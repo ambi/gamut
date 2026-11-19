@@ -73,11 +73,11 @@ func realMain(args []string, stdout, stderr io.Writer) int {
 	}
 
 	results, err := run.Run(ctx, pkg, mutants, run.Options{
-		Workers: *workers, TimeoutFactor: *timeoutFactor, TimeoutMin: *timeoutMin, Log: logw,
+		Workers: *workers, TimeoutFactor: *timeoutFactor, TimeoutMin: *timeoutMin, Log: logw, Warn: stderr,
 	})
 	if err != nil {
 		fmt.Fprintln(stderr, "gamut:", err)
-		return 1
+		return exitCode(err)
 	}
 	rep := report.Build(pkg.ModulePath, pkg.ImportPath, results, time.Since(start))
 	if *output != "" {
@@ -88,6 +88,18 @@ func realMain(args []string, stdout, stderr io.Writer) int {
 	}
 	report.WriteSummary(stdout, rep, results)
 	return 0
+}
+
+// exitCode は、実行の誤りを終了コードへ対応させる。
+// 4 は、変異がテストに届かないと自己検査で分かり、判定しなかったことを表す。
+func exitCode(err error) int {
+	switch {
+	case err == nil:
+		return 0
+	case errors.Is(err, run.ErrSelfCheck):
+		return 4
+	}
+	return 1
 }
 
 func parseTypes(s string) ([]mutant.Type, error) {

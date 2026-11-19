@@ -69,7 +69,16 @@ type Options struct {
 	TimeoutMin time.Duration
 	// Log は進行状況の出力先である。nil なら出さない。
 	Log io.Writer
+	// Warn は警告の出力先である。nil なら出さない。
+	Warn io.Writer
+
+	// rewriteHelper はテスト専用の差し替え口で、補助ファイルの内容をビルドの前に書き換える。
+	rewriteHelper func([]byte) []byte
 }
+
+// ErrSelfCheck は、変異を有効にしてもテストが失敗せず、変異がテストに届いていないと分かったことを表す。
+// このまま判定すると、すべての変異体が生き残りになり、テストの弱さと見分けが付かない。
+var ErrSelfCheck = errors.New("forced-fail self-check failed")
 
 type testCase struct {
 	name     string
@@ -112,7 +121,11 @@ func Run(ctx context.Context, pkg *load.Package, mutants []*mutant.Mutant, opts 
 	}
 	defer func() { _ = os.RemoveAll(work) }()
 
-	overlay := map[string][]byte{sch.HelperPath: sch.Helper}
+	helper := sch.Helper
+	if opts.rewriteHelper != nil {
+		helper = opts.rewriteHelper(helper)
+	}
+	overlay := map[string][]byte{sch.HelperPath: helper}
 	maps.Copy(overlay, sch.Files)
 	bin := filepath.Join(work, "schemata.test")
 	start := time.Now()
@@ -131,6 +144,9 @@ func Run(ctx context.Context, pkg *load.Package, mutants []*mutant.Mutant, opts 
 		return nil, err
 	}
 	logf("coverage: %d tests in %s", len(tests), time.Since(start).Round(time.Millisecond))
+	if err := selfCheck(ctx, pkg.Dir, bin, work, tests, opts); err != nil {
+		return nil, err
+	}
 
 	type job struct {
 		index int
@@ -315,6 +331,48 @@ func cover(ctx context.Context, dir, bin, work string, names []string, workers i
 		return nil, err
 	}
 	return tests, nil
+}
+
+// selfCheck は、到達の記録があるテストのうち最も短い 1 件を forced fail で実行し、失敗することを確かめる。
+// 到達が記録されたのに失敗しないなら、GAMUT_MUTANT がテストのプロセスで読まれていない。
+func selfCheck(ctx context.Context, dir, bin, work string, tests []*testCase, opts Options) error {
+	var probe *testCase
+	for _, t := range tests {
+		if len(t.hits) > 0 && (probe == nil || t.duration < probe.duration) {
+			probe = t
+		}
+	}
+	if probe == nil {
+		if opts.Warn != nil {
+			fmt.Fprintln(opts.Warn, "gamut: warning: forced-fail self-check skipped because no test reaches a mutated site")
+		}
+		return nil
+	}
+	limit := time.Duration(float64(probe.duration)*opts.TimeoutFactor) + opts.TimeoutMin
+	runCtx, cancel := context.WithTimeout(ctx, limit)
+	defer cancel()
+	start := time.Now()
+	cmd := exec.CommandContext(runCtx, bin, "-test.run", "^"+regexp.QuoteMeta(probe.name)+"$", "-test.count=1", "-test.paniconexit0")
+	cmd.Dir = dir
+	// gamutHit は被覆の記録中にだけ呼ばれるので、記録を有効にして forced fail を渡す。
+	cmd.Env = append(os.Environ(), "GAMUT_COVER="+filepath.Join(work, "forced-fail"), "GAMUT_MUTANT="+strconv.Itoa(schemata.ForcedFail))
+	cmd.WaitDelay = time.Second
+	out, err := cmd.CombinedOutput()
+	switch {
+	case ctx.Err() != nil:
+		return ctx.Err()
+	case runCtx.Err() != nil:
+		return fmt.Errorf("%w: %s did not finish within %s with GAMUT_MUTANT=%d", ErrSelfCheck, probe.name, limit, schemata.ForcedFail)
+	case err == nil:
+		return fmt.Errorf("%w: %s reaches mutated sites but passed with GAMUT_MUTANT=%d; "+
+			"the test process does not read the mutant selection, so every mutant would survive "+
+			"(check that GAMUT_MUTANT reaches the test binary and that the code under test does not recover the forced panic)\n%s",
+			ErrSelfCheck, probe.name, schemata.ForcedFail, out)
+	}
+	if opts.Log != nil {
+		fmt.Fprintf(opts.Log, "self-check: forced fail failed %s in %s\n", probe.name, time.Since(start).Round(time.Millisecond))
+	}
+	return nil
 }
 
 var failLine = regexp.MustCompile(`(?m)^\s*--- FAIL: (\S+)`)

@@ -1,5 +1,5 @@
 ---
-status: pending
+status: done
 stage: 2
 depends_on: []
 created_at: 2026-11-20
@@ -37,3 +37,10 @@ gamut は今、変異を無効にした状態で全テストが通ること（�
 
 - 書き換えを壊す差し替え口（テスト専用）を使った端から端までのテスト。
 - `mise run verify`。
+
+## 要約
+
+- 補助ファイルの `gamutHit` が、`GAMUT_MUTANT=-1`（`schemata.ForcedFail`）のとき `panic("gamut: forced fail")` する。`gamutHit` は被覆の記録中にだけ呼ばれるので、検査は `GAMUT_COVER` も渡して実行する。
+- 被覆の記録の後、到達のあるテストのうち最も短い 1 件を 1 プロセスで実行する。通るか時間切れなら `run.ErrSelfCheck` を返し、`cmd/gamut` が終了コード 4 にする。到達のあるテストがなければ `Options.Warn` へ警告して続ける。
+- 対象のコードが `recover` で `panic` を握りつぶすと誤って止まりうる。エラーメッセージでこの可能性を挙げるにとどめた。
+- 端から端までのテストは、テスト専用の差し替え口 `run.IgnoreSelection`（`export_test.go`）で `gamutActive` を 0 に固定した補助ファイルを使う。

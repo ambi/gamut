@@ -1,8 +1,14 @@
 package run_test
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -25,11 +31,16 @@ func TestRun_ClassifiesEveryVerdictOnFixture(t *testing.T) {
 	}
 	mutants := mutant.Enumerate(pkg, mutant.AllTypes)
 	mutant.CheckViability(pkg, mutants)
+	var log bytes.Buffer
 	results, err := run.Run(context.Background(), pkg, mutants, run.Options{
-		Workers: 2, TimeoutFactor: 5, TimeoutMin: time.Second,
+		Workers: 2, TimeoutFactor: 5, TimeoutMin: time.Second, Log: &log,
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	// forced fail の検査は、到達のあるテスト 1 件を 1 回のプロセス起動で実行して終わる。
+	if got := regexp.MustCompile(`(?m)^self-check: forced fail failed Test\w+ in `).FindAllString(log.String(), -1); len(got) != 1 {
+		t.Errorf("want exactly one forced-fail run naming one test, got log:\n%s", log.String())
 	}
 
 	want := map[string]verdict{
@@ -87,5 +98,60 @@ func TestRun_CanaryVerdicts(t *testing.T) {
 	}
 	if statuses[mutant.ConditionalsBoundary] != run.Lived || statuses[mutant.ArithmeticBase] != run.NotViable {
 		t.Fatalf("canary verdicts = %v, want boundary LIVED and arithmetic NOT VIABLE", statuses)
+	}
+}
+
+func TestRun_StopsWhenSelectionDoesNotReachTests(t *testing.T) {
+	pkg, err := load.Load("../../testdata/fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mutants := mutant.Enumerate(pkg, mutant.AllTypes)
+	mutant.CheckViability(pkg, mutants)
+	opts := run.IgnoreSelection(run.Options{Workers: 2, TimeoutFactor: 5, TimeoutMin: time.Second})
+	results, err := run.Run(context.Background(), pkg, mutants, opts)
+	if !errors.Is(err, run.ErrSelfCheck) {
+		t.Fatalf("err = %v, want ErrSelfCheck", err)
+	}
+	if !strings.Contains(err.Error(), "GAMUT_MUTANT") {
+		t.Errorf("error must explain the cause, got: %v", err)
+	}
+	if results != nil {
+		t.Errorf("no verdicts may be returned when the self-check fails, got %d", len(results))
+	}
+}
+
+func TestRun_WarnsWhenNoTestReachesAnySite(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string]string{
+		"go.mod":    "module m\n\ngo 1.27.4\n",
+		"m.go":      "package m\n\nfunc Add(a, b int) int { return a + b }\n",
+		"m_test.go": "package m\n\nimport \"testing\"\n\nfunc TestNothing(t *testing.T) {}\n",
+	}
+	for name, src := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(src), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pkg, err := load.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mutants := mutant.Enumerate(pkg, mutant.AllTypes)
+	mutant.CheckViability(pkg, mutants)
+	var warn bytes.Buffer
+	results, err := run.Run(context.Background(), pkg, mutants, run.Options{
+		Workers: 1, TimeoutFactor: 5, TimeoutMin: time.Second, Warn: &warn,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(warn.String(), "forced-fail self-check skipped") {
+		t.Errorf("want a skip warning, got %q", warn.String())
+	}
+	for _, r := range results {
+		if r.Status != run.NotCovered {
+			t.Errorf("%s: status %s, want NOT COVERED", r.Mutant.ID, r.Status)
+		}
 	}
 }

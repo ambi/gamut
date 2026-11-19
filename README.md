@@ -28,6 +28,9 @@ go build -o bin/gamut ./cmd/gamut
 | `-q` | false | 進行状況を出さない |
 
 変異演算子は `ARITHMETIC_BASE`、`CONDITIONALS_BOUNDARY`、`CONDITIONALS_NEGATION`、`INCREMENT_DECREMENT`、`INVERT_NEGATIVES` で、Gremlins と gomutants と同じ名前である。
+判定の前に、変異がテストに届くことを 1 件のテストで確かめる（forced fail）。
+届いていなければ判定せずに終了コード 4 で止まる。
+
 JSON の報告は gomutants と同じ `files[].mutations[]` の形に、`reason`、`mode`、`tests`、`killed_by` を足したものである。
 
 ## 測定

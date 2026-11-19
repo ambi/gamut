@@ -21,6 +21,10 @@ import (
 // HelperFileName は、選択と被覆の記録を置く補助ファイルの名前である。
 const HelperFileName = "gamut_schemata.go"
 
+// ForcedFail は、GAMUT_MUTANT に渡すと、到達した変異箇所で panic させる値である。
+// 変異の選択がテストに届くことを、判定の前に確かめるために使う。
+const ForcedFail = -1
+
 // helperNames は補助ファイルが宣言する名前である。対象パッケージと衝突してはならない。
 var helperNames = []string{"gamutActive", "gamutCovering", "gamutHits", "gamutInfected", "gamutMu", "gamutOut", "gamutEnvInt", "gamutHit", "gamutInfect", "gamutRecord", "gamutMark"}
 
@@ -536,7 +540,13 @@ func gamutEnvInt(name string) int {
 	return v
 }
 
-func gamutHit(i int) { gamutRecord(&gamutHits[i], 'h', i) }
+// gamutHit は到達を記録する。GAMUT_MUTANT が %d なら、選択の変数が読まれたことを示すために panic する。
+func gamutHit(i int) {
+	if gamutActive == %d {
+		panic("gamut: forced fail")
+	}
+	gamutRecord(&gamutHits[i], 'h', i)
+}
 
 func gamutInfect(i int) { gamutRecord(&gamutInfected[i], 'i', i) }
 
@@ -569,5 +579,5 @@ func gamutRecord(flag *atomic.Bool, kind byte, i int) {
 	line := append([]byte{kind, ' '}, strconv.Itoa(i)...)
 	_, _ = gamutOut.Write(append(line, '\n'))
 }
-`, pkgName, sites+1, mutants+1)
+`, pkgName, sites+1, mutants+1, ForcedFail, ForcedFail)
 }
