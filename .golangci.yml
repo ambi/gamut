@@ -1,0 +1,39 @@
+version: "2"
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - gosec
+    - errorlint
+    - gocritic
+    - modernize
+    - revive
+    - misspell
+    - unconvert
+    - unparam
+    - nolintlint
+  settings:
+    gosec:
+      excludes:
+        - G204 # go コマンドとテストバイナリの起動は本ツールの目的そのものである
+        - G304 # 読み書きするパスは利用者が指定したパッケージと一時ディレクトリに限られる
+        - G306
+    gocritic:
+      enabled-tags: [diagnostic, performance, style]
+      disabled-checks: [hugeParam, rangeValCopy, unnamedResult, paramTypeCombine]
+    errcheck:
+      exclude-functions:
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - fmt.Fprint
+  exclusions:
+    paths:
+      - testdata
+formatters:
+  enable:
+    - gofmt
+    - goimports

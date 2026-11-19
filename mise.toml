@@ -1,0 +1,59 @@
+[tools]
+go = "1.27.4"
+"aqua:golangci/golangci-lint" = "2.15.0"
+"aqua:jqlang/jq" = "1.8.2"
+
+[tasks.build]
+description = "Build the gamut binary into bin/"
+run = "go build -o bin/gamut ./cmd/gamut"
+
+[tasks.gamut]
+description = "Run gamut from source against a package directory"
+run = '''
+#!/usr/bin/env sh
+set -eu
+test "$#" -ge 1 || { echo "usage: mise run gamut -- [flags] <package-directory>" >&2; exit 2; }
+go build -o bin/gamut ./cmd/gamut
+exec ./bin/gamut "$@"
+'''
+
+[tasks.test]
+description = "Run unit and end-to-end tests"
+run = "go test ./..."
+
+[tasks.test-package]
+description = "Run the tests of one package"
+run = '''
+#!/usr/bin/env sh
+set -eu
+test "$#" -ge 1 || { echo "usage: mise run test-package -- <package> [go test flags]" >&2; exit 2; }
+go test "$@"
+'''
+
+[tasks.lint]
+description = "Run static analysis"
+run = "golangci-lint run ./..."
+
+[tasks.format]
+description = "Format Go code"
+run = "golangci-lint fmt"
+
+[tasks.check-canary]
+description = "Check survivor and not-viable verdicts against the fixed canary module"
+run = '''
+#!/usr/bin/env sh
+set -eu
+go build -o bin/gamut ./cmd/gamut
+mkdir -p .gamut
+report=.gamut/canary.json
+./bin/gamut -q -only ARITHMETIC_BASE,CONDITIONALS_BOUNDARY -o "$report" ./testdata/canary >/dev/null
+jq -e '[.files[].mutations[]] | any(.type == "CONDITIONALS_BOUNDARY" and .status == "LIVED")' "$report" >/dev/null \
+  || { echo "canary: expected a CONDITIONALS_BOUNDARY mutant with status LIVED" >&2; exit 1; }
+jq -e '[.files[].mutations[]] | any(.type == "ARITHMETIC_BASE" and .status == "NOT VIABLE")' "$report" >/dev/null \
+  || { echo "canary: expected an ARITHMETIC_BASE mutant with status NOT VIABLE" >&2; exit 1; }
+echo "ok  canary verdicts"
+'''
+
+[tasks.verify]
+description = "Run lint, tests, and the canary check"
+run = "mise run -c lint ::: test ::: check-canary"
