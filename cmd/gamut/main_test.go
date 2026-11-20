@@ -16,6 +16,7 @@ func TestExitCode(t *testing.T) {
 		{nil, 0},
 		{errors.New("build failed"), 1},
 		{fmt.Errorf("wrapped: %w", run.ErrSelfCheck), 4},
+		{fmt.Errorf("wrapped: %w", run.ErrBaseline), 4},
 	}
 	for _, c := range cases {
 		if got := exitCode(c.err); got != c.want {

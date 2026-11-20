@@ -21,6 +21,7 @@ linters:
       excludes:
         - G204 # go コマンドとテストバイナリの起動は本ツールの目的そのものである
         - G304 # 読み書きするパスは利用者が指定したパッケージと一時ディレクトリに限られる
+        - G703 # G304 と同じ理由。パスの汚染の解析版である
         - G306
     gocritic:
       enabled-tags: [diagnostic, performance, style]

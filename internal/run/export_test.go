@@ -10,3 +10,9 @@ func IgnoreSelection(o Options) Options {
 	}
 	return o
 }
+
+// AfterJob は、変異体の実行が 1 体終わるたびに fn を呼ぶ設定を返す。実行の途中で取り消すテストに使う。
+func AfterJob(o Options, fn func()) Options {
+	o.afterJob = fn
+	return o
+}

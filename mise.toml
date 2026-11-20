@@ -8,11 +8,11 @@ description = "Build the gamut binary into bin/"
 run = "go build -o bin/gamut ./cmd/gamut"
 
 [tasks.gamut]
-description = "Run gamut from source against a package directory"
+description = "Run gamut from source against package directories or <dir>/... patterns"
 run = '''
 #!/usr/bin/env sh
 set -eu
-test "$#" -ge 1 || { echo "usage: mise run gamut -- [flags] <package-directory>" >&2; exit 2; }
+test "$#" -ge 1 || { echo "usage: mise run gamut -- [flags] <package-directory>[/...] ..." >&2; exit 2; }
 go build -o bin/gamut ./cmd/gamut
 exec ./bin/gamut "$@"
 '''

@@ -20,7 +20,7 @@ func build(t *testing.T, src string) *schemata.Result {
 	if err := os.WriteFile(filepath.Join(dir, "m.go"), []byte(src), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	pkg, err := load.Load(dir)
+	pkg, err := loadOne(dir, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,11 +96,20 @@ func TestBuild_RejectsHelperNameCollision(t *testing.T) {
 	dir := t.TempDir()
 	_ = os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module m\n\ngo 1.27.4\n"), 0o600)
 	_ = os.WriteFile(filepath.Join(dir, "m.go"), []byte("package m\n\nvar gamutActive = 1\n"), 0o600)
-	pkg, err := load.Load(dir)
+	pkg, err := loadOne(dir, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := schemata.Build(pkg, nil); err == nil {
 		t.Fatal("want an error for a colliding helper name")
 	}
+}
+
+// loadOne は、dir の 1 パッケージを読む。
+func loadOne(dir string, tags []string) (*load.Package, error) {
+	pkgs, err := load.Load([]string{dir}, tags)
+	if err != nil {
+		return nil, err
+	}
+	return pkgs[0], nil
 }

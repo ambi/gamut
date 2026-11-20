@@ -1,0 +1,194 @@
+// Package cache は、変異体の判定を、行と列に依存しない鍵とともにファイルへ保存し、次の実行で再利用できるようにする。
+// どの判定を再利用してよいかの規則は run が持つ。このパッケージは鍵の計算と保存だけを受け持つ。
+package cache
+
+import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"sync"
+)
+
+// formatVersion はキャッシュファイルの形式の版である。形式を変えたら上げ、古いファイルを読み捨てる。
+const formatVersion = 1
+
+// Entry は、1 体の変異体の判定と、判定したときの鍵である。
+type Entry struct {
+	// Package は変異体を含むパッケージの import パスである。
+	Package  string `json:"package"`
+	Status   string `json:"status"`
+	Reason   string `json:"reason,omitempty"`
+	Mode     string `json:"mode,omitempty"`
+	KilledBy string `json:"killed_by,omitempty"`
+	// Decl、Deps、Imports は Keys の同名のメソッドの値である。
+	Decl    string `json:"decl"`
+	Deps    string `json:"deps"`
+	Imports string `json:"imports"`
+	// Reached は変異箇所に到達したテスト、Ran は判定のために実行したテストである。どちらも名前の順に並ぶ。
+	Reached []string `json:"reached,omitempty"`
+	Ran     []string `json:"ran,omitempty"`
+	// TestKeys は、Reached と Ran のテストの Keys.Test の値である。
+	TestKeys map[string]string `json:"test_keys,omitempty"`
+}
+
+type fileFormat struct {
+	Version int               `json:"version"`
+	Env     string            `json:"env"`
+	Mutants map[string]*Entry `json:"mutants"`
+}
+
+// Store は、キャッシュファイルの内容を持つ。並行に使える。
+type Store struct {
+	path string
+	env  string
+	// Reset は、前のファイルの記録を読み捨てた理由である。読み捨てなければ空である。
+	Reset string
+
+	mu      sync.Mutex
+	entries map[string]*Entry
+}
+
+// Open は path のキャッシュを読む。env が記録と違えば、記録をすべて捨てた空の Store を返す。
+// ファイルがないか、壊れているか、形式の版が違うときも空の Store を返す。
+func Open(path, env string) (*Store, error) {
+	s := &Store{path: path, env: env, entries: map[string]*Entry{}}
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return s, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var f fileFormat
+	switch {
+	case json.Unmarshal(data, &f) != nil:
+		s.Reset = "the cache file is unreadable"
+	case f.Version != formatVersion:
+		s.Reset = fmt.Sprintf("the cache format changed from %d to %d", f.Version, formatVersion)
+	case f.Env != env:
+		s.Reset = "the environment changed (Go, gamut, go.mod, go.sum, mutators, tags, test flags, or timeouts)"
+	default:
+		for id, e := range f.Mutants {
+			if e != nil {
+				s.entries[id] = e
+			}
+		}
+	}
+	return s, nil
+}
+
+// Get は id の記録を返す。なければ nil を返す。返した記録を書き換えてはならない。
+func (s *Store) Get(id string) *Entry {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.entries[id]
+}
+
+// Put は id の記録を置き換える。
+func (s *Store) Put(id string, e *Entry) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.entries[id] = e
+}
+
+// Len は記録の数を返す。
+func (s *Store) Len() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.entries)
+}
+
+// Prune は、packages に含まれるパッケージの記録のうち、live が偽を返す識別子の記録を捨てる。
+// 消えた変異体の記録がたまらないようにする。ほかのパッケージの記録は残す。
+func (s *Store) Prune(packages []string, live func(id string) bool) {
+	in := map[string]bool{}
+	for _, p := range packages {
+		in[p] = true
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id, e := range s.entries {
+		if in[e.Package] && !live(id) {
+			delete(s.entries, id)
+		}
+	}
+}
+
+// Save は記録をファイルへ書く。同じディレクトリの一時ファイルに書いてから改名するので、途中で止まっても前のファイルは壊れない。
+func (s *Store) Save() (err error) {
+	s.mu.Lock()
+	data, err := json.Marshal(fileFormat{Version: formatVersion, Env: s.env, Mutants: s.entries})
+	s.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	dir := filepath.Dir(s.path)
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, ".cache-*.json")
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			_ = os.Remove(tmp.Name())
+		}
+	}()
+	if _, err := tmp.Write(append(data, '\n')); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), s.path)
+}
+
+// Environment は、すべての判定に影響する環境のハッシュを返す。
+// Go の版と対象の環境、gamut の実行ファイル、モジュールの go.mod と go.sum、ワークスペースのファイル、settings（変異演算子、ビルドタグ、テストのフラグなど）を含める。
+func Environment(moduleDir string, settings ...string) (string, error) {
+	cmd := exec.Command("go", "env", "GOVERSION", "GOOS", "GOARCH", "GOFLAGS", "GOEXPERIMENT", "CGO_ENABLED", "GOWORK")
+	cmd.Dir = moduleDir
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	goEnv, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("go env: %w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	h := sha256.New()
+	writeString(h, string(goEnv))
+	// 開発中の gamut は版の文字列が変わらないので、実行ファイルの中身で区別する。
+	exe, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	exeData, err := os.ReadFile(exe)
+	if err != nil {
+		return "", err
+	}
+	writeString(h, string(exeData))
+	files := []string{filepath.Join(moduleDir, "go.mod"), filepath.Join(moduleDir, "go.sum")}
+	lines := strings.Split(strings.TrimSpace(string(goEnv)), "\n")
+	if work := strings.TrimSpace(lines[len(lines)-1]); work != "" && work != "off" {
+		files = append(files, work, work+".sum")
+	}
+	for _, f := range files {
+		data, err := os.ReadFile(f)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return "", err
+		}
+		writeString(h, filepath.Base(f))
+		writeString(h, string(data))
+	}
+	for _, s := range settings {
+		writeString(h, s)
+	}
+	return digest(h), nil
+}

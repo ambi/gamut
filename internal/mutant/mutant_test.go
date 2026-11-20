@@ -23,7 +23,7 @@ func writeModule(t *testing.T, src string) string {
 
 func enumerate(t *testing.T, src string) []*mutant.Mutant {
 	t.Helper()
-	pkg, err := load.Load(writeModule(t, src))
+	pkg, err := loadOne(writeModule(t, src), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,4 +96,13 @@ func TestEnumerate_Operators(t *testing.T) {
 			}
 		})
 	}
+}
+
+// loadOne は、dir の 1 パッケージを読む。
+func loadOne(dir string, tags []string) (*load.Package, error) {
+	pkgs, err := load.Load([]string{dir}, tags)
+	if err != nil {
+		return nil, err
+	}
+	return pkgs[0], nil
 }

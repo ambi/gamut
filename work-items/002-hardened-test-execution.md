@@ -1,5 +1,5 @@
 ---
-status: pending
+status: done
 stage: 2
 depends_on: []
 created_at: 2026-11-20
@@ -39,3 +39,12 @@ created_at: 2026-11-20
 
 - 上の 2 つの固定モジュールに対する端から端までのテスト。
 - `mise run verify`。
+
+## 要約
+
+- `-tags` は `load.Load` が受け取り、`Package.Tags` として `go list` と `go test -c`（個別ビルドを含む）へ渡す。型検査の対象は `go list` の `GoFiles` に従う。
+- `-test-flags` は `run.ParseTestFlags` で、接頭辞なしの testing のフラグに `-test.` を補う。gamut が実行ごとに決める `run`、`count`、`failfast`、`list`、`paniconexit0` は拒否する。テストバイナリの起動は `testCommand` の 1 か所にまとめた。
+- Unix ではテストバイナリを新しいプロセスグループで起動し、時間切れと取り消しでグループ全体へ `SIGKILL` を送る。固定モジュール `testdata/orphan` で、グループがなければ子プロセスが残ることを確かめた。
+- 基準のテストの失敗と、`-test.list` の失敗は `run.ErrBaseline` として、出力を添えて終了コード 4 にする。
+- 時間切れの既定値（係数 5、下限 2 秒）は、起動時間の測定（中央値 3 ms、最大 264 ms）から変えない。根拠は設計に書いた。
+- 並行な記録は既存の `atomic.Bool` と mutex で足りた。`testdata/concurrent` で、`t.Parallel` と多数のゴルーチンの下でも全変異体が `KILLED` になることを確かめた。

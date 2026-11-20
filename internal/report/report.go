@@ -27,6 +27,8 @@ type Mutation struct {
 	Mode        string   `json:"mode,omitempty"`
 	Tests       []string `json:"tests,omitempty"`
 	KilledBy    string   `json:"killed_by,omitempty"`
+	// Cached は、判定を実行せずに前の実行から再利用したかである。gomutants にはないフィールドである。
+	Cached bool `json:"cached,omitempty"`
 }
 
 // File は JSON の 1 ファイルである。
@@ -38,23 +40,26 @@ type File struct {
 
 // Report は JSON の報告の全体である。
 type Report struct {
-	GoModule          string  `json:"go_module"`
-	Package           string  `json:"package"`
-	TestEfficacy      float64 `json:"test_efficacy"`
-	MutationsCoverage float64 `json:"mutations_coverage"`
-	MutantsTotal      int     `json:"mutants_total"`
-	MutantsKilled     int     `json:"mutants_killed"`
-	MutantsLived      int     `json:"mutants_lived"`
-	MutantsNotViable  int     `json:"mutants_not_viable"`
-	MutantsNotCovered int     `json:"mutants_not_covered"`
-	MutantsTimedOut   int     `json:"mutants_timed_out"`
-	ElapsedTime       float64 `json:"elapsed_time"`
-	Files             []File  `json:"files"`
+	GoModule string `json:"go_module"`
+	// Package は、1 パッケージならその import パス、複数なら実行時に指定したパターンである。
+	Package string `json:"package"`
+	// Packages は判定したパッケージの import パスである。gomutants にはないフィールドである。
+	Packages          []string `json:"packages,omitempty"`
+	TestEfficacy      float64  `json:"test_efficacy"`
+	MutationsCoverage float64  `json:"mutations_coverage"`
+	MutantsTotal      int      `json:"mutants_total"`
+	MutantsKilled     int      `json:"mutants_killed"`
+	MutantsLived      int      `json:"mutants_lived"`
+	MutantsNotViable  int      `json:"mutants_not_viable"`
+	MutantsNotCovered int      `json:"mutants_not_covered"`
+	MutantsTimedOut   int      `json:"mutants_timed_out"`
+	ElapsedTime       float64  `json:"elapsed_time"`
+	Files             []File   `json:"files"`
 }
 
-// Build は判定から報告を作る。
-func Build(module, pkg string, results []*run.Result, elapsed time.Duration) *Report {
-	r := &Report{GoModule: module, Package: pkg, ElapsedTime: elapsed.Seconds(), MutantsTotal: len(results)}
+// Build は判定から報告を作る。label は package フィールドに入れる名前、packages は判定したパッケージの import パスである。
+func Build(module, label string, packages []string, results []*run.Result, elapsed time.Duration) *Report {
+	r := &Report{GoModule: module, Package: label, Packages: packages, ElapsedTime: elapsed.Seconds(), MutantsTotal: len(results)}
 	byFile := map[string]*File{}
 	var order []string
 	for _, res := range results {
@@ -69,7 +74,7 @@ func Build(module, pkg string, results []*run.Result, elapsed time.Duration) *Re
 			ID: m.ID, Type: string(m.Type), Status: string(res.Status),
 			Line: m.Line, Column: m.Column,
 			Original: m.Original.String(), Replacement: m.Replacement.String(),
-			Reason: res.Reason, Mode: res.Mode, Tests: res.Tests, KilledBy: res.KilledBy,
+			Reason: res.Reason, Mode: res.Mode, Tests: res.Tests, KilledBy: res.KilledBy, Cached: res.Cached,
 		})
 		switch res.Status {
 		case run.Killed:
@@ -131,8 +136,22 @@ func WriteSummary(w io.Writer, r *Report, results []*run.Result) {
 			fmt.Fprintf(w, "  %s\n", describe(x.Mutant))
 		}
 	}
-	fmt.Fprintf(w, "\nkilled %d, lived %d, not covered %d, not viable %d, timed out %d (efficacy %.2f%%) in %.1fs\n",
-		r.MutantsKilled, r.MutantsLived, r.MutantsNotCovered, r.MutantsNotViable, r.MutantsTimedOut, r.TestEfficacy, r.ElapsedTime)
+	reused := ""
+	if n := countCached(results); n > 0 {
+		reused = fmt.Sprintf(", %d reused from the cache", n)
+	}
+	fmt.Fprintf(w, "\nkilled %d, lived %d, not covered %d, not viable %d, timed out %d (efficacy %.2f%%) in %.1fs%s\n",
+		r.MutantsKilled, r.MutantsLived, r.MutantsNotCovered, r.MutantsNotViable, r.MutantsTimedOut, r.TestEfficacy, r.ElapsedTime, reused)
+}
+
+func countCached(results []*run.Result) int {
+	n := 0
+	for _, x := range results {
+		if x.Cached {
+			n++
+		}
+	}
+	return n
 }
 
 func describe(m *mutant.Mutant) string {

@@ -25,7 +25,7 @@ type verdict struct {
 }
 
 func TestRun_ClassifiesEveryVerdictOnFixture(t *testing.T) {
-	pkg, err := load.Load("../../testdata/fixture")
+	pkg, err := loadOne("../../testdata/fixture", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,7 +39,7 @@ func TestRun_ClassifiesEveryVerdictOnFixture(t *testing.T) {
 		t.Fatal(err)
 	}
 	// forced fail の検査は、到達のあるテスト 1 件を 1 回のプロセス起動で実行して終わる。
-	if got := regexp.MustCompile(`(?m)^self-check: forced fail failed Test\w+ in `).FindAllString(log.String(), -1); len(got) != 1 {
+	if got := regexp.MustCompile(`(?m)^self-check: fixture: forced fail failed Test\w+ in `).FindAllString(log.String(), -1); len(got) != 1 {
 		t.Errorf("want exactly one forced-fail run naming one test, got log:\n%s", log.String())
 	}
 
@@ -82,7 +82,7 @@ func TestRun_ClassifiesEveryVerdictOnFixture(t *testing.T) {
 }
 
 func TestRun_CanaryVerdicts(t *testing.T) {
-	pkg, err := load.Load("../../testdata/canary")
+	pkg, err := loadOne("../../testdata/canary", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +102,7 @@ func TestRun_CanaryVerdicts(t *testing.T) {
 }
 
 func TestRun_StopsWhenSelectionDoesNotReachTests(t *testing.T) {
-	pkg, err := load.Load("../../testdata/fixture")
+	pkg, err := loadOne("../../testdata/fixture", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +133,7 @@ func TestRun_WarnsWhenNoTestReachesAnySite(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	pkg, err := load.Load(dir)
+	pkg, err := loadOne(dir, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,4 +154,13 @@ func TestRun_WarnsWhenNoTestReachesAnySite(t *testing.T) {
 			t.Errorf("%s: status %s, want NOT COVERED", r.Mutant.ID, r.Status)
 		}
 	}
+}
+
+// loadOne は、dir の 1 パッケージを読む。
+func loadOne(dir string, tags []string) (*load.Package, error) {
+	pkgs, err := load.Load([]string{dir}, tags)
+	if err != nil {
+		return nil, err
+	}
+	return pkgs[0], nil
 }
