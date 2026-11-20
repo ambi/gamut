@@ -21,12 +21,15 @@ import (
 // HelperFileName は、選択と被覆の記録を置く補助ファイルの名前である。
 const HelperFileName = "gamut_schemata.go"
 
+// TestStartName は、テストの関数の先頭から呼ぶ、記録の境目を書く補助関数の名前である。
+const TestStartName = "GamutTestStart"
+
 // ForcedFail は、GAMUT_MUTANT に渡すと、到達した変異箇所で panic させる値である。
 // 変異の選択がテストに届くことを、判定の前に確かめるために使う。
 const ForcedFail = -1
 
 // helperNames は補助ファイルが宣言する名前である。対象パッケージと衝突してはならない。
-var helperNames = []string{"gamutActive", "gamutCovering", "gamutHits", "gamutInfected", "gamutMu", "gamutOut", "gamutEnvInt", "gamutHit", "gamutInfect", "gamutRecord", "gamutMark"}
+var helperNames = []string{"gamutActive", "gamutCovering", "gamutHits", "gamutInfected", "gamutMu", "gamutOut", "gamutEnvInt", "gamutHit", "gamutInfect", "gamutRecord", "gamutMark", "gamutEntered", "gamutEnter", "gamutOpen", TestStartName, "GamutSetActive", "GamutCoverStop"}
 
 // Level は、変異箇所をどこまで書き換えるかである。
 type Level int
@@ -72,6 +75,8 @@ type Result struct {
 	Sites []*Site
 	// SiteOf は、構築可能な変異体からその変異箇所への対応である。
 	SiteOf map[*mutant.Mutant]*Site
+	// Funcs は、被覆の記録で入ったことを記録する関数の宣言である。Funcs[i] の番号は i+1 である。
+	Funcs []*ast.FuncDecl
 }
 
 // Count は、Level ごとの変異体の数を返す。
@@ -120,6 +125,8 @@ func Build(pkg *load.Package, mutants []*mutant.Mutant) (*Result, error) {
 		s.Mutants = append(s.Mutants, m)
 	}
 
+	funcs, entries := entryPoints(pkg)
+
 	// 各反復で 1 つ以上の箇所の Level が上がるので、反復は箇所の数の 2 倍で終わる。
 	for range 2*len(sites) + 1 {
 		indexed := 0
@@ -130,7 +137,7 @@ func Build(pkg *load.Package, mutants []*mutant.Mutant) (*Result, error) {
 				s.Index = indexed
 			}
 		}
-		r := &renderer{pkg: pkg}
+		r := &renderer{pkg: pkg, entries: entries}
 		files := map[string][]byte{}
 		for _, f := range pkg.Files {
 			var inFile []*Site
@@ -139,7 +146,7 @@ func Build(pkg *load.Package, mutants []*mutant.Mutant) (*Result, error) {
 					inFile = append(inFile, s)
 				}
 			}
-			if len(inFile) == 0 {
+			if len(inFile) == 0 && len(entries[f.Path]) == 0 {
 				continue
 			}
 			files[f.Path] = r.renderFile(f, inFile)
@@ -152,7 +159,7 @@ func Build(pkg *load.Package, mutants []*mutant.Mutant) (*Result, error) {
 			continue
 		}
 
-		helper := renderHelper(pkg.Name, indexed, len(mutants))
+		helper := renderHelper(pkg.Name, indexed, len(mutants), len(funcs))
 		bad, err := typeErrors(pkg, files, helperPath, helper, r.ranges)
 		if err != nil {
 			return nil, err
@@ -170,9 +177,49 @@ func Build(pkg *load.Package, mutants []*mutant.Mutant) (*Result, error) {
 				siteOf[m] = s
 			}
 		}
-		return &Result{Files: files, HelperPath: helperPath, Helper: helper, Sites: sites, SiteOf: siteOf}, nil
+		return &Result{Files: files, HelperPath: helperPath, Helper: helper, Sites: sites, SiteOf: siteOf, Funcs: funcs}, nil
 	}
 	return nil, fmt.Errorf("schemata rewrite of %s did not converge", pkg.ImportPath)
+}
+
+// entry は、関数の本文の { の直後に差し込む、入ったことの記録である。
+type entry struct {
+	offset int
+	text   string
+}
+
+// entryPoints は、対象ファイルの本文を持つ関数の宣言に番号を振り、ファイルごとの差し込み位置を返す。
+// 被覆の記録は、変異箇所に到達しなくても、テストが入った関数を知るためにこれを使う。
+// //go:nosplit の関数は、呼び出しを足すとスタックの上限を超えうるので除く。
+func entryPoints(pkg *load.Package) ([]*ast.FuncDecl, map[string][]entry) {
+	var funcs []*ast.FuncDecl
+	entries := map[string][]entry{}
+	for _, f := range pkg.Files {
+		for _, d := range f.AST.Decls {
+			fd, ok := d.(*ast.FuncDecl)
+			if !ok || fd.Body == nil || nosplit(fd) {
+				continue
+			}
+			funcs = append(funcs, fd)
+			entries[f.Path] = append(entries[f.Path], entry{
+				offset: pkg.Fset.Position(fd.Body.Lbrace).Offset + 1,
+				text:   fmt.Sprintf(" if gamutCovering { gamutEnter(%d) };", len(funcs)),
+			})
+		}
+	}
+	return funcs, entries
+}
+
+func nosplit(fd *ast.FuncDecl) bool {
+	if fd.Doc == nil {
+		return false
+	}
+	for _, c := range fd.Doc.List {
+		if strings.HasPrefix(c.Text, "//go:nosplit") {
+			return true
+		}
+	}
+	return false
 }
 
 type outRange struct {
@@ -182,10 +229,14 @@ type outRange struct {
 
 type renderer struct {
 	pkg *load.Package
+	// entries は、ファイルごとの関数の入口の差し込みである。変異箇所の外の字句を写すときに差し込む。
+	entries map[string][]entry
 	// demotions は、描画中に書き換えられないと分かった箇所と、次に試す Level である。
 	demotions map[*Site]Level
 	// ranges は、ファイルごとに各箇所が書き換え後の内容のどこを占めるかである。
 	ranges map[string][]outRange
+	// top は、次の renderRange がファイルの最上位の呼び出しであるかである。
+	top bool
 }
 
 func (r *renderer) demote(s *Site, level Level) {
@@ -206,18 +257,38 @@ func (r *renderer) renderFile(f *load.File, sites []*Site) []byte {
 		r.ranges = map[string][]outRange{}
 	}
 	var buf bytes.Buffer
+	r.top = true
 	r.renderRange(&buf, f, sites, 0, len(f.Src))
+	r.top = false
 	return buf.Bytes()
+}
+
+// copySrc は、元のソースの [lo, hi) を buf へ写す。ファイルの最上位の字句なら、関数の入口の記録を差し込む。
+// 関数の宣言の本文の { は変異箇所の式の中に現れないので、最上位で写す字句だけを見ればよい。
+func (r *renderer) copySrc(buf *bytes.Buffer, f *load.File, lo, hi int, top bool) {
+	if top {
+		for _, e := range r.entries[f.Path] {
+			if lo < e.offset && e.offset <= hi {
+				buf.Write(f.Src[lo:e.offset])
+				buf.WriteString(e.text)
+				lo = e.offset
+			}
+		}
+	}
+	buf.Write(f.Src[lo:hi])
 }
 
 // renderRange は元のソースの [lo, hi) を buf へ書き、その中の変異箇所を書き換える。
 func (r *renderer) renderRange(buf *bytes.Buffer, f *load.File, sites []*Site, lo, hi int) {
+	top := r.top
+	r.top = false
+	defer func() { r.top = top }()
 	pos := lo
 	for _, s := range sites {
 		if s.start < pos || s.end > hi {
 			continue
 		}
-		buf.Write(f.Src[pos:s.start])
+		r.copySrc(buf, f, pos, s.start, top)
 		start := buf.Len()
 		if s.Level == Marked {
 			fmt.Fprintf(buf, "gamutMark(%d, ", s.Index)
@@ -229,7 +300,7 @@ func (r *renderer) renderRange(buf *bytes.Buffer, f *load.File, sites []*Site, l
 		r.ranges[f.Path] = append(r.ranges[f.Path], outRange{site: s, start: start, end: buf.Len()})
 		pos = s.end
 	}
-	buf.Write(f.Src[pos:hi])
+	r.copySrc(buf, f, pos, hi, top)
 }
 
 func without(sites []*Site, s *Site) []*Site {
@@ -512,7 +583,7 @@ func typeErrors(pkg *load.Package, files map[string][]byte, helperPath string, h
 	return bad, nil
 }
 
-func renderHelper(pkgName string, sites, mutants int) []byte {
+func renderHelper(pkgName string, sites, mutants, funcs int) []byte {
 	return fmt.Appendf(nil, `// Code generated by gamut. DO NOT EDIT.
 
 package %s
@@ -531,6 +602,7 @@ var gamutCovering = os.Getenv("GAMUT_COVER") != ""
 var (
 	gamutHits     [%d]atomic.Bool
 	gamutInfected [%d]atomic.Bool
+	gamutEntered  [%d]atomic.Bool
 	gamutMu       sync.Mutex
 	gamutOut      *os.File
 )
@@ -550,6 +622,60 @@ func gamutHit(i int) {
 
 func gamutInfect(i int) { gamutRecord(&gamutInfected[i], 'i', i) }
 
+// GamutSetActive は、有効にする変異体を i に切り替える。1 つのテストプロセスで変異体を順に判定するときに、テストの合間に呼ばれる。
+func GamutSetActive(i int) { gamutActive = i }
+
+// GamutCoverStop は、被覆の記録を止めて記録のファイルを閉じる。被覆を測ったテストプロセスを、そのまま変異体の判定に使い回すときに呼ばれる。
+func GamutCoverStop() {
+	gamutMu.Lock()
+	defer gamutMu.Unlock()
+	gamutCovering = false
+	if gamutOut != nil {
+		_ = gamutOut.Close()
+		gamutOut = nil
+	}
+}
+
+// GamutTestStart は、トップレベルのテスト name が始まったことを記録の境目として書き、以後の到達と感染と入った関数を記録し直す。
+// 1 つのプロセスで複数のテストの被覆を記録するときに、テストの関数の先頭から呼ばれる。外部テストからも呼べるよう公開する。
+func GamutTestStart(name string) {
+	if !gamutCovering {
+		return
+	}
+	gamutMu.Lock()
+	defer gamutMu.Unlock()
+	for i := range gamutHits {
+		gamutHits[i].Store(false)
+	}
+	for i := range gamutInfected {
+		gamutInfected[i].Store(false)
+	}
+	for i := range gamutEntered {
+		gamutEntered[i].Store(false)
+	}
+	if gamutOpen() {
+		_, _ = gamutOut.Write([]byte("t " + name + "\n"))
+	}
+}
+
+// gamutOpen は、記録のファイルを開く。gamutMu を持って呼ぶ。
+func gamutOpen() bool {
+	if !gamutCovering {
+		return false
+	}
+	if gamutOut == nil {
+		f, err := os.OpenFile(os.Getenv("GAMUT_COVER"), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o600)
+		if err != nil {
+			return false
+		}
+		gamutOut = f
+	}
+	return true
+}
+
+// gamutEnter は、関数に入ったことを記録する。
+func gamutEnter(i int) { gamutRecord(&gamutEntered[i], 'e', i) }
+
 // gamutMark は、到達だけを記録して v をそのまま返す。
 func gamutMark[T any](i int, v T) T {
 	if gamutCovering {
@@ -566,18 +692,11 @@ func gamutRecord(flag *atomic.Bool, kind byte, i int) {
 	}
 	gamutMu.Lock()
 	defer gamutMu.Unlock()
-	if flag.Swap(true) {
+	if flag.Swap(true) || !gamutOpen() {
 		return
-	}
-	if gamutOut == nil {
-		f, err := os.OpenFile(os.Getenv("GAMUT_COVER"), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o600)
-		if err != nil {
-			return
-		}
-		gamutOut = f
 	}
 	line := append([]byte{kind, ' '}, strconv.Itoa(i)...)
 	_, _ = gamutOut.Write(append(line, '\n'))
 }
-`, pkgName, sites+1, mutants+1, ForcedFail, ForcedFail)
+`, pkgName, sites+1, mutants+1, funcs+1, ForcedFail, ForcedFail)
 }

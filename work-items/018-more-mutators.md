@@ -19,13 +19,16 @@ gamut の 5 種類は演算子の置き換えに限られる。
 
 | 名前 | 変異 | 埋め込み方 |
 | --- | --- | --- |
-| `CONDITIONALS_LOGICAL` | `&&`↔`||` | 短絡評価を保つため、関数リテラルの中で元の形と変異後の形を分岐させる |
-| `CONDITIONS_CONSTANT` | `if`、`for` の条件と `&&`、`||` の被演算子を `true` か `false` にする。`||` の下では `false`、`&&` の下では `true` だけ | 条件を関数リテラルで包む |
+| `CONDITIONALS_LOGICAL` | `&&`↔`\|\|` | 短絡評価を保つため、関数リテラルの中で元の形と変異後の形を分岐させる |
+| `CONDITIONS_CONSTANT` | `if`、`for` の条件と `&&`、`\|\|` の被演算子を `true` か `false` にする。`\|\|` の下では `false`、`&&` の下では `true` だけ | 条件を関数リテラルで包む |
 | `STATEMENT_REMOVE` | 値を返さない呼び出しの文を削除する | 文を `if gamutActive != N { ... }` で包む |
 | `RETURN_ZERO` | 関数の本体を、戻り値の型のゼロ値（`error` は `errors.New("gamut")`）を返す文にする | 本体の先頭に `if gamutActive == N { return ... }` を置く |
 | `ASSIGNMENT_OPERATOR` | `+=`↔`-=`、`*=`↔`/=` など | 文を分岐させる |
 | `BRANCH_SWAP` | `break`↔`continue` | 文を分岐させる |
 | `NEGATE_UNARY` | `!x`→`x` | 式を包む |
+| `BOOLEAN_LITERAL` | `true`↔`false` | 式を包む。定数の文脈（`const` の宣言など）は個別ビルドにする |
+| `INVERT_BITWISE` | `&`↔`\|`、`^`→`&`、`&^`→`&`、`<<`↔`>>` | 二項演算子と同じく分岐させる |
+| `INVERT_BITWISE_ASSIGNMENT` | `&=`↔`\|=`、`^=`→`&=`、`<<=`↔`>>=` | 文を分岐させる |
 
 - `switch` の `case` の削除は、`default` があるときだけ行う。
 - 等価になりやすい変異（`==`→`<=` など）は作らない。

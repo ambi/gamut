@@ -2,21 +2,14 @@
 package run
 
 import (
-	"bufio"
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"maps"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -36,6 +29,8 @@ const (
 	NotCovered Status = "NOT COVERED"
 	NotViable  Status = "NOT VIABLE"
 	TimedOut   Status = "TIMED OUT"
+	// Pending は、選択（差分や識別子の指定）の外にあり、判定しなかったことを表す。
+	Pending Status = "PENDING"
 )
 
 // 生き残りの理由。
@@ -58,9 +53,13 @@ type Result struct {
 	Mode     string
 	Tests    []string
 	KilledBy string
-	Elapsed  time.Duration
+	// Killer は、検出したトップレベルのテストの名前である。KilledBy はサブテストの名前を含みうる。
+	Killer  string
+	Elapsed time.Duration
 	// Cached は、判定を実行せずにキャッシュから再利用したかである。
 	Cached bool
+	// PreviouslyKilledBy は、前回この変異体を検出したテストが消えたので再検査し、今回は検出されなかったときの、前回の検出テストである。
+	PreviouslyKilledBy string
 }
 
 // Options は実行の設定である。
@@ -76,14 +75,25 @@ type Options struct {
 	Warn io.Writer
 	// TestFlags は、テストバイナリのすべての実行に渡すフラグである。ParseTestFlags で作る。
 	TestFlags []string
-	// Cache は判定の再利用に使うキャッシュである。nil なら再利用も記録もしない。
+	// Cache は判定と被覆の記録の再利用に使うキャッシュである。nil なら再利用も記録もしない。
 	// 鍵を持たない Target（Keys が nil）の変異体も再利用しない。
 	Cache *cache.Store
+	// Select は判定する変異体を絞る。nil なら全変異体を判定する。
+	Select *Selection
+	// Isolate は、変異体ごとに新しいテストプロセスで判定するかである。偽なら、gamut の実行の間だけ動くテストプロセスで、
+	// 複数の変異体を順に判定する（パッケージの初期化を変異体ごとに繰り返さない）。
+	Isolate bool
 
 	// rewriteHelper はテスト専用の差し替え口で、補助ファイルの内容をビルドの前に書き換える。
 	rewriteHelper func([]byte) []byte
 	// afterJob はテスト専用の差し替え口で、変異体の実行が 1 体終わるたびに呼ばれる。
 	afterJob func()
+	// onExecute はテスト専用の差し替え口で、変異体を実行する前に、テストのプロセスごとのテストの並びを受け取る。
+	onExecute func(m *mutant.Mutant, groups [][]string)
+	// noBatch はテスト専用の差し替え口で、被覆の記録をまとめずに 1 件ずつ行う。
+	noBatch bool
+	// onCoverage はテスト専用の差し替え口で、被覆の記録のために実行したテストの名前を受け取る。
+	onCoverage func(names []string)
 }
 
 // ErrBaseline は、変異を無効にした状態でテストが失敗し、判定の前提が崩れていることを表す。
@@ -93,19 +103,21 @@ var ErrBaseline = errors.New("baseline tests fail without mutants")
 // このまま判定すると、すべての変異体が生き残りになり、テストの弱さと見分けが付かない。
 var ErrSelfCheck = errors.New("forced-fail self-check failed")
 
-type testCase struct {
-	name     string
-	duration time.Duration
-	hits     map[int]bool
-	infected map[int]bool
-}
-
 // Target は、判定する 1 つのパッケージとその変異体である。
 type Target struct {
 	Pkg     *load.Package
 	Mutants []*mutant.Mutant
-	// Keys は判定の再利用の鍵である。nil ならこのパッケージの判定を再利用しない。
+	// Keys は判定と被覆の記録の再利用の鍵である。nil ならこのパッケージの記録を再利用しない。
 	Keys *cache.Keys
+	// RevDeps は、変異の検出を試す逆依存パッケージである（統合モード）。
+	RevDeps []RevDep
+}
+
+// RevDep は、統合モードで変異の検出を試す逆依存パッケージである。
+type RevDep struct {
+	load.RevDep
+	// Key は、cache.RevDepKey によるテストの鍵である。空なら被覆の記録を再利用しない。
+	Key string
 }
 
 // Run は、1 つのパッケージの mutants を判定する。
@@ -123,9 +135,20 @@ type unit struct {
 	results []*Result
 	work    string
 	sch     *schemata.Result
-	bin     string
-	names   []string
-	tests   []*testCase
+	// overlay は、schemata の書き換えを渡す overlay のファイルである。
+	overlay string
+	// bins は、変異箇所に到達しうるテストバイナリで、bins[0] がパッケージ自身のものである。
+	bins []*binary
+	// tests は、すべてのテストバイナリのテストである。
+	tests []*testCase
+	// buildTime は、パッケージ自身のテストバイナリのビルドにかかった時間である。個別ビルドの見積もりに使う。
+	buildTime time.Duration
+	// served は、判定のテストから呼べる、パッケージ自身のテストの名前である。nil なら変異体ごとにプロセスを起動する。
+	served map[string]bool
+	// batches は、逆依存パッケージのテストバイナリをまとめてビルドした回数である。出力先のディレクトリの名前に使う。
+	batches int
+	// changed は、差分が変えたテストの名前である（--since と --include-test-changes）。
+	changed map[string]bool
 }
 
 type job struct {
@@ -136,6 +159,12 @@ type job struct {
 	mode    string
 	reached []*testCase
 	ran     []*testCase
+	// forced は、識別子で指定したのでキャッシュを使わないことを表す。
+	forced bool
+	// previousKiller は、前回の検出テストが消えたので再検査するときの、前回の検出テストである。
+	previousKiller string
+	// estimate は実行時間の見積もりである。
+	estimate time.Duration
 }
 
 // All は、targets の全変異体を判定し、targets と同じ順に判定の列を返す。
@@ -169,21 +198,40 @@ func All(ctx context.Context, targets []Target, opts Options) ([][]*Result, erro
 	for i, t := range targets {
 		u := &unit{Target: t, results: make([]*Result, len(t.Mutants)), work: filepath.Join(root, strconv.Itoa(i))}
 		units[i] = u
+		if !opts.Select.touches(u) {
+			// 選択に触れないパッケージは、ビルドせずにすべて PENDING にする。
+			for k, m := range t.Mutants {
+				u.results[k] = &Result{Mutant: m, Status: Pending}
+			}
+			continue
+		}
 		viable := 0
 		for k, m := range t.Mutants {
-			if !m.Viable {
+			switch {
+			case !opts.Select.direct(u, m) && !opts.Select.mayRecheck():
+				u.results[k] = &Result{Mutant: m, Status: Pending}
+			case !m.Viable:
 				u.results[k] = &Result{Mutant: m, Status: NotViable}
-				continue
-			}
-			viable++
-			if !t.Pkg.HasTests {
-				// テストファイルがなければどのテストも到達しないので、ビルドせずに判定する。
-				u.results[k] = &Result{Mutant: m, Status: NotCovered}
+				if !opts.Select.direct(u, m) {
+					u.results[k].Status = Pending
+				}
+			default:
+				viable++
+				if !t.Pkg.HasTests && len(t.RevDeps) == 0 {
+					// テストファイルがなければどのテストも到達しないので、ビルドせずに判定する。
+					u.results[k] = &Result{Mutant: m, Status: NotCovered}
+					if !opts.Select.direct(u, m) {
+						u.results[k].Status = Pending
+					}
+				}
 			}
 		}
-		if viable > 0 && t.Pkg.HasTests {
-			active = append(active, u)
-		} else if viable > 0 {
+		switch {
+		case viable > 0 && (t.Pkg.HasTests || len(t.RevDeps) > 0):
+			if slices.ContainsFunc(u.results, func(r *Result) bool { return r == nil }) {
+				active = append(active, u)
+			}
+		case viable > 0:
 			logf("skip: %s has no test files, so %d viable mutants are not covered", t.Pkg.ImportPath, viable)
 		}
 	}
@@ -194,48 +242,38 @@ func All(ctx context.Context, targets []Target, opts Options) ([][]*Result, erro
 		return nil, err
 	}
 
-	// 被覆の記録は、全パッケージのテストを 1 つの列にまとめる。
-	type coverItem struct {
-		unit *unit
-		i    int
+	var srv *pool
+	if !opts.Isolate {
+		srv = newPool(ctx, opts)
+		defer srv.close()
 	}
-	var items []coverItem
-	for _, u := range active {
-		u.tests = make([]*testCase, len(u.names))
-		for i := range u.names {
-			items = append(items, coverItem{u, i})
-		}
-	}
-	start := time.Now()
-	errs = make([]error, len(items))
-	parallel(len(items), opts.Workers, func(k int) {
-		it := items[k]
-		it.unit.tests[it.i], errs[k] = coverTest(ctx, it.unit, it.i, opts)
-	})
-	if err := errors.Join(errs...); err != nil {
+	// 自己検査は被覆の記録の中で行う。記録を戻したテストで検査できるなら、測定と並行させる。
+	if err := cover(ctx, active, opts, srv, logf); err != nil {
 		return nil, err
 	}
-	for _, u := range active {
-		logf("coverage: %s: %d tests", u.Pkg.ImportPath, len(u.tests))
-	}
-	logf("coverage: %d tests in %s", len(items), time.Since(start).Round(time.Millisecond))
-
-	errs = make([]error, len(active))
-	parallel(len(active), opts.Workers, func(i int) { errs[i] = selfCheck(ctx, active[i], opts) })
-	if err := errors.Join(errs...); err != nil {
-		return nil, err
-	}
-
 	var all []job
 	for _, u := range active {
-		all = append(all, u.jobs(ctx, opts)...)
+		all = append(all, u.jobs(ctx, opts, srv)...)
 	}
 	jobs := all
 	if opts.Cache != nil {
 		jobs = reuse(all, opts.Cache, duplicateIDs(targets))
 		logf("cache: %d mutants reused, %d to execute", len(all)-len(jobs), len(jobs))
 	}
-	start = time.Now()
+	err = buildLazy(ctx, active, func(u *unit) []*testCase {
+		var ts []*testCase
+		for _, j := range jobs {
+			if j.unit == u && j.mode == ModeSchemata {
+				ts = append(ts, j.ran...)
+			}
+		}
+		return ts
+	}, opts, logf)
+	if err != nil {
+		return nil, err
+	}
+	orderJobs(jobs)
+	start := time.Now()
 	var mu sync.Mutex
 	done := 0
 	parallel(len(jobs), opts.Workers, func(k int) {
@@ -244,6 +282,9 @@ func All(ctx context.Context, targets []Target, opts Options) ([][]*Result, erro
 		// 取り消しの後に終わった実行は、テストが失敗したのか止められたのか区別できないので、記録しない。
 		if ctx.Err() == nil {
 			j.record(opts.Cache, r)
+		}
+		if j.previousKiller != "" && r.Status != Killed && r.Status != TimedOut {
+			r.PreviouslyKilledBy = j.previousKiller
 		}
 		mu.Lock()
 		j.unit.results[j.index] = r
@@ -265,6 +306,12 @@ func All(ctx context.Context, targets []Target, opts Options) ([][]*Result, erro
 	return out, ctx.Err()
 }
 
+// orderJobs は、変異体の実行を見積もり時間の長い順に並べる（LPT 規則）。
+// 長い変異体を先に始めると、並列実行の最後に長い変異体が 1 つだけ残って待つことが減る。測定は設計の「実行の順序」に書く。
+func orderJobs(jobs []job) {
+	slices.SortStableFunc(jobs, func(a, b job) int { return int(b.estimate - a.estimate) })
+}
+
 // lockedWriter は、mu を持って w へ書く。Log と Warn が同じ出力先でも行が混ざらないよう、mu を共有する。
 type lockedWriter struct {
 	mu *sync.Mutex
@@ -277,86 +324,86 @@ func (l *lockedWriter) Write(p []byte) (int, error) {
 	return l.w.Write(p)
 }
 
-// prepare は、パッケージの schemata を書き換え、テストバイナリをビルドし、テストの一覧を得る。
-func prepare(ctx context.Context, u *unit, opts Options, logf func(string, ...any)) error {
-	pkg := u.Pkg
-	sch, err := schemata.Build(pkg, u.Mutants)
-	if err != nil {
-		return err
-	}
-	u.sch = sch
-	notViable := 0
-	for _, m := range u.Mutants {
-		if !m.Viable {
-			notViable++
-		}
-	}
-	logf("schemata: %s: %d embedded, %d standalone with coverage, %d standalone without coverage, %d not viable", pkg.ImportPath,
-		sch.Count(schemata.Wrapped), sch.Count(schemata.Marked), sch.Count(schemata.Untouched), notViable)
-
-	if err := os.MkdirAll(u.work, 0o700); err != nil {
-		return err
-	}
-	helper := sch.Helper
-	if opts.rewriteHelper != nil {
-		helper = opts.rewriteHelper(helper)
-	}
-	overlay := map[string][]byte{sch.HelperPath: helper}
-	maps.Copy(overlay, sch.Files)
-	u.bin = filepath.Join(u.work, "schemata.test")
-	start := time.Now()
-	if err := buildTest(ctx, pkg, u.work, "schemata", overlay, u.bin); err != nil {
-		return err
-	}
-	logf("build: %s in %s", pkg.ImportPath, time.Since(start).Round(time.Millisecond))
-	u.names, err = listTests(ctx, pkg.Dir, u.bin, opts.TestFlags)
-	return err
-}
-
 // jobs は、被覆の記録から判定できる変異体の判定を書き、実行が要る変異体の作業を返す。
-func (u *unit) jobs(ctx context.Context, opts Options) []job {
-	pkg, sch, tests := u.Pkg, u.sch, u.tests
+// 選択の外の変異体は PENDING にする。
+func (u *unit) jobs(ctx context.Context, opts Options, srv *pool) []job {
 	var jobs []job
 	for i, m := range u.Mutants {
 		if u.results[i] != nil {
 			continue
 		}
-		site := sch.SiteOf[m]
-		if site.Level == schemata.Untouched {
-			jobs = append(jobs, job{unit: u, index: i, mode: ModeStandalone, ran: tests, run: func() *Result {
-				return standalone(ctx, pkg, m, u.work, tests, opts)
-			}})
-			continue
-		}
+		site := u.sch.SiteOf[m]
 		var reached, infected []*testCase
-		for _, t := range tests {
-			if t.hits[site.Index] {
-				reached = append(reached, t)
-				if t.infected[m.Index] {
-					infected = append(infected, t)
+		if site.Level != schemata.Untouched {
+			for _, t := range u.tests {
+				if t.hits[site.Index] {
+					reached = append(reached, t)
+					if t.infected[m.Index] {
+						infected = append(infected, t)
+					}
 				}
 			}
 		}
+		var j *job
+		var res *Result
 		switch {
+		case site.Level == schemata.Untouched && len(u.standaloneTests()) == 0:
+			res = &Result{Mutant: m, Status: NotCovered, Mode: ModeStandalone}
+		case site.Level == schemata.Untouched:
+			ran := u.standaloneTests()
+			j = &job{mode: ModeStandalone, ran: ran, estimate: u.buildTime + total(ran), run: func() *Result {
+				return u.standalone(ctx, m, ran, opts)
+			}}
 		case len(reached) == 0:
-			u.results[i] = &Result{Mutant: m, Status: NotCovered, Mode: modeOf(site)}
+			res = &Result{Mutant: m, Status: NotCovered, Mode: modeOf(site)}
 		case site.Level == schemata.Marked:
-			jobs = append(jobs, job{unit: u, index: i, mode: ModeStandalone, reached: reached, ran: reached, run: func() *Result {
-				r := standalone(ctx, pkg, m, u.work, reached, opts)
+			j = &job{mode: ModeStandalone, reached: reached, ran: reached, estimate: u.buildTime + total(reached), run: func() *Result {
+				r := u.standalone(ctx, m, reached, opts)
 				r.Tests = testNames(reached)
 				return r
-			}})
+			}}
 		case len(infected) == 0:
-			u.results[i] = &Result{Mutant: m, Status: Lived, Reason: ReasonNotInfected, Mode: ModeSchemata, Tests: testNames(reached)}
+			res = &Result{Mutant: m, Status: Lived, Reason: ReasonNotInfected, Mode: ModeSchemata, Tests: testNames(reached)}
 		default:
-			jobs = append(jobs, job{unit: u, index: i, mode: ModeSchemata, reached: reached, ran: infected, run: func() *Result {
-				r := execute(ctx, pkg.Dir, u.bin, m.Index, infected, opts)
-				r.Mutant, r.Mode, r.Tests = m, ModeSchemata, testNames(reached)
+			j = &job{mode: ModeSchemata, reached: reached, ran: infected, estimate: total(infected), run: func() *Result {
+				var r *Result
+				if srv != nil && u.canServe(infected) {
+					r = u.serve(ctx, m, infected, opts, srv)
+				} else {
+					r = u.execute(ctx, m, infected, opts, func(b *binary) (string, error) { return b.path, nil })
+				}
+				r.Mode, r.Tests = ModeSchemata, testNames(reached)
 				return r
-			}})
+			}}
+		}
+		// 個別ビルドで全テストを実行する変異体は、実行するテストを到達したテストとみなして選ぶ。
+		touching := reached
+		if j != nil && j.reached == nil {
+			touching = j.ran
+		}
+		selected, previous := opts.Select.selects(u, m, touching, opts.Cache)
+		switch {
+		case !selected:
+			u.results[i] = &Result{Mutant: m, Status: Pending}
+		case j != nil:
+			j.unit, j.index, j.previousKiller = u, i, previous
+			j.forced = opts.Select != nil && opts.Select.Mutants != nil
+			jobs = append(jobs, *j)
+		default:
+			// 実行せずに決まる判定（到達しない、感染しない）は、どれも検出されていない。
+			res.PreviouslyKilledBy = previous
+			u.results[i] = res
 		}
 	}
 	return jobs
+}
+
+func total(ts []*testCase) time.Duration {
+	var d time.Duration
+	for _, t := range ts {
+		d += t.duration
+	}
+	return d
 }
 
 func testNames(ts []*testCase) []string {
@@ -382,204 +429,6 @@ func parallel(n, workers int, fn func(int)) {
 	}
 	close(ch)
 	wg.Wait()
-}
-
-// buildTest は overlay を当てたテストバイナリを bin へビルドする。
-func buildTest(ctx context.Context, pkg *load.Package, work, name string, files map[string][]byte, bin string) error {
-	srcDir := filepath.Join(work, name+"-src")
-	if err := os.MkdirAll(srcDir, 0o700); err != nil {
-		return err
-	}
-	replace := map[string]string{}
-	keys := make([]string, 0, len(files))
-	for path := range files {
-		keys = append(keys, path)
-	}
-	slices.Sort(keys)
-	for i, path := range keys {
-		dst := filepath.Join(srcDir, strconv.Itoa(i)+"_"+filepath.Base(path))
-		if err := os.WriteFile(dst, files[path], 0o600); err != nil {
-			return err
-		}
-		replace[path] = dst
-	}
-	overlay, err := json.Marshal(map[string]any{"Replace": replace})
-	if err != nil {
-		return err
-	}
-	overlayPath := filepath.Join(work, name+"-overlay.json")
-	if err := os.WriteFile(overlayPath, overlay, 0o600); err != nil {
-		return err
-	}
-	args := []string{"test", "-c", "-o", bin, "-overlay", overlayPath}
-	if len(pkg.Tags) > 0 {
-		args = append(args, "-tags="+strings.Join(pkg.Tags, ","))
-	}
-	cmd := exec.CommandContext(ctx, "go", append(args, ".")...)
-	cmd.Dir = pkg.Dir
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("build test binary: %w\n%s", err, out)
-	}
-	return nil
-}
-
-// testCommand は、テストバイナリを起動するコマンドを作る。
-// 利用者のフラグを先に、gamut が実行ごとに決めるフラグを後に置く。
-// テストバイナリは新しいプロセスグループで起動し、取り消しや時間切れではテストが起動した子プロセスごと止める。
-func testCommand(ctx context.Context, dir, bin string, flags, env []string, args ...string) *exec.Cmd {
-	cmd := exec.CommandContext(ctx, bin, append(slices.Clone(flags), args...)...)
-	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), env...)
-	// 止めた後も、孫プロセスが出力の管を握ったまま残ることがあるので、待つ時間に上限を置く。
-	cmd.WaitDelay = time.Second
-	isolate(cmd)
-	return cmd
-}
-
-var runnable = regexp.MustCompile(`^(Test|Example|Fuzz)`)
-
-func listTests(ctx context.Context, dir, bin string, flags []string) ([]string, error) {
-	cmd := testCommand(ctx, dir, bin, flags, nil, "-test.list", ".")
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
-	if err != nil {
-		// TestMain の準備が失敗しても、一覧を得られない。
-		return nil, fmt.Errorf("%w: listing tests failed: %w\n%s%s", ErrBaseline, err, out, stderr.Bytes())
-	}
-	var names []string
-	sc := bufio.NewScanner(bytes.NewReader(out))
-	for sc.Scan() {
-		name := strings.TrimSpace(sc.Text())
-		if runnable.MatchString(name) {
-			names = append(names, name)
-		}
-	}
-	return names, nil
-}
-
-// coverTest は、変異を無効にしたまま u の i 番目のテストを別のプロセスで実行し、到達と感染を記録する。
-func coverTest(ctx context.Context, u *unit, i int, opts Options) (*testCase, error) {
-	name := u.names[i]
-	path := filepath.Join(u.work, "cover-"+strconv.Itoa(i))
-	start := time.Now()
-	cmd := testCommand(ctx, u.Pkg.Dir, u.bin, opts.TestFlags, []string{"GAMUT_COVER=" + path, "GAMUT_MUTANT=0"},
-		"-test.run", "^"+regexp.QuoteMeta(name)+"$", "-test.count=1", "-test.paniconexit0")
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return nil, fmt.Errorf("%w: %s.%s fails, so verdicts would be meaningless: %w\n%s", ErrBaseline, u.Pkg.ImportPath, name, err, out)
-	}
-	t := &testCase{name: name, duration: time.Since(start), hits: map[int]bool{}, infected: map[int]bool{}}
-	data, err := os.ReadFile(path)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return nil, err
-	}
-	for line := range strings.Lines(string(data)) {
-		kind, num, ok := strings.Cut(strings.TrimSpace(line), " ")
-		n, convErr := strconv.Atoi(num)
-		if !ok || convErr != nil {
-			continue
-		}
-		switch kind {
-		case "h":
-			t.hits[n] = true
-		case "i":
-			t.infected[n] = true
-		}
-	}
-	return t, nil
-}
-
-// selfCheck は、到達の記録があるテストのうち最も短い 1 件を forced fail で実行し、失敗することを確かめる。
-// 到達が記録されたのに失敗しないなら、GAMUT_MUTANT がテストのプロセスで読まれていない。
-func selfCheck(ctx context.Context, u *unit, opts Options) error {
-	dir, bin, work, pkgPath := u.Pkg.Dir, u.bin, u.work, u.Pkg.ImportPath
-	var probe *testCase
-	for _, t := range u.tests {
-		if len(t.hits) > 0 && (probe == nil || t.duration < probe.duration) {
-			probe = t
-		}
-	}
-	if probe == nil {
-		if opts.Warn != nil {
-			fmt.Fprintf(opts.Warn, "gamut: warning: forced-fail self-check skipped for %s because no test reaches a mutated site\n", pkgPath)
-		}
-		return nil
-	}
-	limit := time.Duration(float64(probe.duration)*opts.TimeoutFactor) + opts.TimeoutMin
-	runCtx, cancel := context.WithTimeout(ctx, limit)
-	defer cancel()
-	start := time.Now()
-	// gamutHit は被覆の記録中にだけ呼ばれるので、記録を有効にして forced fail を渡す。
-	env := []string{"GAMUT_COVER=" + filepath.Join(work, "forced-fail"), "GAMUT_MUTANT=" + strconv.Itoa(schemata.ForcedFail)}
-	cmd := testCommand(runCtx, dir, bin, opts.TestFlags, env, "-test.run", "^"+regexp.QuoteMeta(probe.name)+"$", "-test.count=1", "-test.paniconexit0")
-	out, err := cmd.CombinedOutput()
-	switch {
-	case ctx.Err() != nil:
-		return ctx.Err()
-	case runCtx.Err() != nil:
-		return fmt.Errorf("%w: %s.%s did not finish within %s with GAMUT_MUTANT=%d", ErrSelfCheck, pkgPath, probe.name, limit, schemata.ForcedFail)
-	case err == nil:
-		return fmt.Errorf("%w: %s.%s reaches mutated sites but passed with GAMUT_MUTANT=%d; "+
-			"the test process does not read the mutant selection, so every mutant would survive "+
-			"(check that GAMUT_MUTANT reaches the test binary and that the code under test does not recover the forced panic)\n%s",
-			ErrSelfCheck, pkgPath, probe.name, schemata.ForcedFail, out)
-	}
-	if opts.Log != nil {
-		fmt.Fprintf(opts.Log, "self-check: %s: forced fail failed %s in %s\n", pkgPath, probe.name, time.Since(start).Round(time.Millisecond))
-	}
-	return nil
-}
-
-var failLine = regexp.MustCompile(`(?m)^\s*--- FAIL: (\S+)`)
-
-// execute は、変異体 index を有効にして tests を短い順に実行する。
-func execute(ctx context.Context, dir, bin string, index int, tests []*testCase, opts Options) *Result {
-	sorted := slices.Clone(tests)
-	slices.SortStableFunc(sorted, func(a, b *testCase) int { return int(a.duration - b.duration) })
-	var total time.Duration
-	quoted := make([]string, len(sorted))
-	for i, t := range sorted {
-		total += t.duration
-		quoted[i] = regexp.QuoteMeta(t.name)
-	}
-	limit := time.Duration(float64(total)*opts.TimeoutFactor) + opts.TimeoutMin
-	runCtx, cancel := context.WithTimeout(ctx, limit)
-	defer cancel()
-
-	start := time.Now()
-	cmd := testCommand(runCtx, dir, bin, opts.TestFlags, []string{"GAMUT_MUTANT=" + strconv.Itoa(index)},
-		"-test.run", "^(?:"+strings.Join(quoted, "|")+")$", "-test.count=1", "-test.failfast", "-test.paniconexit0")
-	out, err := cmd.CombinedOutput()
-	r := &Result{Elapsed: time.Since(start)}
-	switch {
-	case runCtx.Err() != nil && ctx.Err() == nil:
-		r.Status = TimedOut
-	case err != nil:
-		r.Status = Killed
-		if m := failLine.FindSubmatch(out); m != nil {
-			r.KilledBy = string(m[1])
-		}
-	default:
-		r.Status, r.Reason = Lived, ReasonNotDetected
-	}
-	return r
-}
-
-// standalone は、schemata に埋め込めなかった変異体を個別にビルドし、全テストで判定する。
-func standalone(ctx context.Context, pkg *load.Package, m *mutant.Mutant, work string, tests []*testCase, opts Options) *Result {
-	name := "standalone-" + strconv.Itoa(m.Index)
-	bin := filepath.Join(work, name+".test")
-	defer func() { _ = os.Remove(bin) }()
-	err := buildTest(ctx, pkg, work, name, map[string][]byte{m.File.Path: m.Apply(m.File.Src)}, bin)
-	if err != nil {
-		// 型検査を通ってもコンパイラが拒む変異体（定数の桁あふれなど）は構築不能とする。
-		return &Result{Mutant: m, Status: NotViable, Mode: ModeStandalone}
-	}
-	r := execute(ctx, pkg.Dir, bin, 0, tests, opts)
-	r.Mutant, r.Mode = m, ModeStandalone
-	return r
 }
 
 func modeOf(s *schemata.Site) string {

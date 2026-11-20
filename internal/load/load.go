@@ -12,6 +12,7 @@ import (
 	"go/token"
 	"go/types"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -70,13 +71,13 @@ type listedPackage struct {
 	Dir          string
 	ImportPath   string
 	Name         string
-	Export       string
 	DepOnly      bool
 	GoFiles      []string
 	CgoFiles     []string
 	TestGoFiles  []string
 	XTestGoFiles []string
 	ImportMap    map[string]string
+	Imports      []string
 	Module       *struct {
 		Path string
 		Dir  string
@@ -85,89 +86,163 @@ type listedPackage struct {
 }
 
 // Load は、ビルドタグ tags の下で patterns に当たるパッケージを読み、型を検査する。
-// パターンはパッケージディレクトリか、その下のすべてのパッケージを表す <ディレクトリ>/... である。
-// go list は最初のパターンのディレクトリで 1 回だけ実行し、依存のエクスポートデータと型の読み込みは全パッケージで共有する。
-// 対象のファイルは go list の GoFiles に従うので、ビルドの条件を自前で評価しない。
-// テスト以外の Go ファイルを持たないパッケージは返さない。返すパッケージは import パスの順に並ぶ。
 func Load(patterns []string, tags []string) ([]*Package, error) {
+	pkgs, _, err := WithHint(patterns, tags, nil)
+	return pkgs, err
+}
+
+// listFields は、読み込みが go list から受け取るフィールドである。
+const listFields = "Dir,ImportPath,Name,DepOnly,GoFiles,CgoFiles,TestGoFiles,XTestGoFiles,ImportMap,Imports,Module,Error"
+
+// WithHint は、Load と同じく読み込む。型検査が要るエクスポートデータを持つパッケージの import パスを、次の読み込みの hint として返す。
+//
+// エクスポートデータは、対象パッケージの依存の分だけ求める。go list -export -deps を対象パッケージごと実行すると、
+// 編集したばかりの対象パッケージまでコンパイルしてビルドキャッシュに書くが、その結果はどこにも使わない
+// （schemata のバイナリは書き換えたソースからコンパイルし直す）。そこで、依存の一覧（-export なし）と、
+// hint のパッケージのエクスポートデータとを並行して求め、hint に足りないものだけを後から求める。
+// hint が前回と同じなら、go list の 2 回の実行は並行するので、待つのは 1 回分である。
+func WithHint(patterns, tags, hint []string) ([]*Package, []string, error) {
 	if len(patterns) == 0 {
-		return nil, errors.New("no package patterns")
+		return nil, nil, errors.New("no package patterns")
 	}
-	var abs []string
-	for _, p := range patterns {
-		dir, rest := p, ""
-		if d, ok := strings.CutSuffix(filepath.ToSlash(p), "/..."); ok {
-			dir, rest = filepath.FromSlash(d), "/..."
-		} else if p == "..." {
-			dir, rest = ".", "/..."
-		}
-		a, err := filepath.Abs(dir)
-		if err != nil {
-			return nil, err
-		}
-		abs = append(abs, a+filepath.FromSlash(rest))
+	abs, err := AbsPatterns(patterns)
+	if err != nil {
+		return nil, nil, err
 	}
 	runDir := strings.TrimSuffix(abs[0], filepath.FromSlash("/..."))
+	exports := map[string]string{}
+	var hinted sync.WaitGroup
+	var hintErr error
+	if len(hint) > 0 {
+		hinted.Go(func() { hintErr = listExports(runDir, tags, hint, exports) })
+	}
 	// schemata の補助ファイルが import するパッケージも、型検査のために一緒に列挙する。
-	args := []string{"list", "-e", "-json", "-export", "-deps"}
+	args := []string{"list", "-e", "-json=" + listFields, "-deps"}
 	if len(tags) > 0 {
 		args = append(args, "-tags="+strings.Join(tags, ","))
 	}
 	args = append(append(args, abs...), HelperImports...)
-	cmd := exec.Command("go", args...)
-	cmd.Dir = runDir
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
+	out, err := goList(runDir, args)
+	hinted.Wait()
 	if err != nil {
-		return nil, fmt.Errorf("go list in %s: %w: %s", runDir, err, strings.TrimSpace(stderr.String()))
+		return nil, nil, err
 	}
-	exports := map[string]string{}
 	var targets []*listedPackage
+	var all []*listedPackage
 	dec := json.NewDecoder(bytes.NewReader(out))
 	for {
 		var p listedPackage
 		if err := dec.Decode(&p); errors.Is(err, io.EOF) {
 			break
 		} else if err != nil {
-			return nil, fmt.Errorf("decode go list output: %w", err)
+			return nil, nil, fmt.Errorf("decode go list output: %w", err)
 		}
 		if p.Error != nil {
-			return nil, fmt.Errorf("go list %s: %s", p.ImportPath, p.Error.Err)
+			return nil, nil, fmt.Errorf("go list %s: %s", p.ImportPath, p.Error.Err)
 		}
-		exports[p.ImportPath] = p.Export
+		all = append(all, &p)
 		if !p.DepOnly && !slices.Contains(HelperImports, p.ImportPath) && len(p.GoFiles)+len(p.CgoFiles) > 0 {
 			targets = append(targets, &p)
 		}
 	}
 	if len(targets) == 0 {
-		return nil, fmt.Errorf("no packages with non-test Go files match %s", strings.Join(patterns, " "))
+		return nil, nil, fmt.Errorf("no packages with non-test Go files match %s", strings.Join(patterns, " "))
 	}
 	slices.SortFunc(targets, func(a, b *listedPackage) int { return strings.Compare(a.ImportPath, b.ImportPath) })
 
+	// エクスポートデータが要るのは、対象パッケージ以外のすべてと、別の対象パッケージが import する対象パッケージである。
+	isTarget := map[string]bool{}
+	for _, t := range targets {
+		isTarget[t.ImportPath] = true
+	}
+	imported := map[string]bool{}
+	for _, t := range targets {
+		for _, path := range t.Imports {
+			if mapped, ok := t.ImportMap[path]; ok {
+				path = mapped
+			}
+			imported[path] = true
+		}
+	}
+	var needed, missing []string
+	for _, p := range all {
+		if isTarget[p.ImportPath] && !imported[p.ImportPath] || p.ImportPath == "unsafe" {
+			continue
+		}
+		needed = append(needed, p.ImportPath)
+		if hintErr != nil || exports[p.ImportPath] == "" {
+			missing = append(missing, p.ImportPath)
+		}
+	}
+	if len(missing) > 0 {
+		if err := listExports(runDir, tags, missing, exports); err != nil {
+			return nil, nil, err
+		}
+	}
 	fset := token.NewFileSet()
 	shared := &sharedImporter{exports: exports}
 	shared.imp = importer.ForCompiler(fset, "gc", shared.lookup)
 	var pkgs []*Package
 	for _, target := range targets {
 		if len(target.CgoFiles) > 0 {
-			return nil, fmt.Errorf("package %s uses cgo, which gamut does not support", target.ImportPath)
+			return nil, nil, fmt.Errorf("package %s uses cgo, which gamut does not support", target.ImportPath)
 		}
 		if target.Module == nil {
-			return nil, fmt.Errorf("package %s is not in a module", target.ImportPath)
+			return nil, nil, fmt.Errorf("package %s is not in a module", target.ImportPath)
 		}
 		if len(pkgs) > 0 && pkgs[0].ModuleDir != target.Module.Dir {
 			// 報告のファイルのパスはモジュール相対なので、モジュールをまたぐと区別できない。
-			return nil, fmt.Errorf("packages %s and %s are in different modules; run gamut once per module",
+			return nil, nil, fmt.Errorf("packages %s and %s are in different modules; run gamut once per module",
 				pkgs[0].ImportPath, target.ImportPath)
 		}
 		pkg, err := newPackage(target, tags, fset, &packageImporter{shared: shared, importMap: target.ImportMap})
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		pkgs = append(pkgs, pkg)
 	}
-	return pkgs, nil
+	return pkgs, needed, nil
+}
+
+// goList は、dir で go に args を渡して実行し、標準出力を返す。
+func goList(dir string, args []string) ([]byte, error) {
+	cmd := exec.Command("go", args...)
+	cmd.Dir = dir
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("go list in %s: %w: %s", dir, err, strings.TrimSpace(stderr.String()))
+	}
+	return out, nil
+}
+
+// listExports は、paths のパッケージのエクスポートデータのファイルを求め、exports に足す。
+// 求められなかったパッケージ（消えたパッケージなど）は足さない。
+func listExports(dir string, tags, paths []string, exports map[string]string) error {
+	args := []string{"list", "-e", "-export", "-json=ImportPath,Export"}
+	if len(tags) > 0 {
+		args = append(args, "-tags="+strings.Join(tags, ","))
+	}
+	out, err := goList(dir, append(args, paths...))
+	if err != nil {
+		return err
+	}
+	found := map[string]string{}
+	dec := json.NewDecoder(bytes.NewReader(out))
+	for {
+		var p struct{ ImportPath, Export string }
+		if err := dec.Decode(&p); errors.Is(err, io.EOF) {
+			break
+		} else if err != nil {
+			return fmt.Errorf("decode go list output: %w", err)
+		}
+		if p.Export != "" {
+			found[p.ImportPath] = p.Export
+		}
+	}
+	maps.Copy(exports, found)
+	return nil
 }
 
 func newPackage(target *listedPackage, tags []string, fset *token.FileSet, imp types.Importer) (*Package, error) {
@@ -249,6 +324,37 @@ func (p *packageImporter) Import(path string) (*types.Package, error) {
 	defer p.shared.mu.Unlock()
 	p.shared.importMap = p.importMap
 	return p.shared.imp.Import(path)
+}
+
+// AbsPatterns は、パターンのディレクトリを絶対パスにする。<ディレクトリ>/... の形は保つ。
+func AbsPatterns(patterns []string) ([]string, error) {
+	var abs []string
+	for _, p := range patterns {
+		dir, rest := p, ""
+		if d, ok := strings.CutSuffix(filepath.ToSlash(p), "/..."); ok {
+			dir, rest = filepath.FromSlash(d), "/..."
+		} else if p == "..." {
+			dir, rest = ".", "/..."
+		}
+		a, err := filepath.Abs(dir)
+		if err != nil {
+			return nil, err
+		}
+		abs = append(abs, a+filepath.FromSlash(rest))
+	}
+	return abs, nil
+}
+
+// ModuleRoot は、dir から親へたどって最初に go.mod を持つディレクトリを返す。見つからなければ空を返す。
+func ModuleRoot(dir string) string {
+	for d := dir; ; d = filepath.Dir(d) {
+		if _, err := os.Stat(filepath.Join(d, "go.mod")); err == nil {
+			return d
+		}
+		if filepath.Dir(d) == d {
+			return ""
+		}
+	}
 }
 
 // NewInfo は、列挙と書き換えが参照する型情報の入れ物を作る。

@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ambi/gamut/internal/mutant"
 	"github.com/ambi/gamut/internal/run"
 )
 
@@ -29,6 +28,9 @@ type Mutation struct {
 	KilledBy    string   `json:"killed_by,omitempty"`
 	// Cached は、判定を実行せずに前の実行から再利用したかである。gomutants にはないフィールドである。
 	Cached bool `json:"cached,omitempty"`
+	// PreviouslyKilledBy は、前回の検出テストが消えたので再検査し、今回は検出されなかったときの、前回の検出テストである。
+	// gomutants にはないフィールドである。
+	PreviouslyKilledBy string `json:"previously_killed_by,omitempty"`
 }
 
 // File は JSON の 1 ファイルである。
@@ -53,13 +55,15 @@ type Report struct {
 	MutantsNotViable  int      `json:"mutants_not_viable"`
 	MutantsNotCovered int      `json:"mutants_not_covered"`
 	MutantsTimedOut   int      `json:"mutants_timed_out"`
-	ElapsedTime       float64  `json:"elapsed_time"`
-	Files             []File   `json:"files"`
+	// MutantsPending は、選択の外で判定しなかった変異体の数である。MutantsTotal と効率の計算には含めない。gomutants にはないフィールドである。
+	MutantsPending int     `json:"mutants_pending,omitempty"`
+	ElapsedTime    float64 `json:"elapsed_time"`
+	Files          []File  `json:"files"`
 }
 
 // Build は判定から報告を作る。label は package フィールドに入れる名前、packages は判定したパッケージの import パスである。
 func Build(module, label string, packages []string, results []*run.Result, elapsed time.Duration) *Report {
-	r := &Report{GoModule: module, Package: label, Packages: packages, ElapsedTime: elapsed.Seconds(), MutantsTotal: len(results)}
+	r := &Report{GoModule: module, Package: label, Packages: packages, ElapsedTime: elapsed.Seconds()}
 	byFile := map[string]*File{}
 	var order []string
 	for _, res := range results {
@@ -75,7 +79,11 @@ func Build(module, label string, packages []string, results []*run.Result, elaps
 			Line: m.Line, Column: m.Column,
 			Original: m.Original.String(), Replacement: m.Replacement.String(),
 			Reason: res.Reason, Mode: res.Mode, Tests: res.Tests, KilledBy: res.KilledBy, Cached: res.Cached,
+			PreviouslyKilledBy: res.PreviouslyKilledBy,
 		})
+		if res.Status != run.Pending {
+			r.MutantsTotal++
+		}
 		switch res.Status {
 		case run.Killed:
 			r.MutantsKilled++
@@ -87,6 +95,8 @@ func Build(module, label string, packages []string, results []*run.Result, elaps
 			r.MutantsNotCovered++
 		case run.TimedOut:
 			r.MutantsTimedOut++
+		case run.Pending:
+			r.MutantsPending++
 		}
 	}
 	slices.Sort(order)
@@ -108,53 +118,79 @@ func (r *Report) WriteJSON(w io.Writer) error {
 	return enc.Encode(r)
 }
 
-// WriteSummary は、生き残りを理由ごとに並べた要約を書く。
-func WriteSummary(w io.Writer, r *Report, results []*run.Result) {
+// WriteSummary は、生き残りを理由ごとに並べた要約を書く。報告だけから書くので、保存した報告からも同じ要約を書ける。
+func WriteSummary(w io.Writer, r *Report) {
+	lived, covered := string(run.Lived), string(run.NotCovered)
 	groups := []struct {
 		title, hint string
-		match       func(*run.Result) bool
+		match       func(Mutation) bool
 	}{
+		{"no longer detected", "the tests that killed these mutants last time are gone and no remaining test fails: restore or replace them",
+			func(x Mutation) bool { return x.PreviouslyKilledBy != "" }},
 		{"not detected", "tests run the mutant and see a different value, but none fails: strengthen an assertion",
-			func(x *run.Result) bool { return x.Status == run.Lived && x.Reason == run.ReasonNotDetected }},
+			func(x Mutation) bool {
+				return x.PreviouslyKilledBy == "" && x.Status == lived && x.Reason == run.ReasonNotDetected
+			}},
 		{"not infected", "tests reach the mutant but never with a value it changes: add an input",
-			func(x *run.Result) bool { return x.Status == run.Lived && x.Reason == run.ReasonNotInfected }},
+			func(x Mutation) bool {
+				return x.PreviouslyKilledBy == "" && x.Status == lived && x.Reason == run.ReasonNotInfected
+			}},
 		{"not covered", "no test reaches the mutant: add a test case",
-			func(x *run.Result) bool { return x.Status == run.NotCovered }},
+			func(x Mutation) bool { return x.PreviouslyKilledBy == "" && x.Status == covered }},
 	}
-	for _, g := range groups {
-		var hits []*run.Result
-		for _, x := range results {
-			if g.match(x) {
-				hits = append(hits, x)
+	cached := 0
+	for _, f := range r.Files {
+		for _, m := range f.Mutations {
+			if m.Cached {
+				cached++
 			}
 		}
-		if len(hits) == 0 {
+	}
+	for _, g := range groups {
+		var lines []string
+		for _, f := range r.Files {
+			for _, m := range f.Mutations {
+				if !g.match(m) {
+					continue
+				}
+				line := fmt.Sprintf("%s:%d:%d %s %s -> %s  [%s]", f.Path, m.Line, m.Column, m.Type, strings.TrimSpace(m.Original), m.Replacement, m.ID)
+				if m.PreviouslyKilledBy != "" {
+					line += "  previously killed by " + m.PreviouslyKilledBy
+				}
+				lines = append(lines, line)
+			}
+		}
+		if len(lines) == 0 {
 			continue
 		}
-		fmt.Fprintf(w, "\n%s (%d): %s\n", g.title, len(hits), g.hint)
-		for _, x := range hits {
-			fmt.Fprintf(w, "  %s\n", describe(x.Mutant))
+		fmt.Fprintf(w, "\n%s (%d): %s\n", g.title, len(lines), g.hint)
+		for _, line := range lines {
+			fmt.Fprintf(w, "  %s\n", line)
 		}
 	}
 	reused := ""
-	if n := countCached(results); n > 0 {
-		reused = fmt.Sprintf(", %d reused from the cache", n)
+	if cached > 0 {
+		reused = fmt.Sprintf(", %d reused from the cache", cached)
+	}
+	if r.MutantsPending > 0 {
+		reused += fmt.Sprintf(", %d pending outside the selection", r.MutantsPending)
 	}
 	fmt.Fprintf(w, "\nkilled %d, lived %d, not covered %d, not viable %d, timed out %d (efficacy %.2f%%) in %.1fs%s\n",
 		r.MutantsKilled, r.MutantsLived, r.MutantsNotCovered, r.MutantsNotViable, r.MutantsTimedOut, r.TestEfficacy, r.ElapsedTime, reused)
 }
 
-func countCached(results []*run.Result) int {
-	n := 0
-	for _, x := range results {
-		if x.Cached {
-			n++
+// MarkReused は、実行して決まる判定（KILLED、TIMED OUT、not detected の LIVED、個別ビルドの NOT VIABLE）を、キャッシュから再利用したとする。
+// 保存した報告を、変更のない再実行の報告として返すときに使う。
+func (r *Report) MarkReused() {
+	for i := range r.Files {
+		for k := range r.Files[i].Mutations {
+			m := &r.Files[i].Mutations[k]
+			switch {
+			case m.Status == string(run.Killed), m.Status == string(run.TimedOut),
+				m.Status == string(run.Lived) && m.Reason == run.ReasonNotDetected,
+				m.Status == string(run.NotViable) && m.Mode == run.ModeStandalone:
+				m.Cached = true
+			}
 		}
 	}
-	return n
-}
-
-func describe(m *mutant.Mutant) string {
-	return fmt.Sprintf("%s:%d:%d %s %s -> %s  [%s]", m.File.Rel, m.Line, m.Column, m.Type,
-		strings.TrimSpace(m.Original.String()), m.Replacement, m.ID)
 }

@@ -3,6 +3,7 @@ package mutant_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/ambi/gamut/internal/load"
@@ -105,4 +106,40 @@ func loadOne(dir string, tags []string) (*load.Package, error) {
 		return nil, err
 	}
 	return pkgs[0], nil
+}
+
+func TestEnumerate_SiteKeysGroupMutantsOfOneSite(t *testing.T) {
+	before := enumerate(t, "package m\n\nfunc F(a, b int) bool { return a < b && b > 0 }\n")
+	after := enumerate(t, "package m\n\n// 行をずらす。\n\nfunc F(a, b int) bool {\n\treturn a < b && b > 0\n}\n")
+	sites := map[string][]string{}
+	for i, m := range before {
+		sites[m.SiteKey] = append(sites[m.SiteKey], m.Original.String())
+		if after[i].SiteKey != m.SiteKey {
+			t.Errorf("%s: site key changed with the line: %s -> %s", m.ID, m.SiteKey, after[i].SiteKey)
+		}
+	}
+	// < と > の箇所がそれぞれ 2 体ずつ（BOUNDARY と NEGATION）の変異体を持つ。
+	if len(sites) != 2 {
+		t.Fatalf("got %d site keys %v, want 2", len(sites), sites)
+	}
+	for key, ops := range sites {
+		if len(ops) != 2 || ops[0] != ops[1] {
+			t.Errorf("site %s groups %v, want two mutants of one operator", key, ops)
+		}
+	}
+}
+
+func TestMutant_IDAtReproducesTheIDUnderAnotherPath(t *testing.T) {
+	ms := enumerate(t, "package m\n\nfunc F(a, b int) int { return a + b }\n")
+	m := ms[0]
+	if got := m.IDAt(m.File.Rel); got != m.ID {
+		t.Errorf("IDAt(own path) = %s, want %s", got, m.ID)
+	}
+	moved := m.IDAt("old/m.go")
+	if moved == m.ID || !strings.HasPrefix(moved, "old/m.go::ARITHMETIC_BASE::F::") {
+		t.Errorf("IDAt(old/m.go) = %s, want an ID under old/m.go", moved)
+	}
+	if !strings.HasSuffix(m.ID, "::"+m.Key()) || len(m.Key()) != 10 {
+		t.Errorf("Key() = %q, want the hash part of %s", m.Key(), m.ID)
+	}
 }

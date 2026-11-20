@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,7 +17,7 @@ import (
 )
 
 // formatVersion はキャッシュファイルの形式の版である。形式を変えたら上げ、古いファイルを読み捨てる。
-const formatVersion = 1
+const formatVersion = 3
 
 // Entry は、1 体の変異体の判定と、判定したときの鍵である。
 type Entry struct {
@@ -26,6 +27,8 @@ type Entry struct {
 	Reason   string `json:"reason,omitempty"`
 	Mode     string `json:"mode,omitempty"`
 	KilledBy string `json:"killed_by,omitempty"`
+	// Killer は、検出したトップレベルのテストの名前である。逆依存パッケージのテストは import パスを前に付ける。
+	Killer string `json:"killer,omitempty"`
 	// Decl、Deps、Imports は Keys の同名のメソッドの値である。
 	Decl    string `json:"decl"`
 	Deps    string `json:"deps"`
@@ -37,10 +40,46 @@ type Entry struct {
 	TestKeys map[string]string `json:"test_keys,omitempty"`
 }
 
+// Coverage は、1 つのテストバイナリのテストが、1 つの対象パッケージの変異箇所に到達し感染した記録である。
+// 箇所と変異体は、書き換えのたびに変わる番号ではなく、行と列に依存しない鍵で書く。
+type Coverage struct {
+	// Imports と Init は、記録したときの対象パッケージの Keys.Imports と Keys.Init である。
+	Imports string `json:"imports"`
+	Init    string `json:"init"`
+	// Levels は、記録したときの全変異箇所の書き換えの段階（schemata.Level）である。
+	Levels map[string]int `json:"levels"`
+	// Tests は、トップレベルのテストの名前から記録を引く。
+	Tests map[string]*TestRecord `json:"tests"`
+}
+
+// TestRecord は、1 件のテストの被覆の記録と、それを測ったときの鍵である。
+type TestRecord struct {
+	// Key はテストの鍵（Keys.Test か RevDepKey）である。
+	Key string `json:"key"`
+	// Reach は、テストが入った関数の宣言と、到達した変異箇所を囲む宣言の Keys.ReachOf の値である。
+	Reach []string `json:"reach,omitempty"`
+	// Hits は到達した変異箇所の鍵、Infected は感染した変異体の鍵（mutant.Mutant.Key）である。
+	Hits     []string `json:"hits,omitempty"`
+	Infected []string `json:"infected,omitempty"`
+	// Duration は、被覆の記録の実行時間（ナノ秒）である。
+	Duration int64 `json:"duration"`
+}
+
+// Viability は、1 体の変異体の構築可能性の判定と、判定したときの鍵（Keys.Viability）である。
+type Viability struct {
+	Package string `json:"package"`
+	Key     string `json:"key"`
+	Viable  bool   `json:"viable"`
+}
+
 type fileFormat struct {
-	Version int               `json:"version"`
-	Env     string            `json:"env"`
-	Mutants map[string]*Entry `json:"mutants"`
+	Version   int                   `json:"version"`
+	Env       string                `json:"env"`
+	Mutants   map[string]*Entry     `json:"mutants"`
+	Coverage  map[string]*Coverage  `json:"coverage,omitempty"`
+	Viability map[string]*Viability `json:"viability,omitempty"`
+	Quick     map[string]*Quick     `json:"quick,omitempty"`
+	LoadHints map[string][]string   `json:"load_hints,omitempty"`
 }
 
 // Store は、キャッシュファイルの内容を持つ。並行に使える。
@@ -52,12 +91,22 @@ type Store struct {
 
 	mu      sync.Mutex
 	entries map[string]*Entry
+	// coverage は、対象パッケージとテストバイナリのパッケージの組（pairKey）から引く。
+	coverage map[string]*Coverage
+	// viability は、変異体の識別子から構築可能性の判定を引く。
+	viability map[string]*Viability
+	// quick は、実行の引数と設定の鍵から、前回の実行の入力の指紋と報告を引く。
+	quick map[string]*Quick
+	// loadHints は、読み込みのパターンと設定の鍵から、前回の読み込みでエクスポートデータを求めたパッケージを引く。
+	loadHints map[string][]string
 }
+
+func pairKey(target, binary string) string { return target + " " + binary }
 
 // Open は path のキャッシュを読む。env が記録と違えば、記録をすべて捨てた空の Store を返す。
 // ファイルがないか、壊れているか、形式の版が違うときも空の Store を返す。
 func Open(path, env string) (*Store, error) {
-	s := &Store{path: path, env: env, entries: map[string]*Entry{}}
+	s := &Store{path: path, env: env, entries: map[string]*Entry{}, coverage: map[string]*Coverage{}, viability: map[string]*Viability{}, quick: map[string]*Quick{}, loadHints: map[string][]string{}}
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return s, nil
@@ -79,6 +128,23 @@ func Open(path, env string) (*Store, error) {
 				s.entries[id] = e
 			}
 		}
+		for k, c := range f.Coverage {
+			if c != nil {
+				s.coverage[k] = c
+			}
+		}
+		for k, q := range f.Quick {
+			if q != nil {
+				s.quick[k] = q
+			}
+		}
+		maps.Copy(s.loadHints, f.LoadHints)
+		for k, v := range f.Viability {
+			if v != nil {
+				s.viability[k] = v
+			}
+		}
+
 	}
 	return s, nil
 }
@@ -97,6 +163,51 @@ func (s *Store) Put(id string, e *Entry) {
 	s.entries[id] = e
 }
 
+// Coverage は、対象パッケージ target の変異箇所について、パッケージ binary のテストの被覆の記録を返す。なければ nil を返す。
+// 返した記録を書き換えてはならない。
+func (s *Store) Coverage(target, binary string) *Coverage {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.coverage[pairKey(target, binary)]
+}
+
+// PutCoverage は、target と binary の組の被覆の記録を置き換える。
+func (s *Store) PutCoverage(target, binary string, c *Coverage) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.coverage[pairKey(target, binary)] = c
+}
+
+// Viable は、識別子 id の変異体の構築可能性の記録が鍵 key のものなら、その判定を返す。2 つ目の戻り値は記録を使えたかである。
+func (s *Store) Viable(id, key string) (bool, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	v := s.viability[id]
+	if v == nil || key == "" || v.Key != key {
+		return false, false
+	}
+	return v.Viable, true
+}
+
+// PutViable は、識別子 id の変異体の構築可能性の判定を記録する。
+func (s *Store) PutViable(id string, v *Viability) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.viability[id] = v
+}
+
+// Inherit は、from の記録を to へ写す。to に記録があれば何もしない。ファイルの名前を変えたときに前の判定を引き継ぐ。
+func (s *Store) Inherit(from, to string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e, ok := s.entries[from]
+	if !ok || s.entries[to] != nil {
+		return false
+	}
+	s.entries[to] = e
+	return true
+}
+
 // Len は記録の数を返す。
 func (s *Store) Len() int {
 	s.mu.Lock()
@@ -106,6 +217,7 @@ func (s *Store) Len() int {
 
 // Prune は、packages に含まれるパッケージの記録のうち、live が偽を返す識別子の記録を捨てる。
 // 消えた変異体の記録がたまらないようにする。ほかのパッケージの記録は残す。
+// 被覆の記録は、判定のたびにパッケージごとに置き換わるので、ここでは捨てない。
 func (s *Store) Prune(packages []string, live func(id string) bool) {
 	in := map[string]bool{}
 	for _, p := range packages {
@@ -118,12 +230,17 @@ func (s *Store) Prune(packages []string, live func(id string) bool) {
 			delete(s.entries, id)
 		}
 	}
+	for id, v := range s.viability {
+		if in[v.Package] && !live(id) {
+			delete(s.viability, id)
+		}
+	}
 }
 
 // Save は記録をファイルへ書く。同じディレクトリの一時ファイルに書いてから改名するので、途中で止まっても前のファイルは壊れない。
 func (s *Store) Save() (err error) {
 	s.mu.Lock()
-	data, err := json.Marshal(fileFormat{Version: formatVersion, Env: s.env, Mutants: s.entries})
+	data, err := json.Marshal(fileFormat{Version: formatVersion, Env: s.env, Mutants: s.entries, Coverage: s.coverage, Viability: s.viability, Quick: s.quick, LoadHints: s.loadHints})
 	s.mu.Unlock()
 	if err != nil {
 		return err

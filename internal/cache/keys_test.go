@@ -31,7 +31,9 @@ func H(v int) int { return v + 1 }
 
 func F(v int) int { return H(v) * 2 }
 
-func G(v int) int { return v - 1 }
+func G(v int) int { return v - step }
+
+const step = 1
 `
 
 const baseTest = `package k
@@ -45,36 +47,45 @@ func TestF(t *testing.T) { _ = F(helper(1)) }
 func TestG(t *testing.T) { _ = G(1) }
 `
 
-// snapshot は、宣言ごとの Decl と Deps、テストごとの鍵である。
+// snapshot は、宣言ごとの Decl、Deps、Reach、テストごとの鍵、初期化の鍵である。
 type snapshot struct {
-	decl, deps map[string]string
-	tests      map[string]string
+	decl, deps, reach map[string]string
+	tests             map[string]string
+	init              string
+	keys              *cache.Keys
 }
 
 func TestKeys_ChangeOnlyWithTheSourcesTheyCover(t *testing.T) {
 	cases := []struct {
-		name      string
-		file      string
-		old, new  string
-		declDiffs []string // Decl が変わる宣言
-		depsDiffs []string // Deps が変わる宣言
-		testDiffs []string // 鍵が変わるテスト
+		name       string
+		file       string
+		old, new   string
+		declDiffs  []string // Decl が変わる宣言
+		depsDiffs  []string // Deps が変わる宣言
+		reachDiffs []string // Reach が変わる宣言
+		testDiffs  []string // 鍵が変わるテスト
+		initDiff   bool     // Init が変わるか
+		changed    []string // 変わった区間から ChangedTests が返すテスト
 	}{
 		{name: "comments and blank lines", file: "k.go", old: "func F(", new: "// F の注釈。\n\n\nfunc F("},
 		{name: "new unrelated declaration", file: "k.go", old: "func G(", new: "func Unused() int { return 0 }\n\nfunc G("},
 		{name: "reordered declarations", file: "k.go",
-			old: "func F(v int) int { return H(v) * 2 }\n\nfunc G(v int) int { return v - 1 }\n",
-			new: "func G(v int) int { return v - 1 }\n\nfunc F(v int) int { return H(v) * 2 }\n"},
+			old: "func F(v int) int { return H(v) * 2 }\n\nfunc G(v int) int { return v - step }\n",
+			new: "func G(v int) int { return v - step }\n\nfunc F(v int) int { return H(v) * 2 }\n"},
+		// 被覆の記録は入った関数をすべて記録するので、Reach は呼ぶ関数を含めない。
 		{name: "helper body", file: "k.go", old: "return v + 1", new: "return v + 2",
-			declDiffs: []string{"H"}, depsDiffs: []string{"F"}},
+			declDiffs: []string{"H"}, depsDiffs: []string{"F"}, reachDiffs: []string{"H"}},
 		{name: "method reached through an interface", file: "k.go", old: "return q.s * q.s", new: "return q.s * 2",
-			declDiffs: []string{"Sq.Area"}, depsDiffs: []string{"Total"}},
+			declDiffs: []string{"Sq.Area"}, depsDiffs: []string{"Total"}, reachDiffs: []string{"Sq.Area"}},
+		{name: "a constant a function uses", file: "k.go", old: "const step = 1", new: "const step = 2",
+			depsDiffs: []string{"G"}, reachDiffs: []string{"G"}},
 		{name: "init runs before every declaration", file: "k.go", old: "func G(", new: "func init() { _ = 1 }\n\nfunc G(",
-			depsDiffs: []string{"F", "G", "H", "Sq.Area", "Total"}},
-		{name: "test helper", file: "k_test.go", old: "return v }", new: "return v + 0 }", testDiffs: []string{"TestF"}},
-		{name: "test body", file: "k_test.go", old: "_ = G(1)", new: "_ = G(2)", testDiffs: []string{"TestG"}},
+			depsDiffs: []string{"F", "G", "H", "Sq.Area", "Total"}, initDiff: true},
+		{name: "package variable", file: "k.go", old: "func G(", new: "var scale = 3\n\nfunc G(", initDiff: true},
+		{name: "test helper", file: "k_test.go", old: "return v }", new: "return v + 0 }", testDiffs: []string{"TestF"}, changed: []string{"TestF"}},
+		{name: "test body", file: "k_test.go", old: "_ = G(1)", new: "_ = G(2)", testDiffs: []string{"TestG"}, changed: []string{"TestG"}},
 		{name: "TestMain runs before every test", file: "k_test.go", old: "func helper(",
-			new: "func TestMain(m *testing.M) { m.Run() }\n\nfunc helper(", testDiffs: []string{"TestF", "TestG"}},
+			new: "func TestMain(m *testing.M) { m.Run() }\n\nfunc helper(", testDiffs: []string{"TestF", "TestG"}, changed: []string{"TestF", "TestG"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -91,11 +102,30 @@ func TestKeys_ChangeOnlyWithTheSourcesTheyCover(t *testing.T) {
 			if !strings.Contains(string(data), c.old) {
 				t.Fatalf("%s does not contain %q", c.file, c.old)
 			}
-			write(t, dir, c.file, strings.Replace(string(data), c.old, c.new, 1))
+			edited := strings.Replace(string(data), c.old, c.new, 1)
+			write(t, dir, c.file, edited)
 			after := take(t, dir)
 			compare(t, "Decl", before.decl, after.decl, c.declDiffs)
 			compare(t, "Deps", before.deps, after.deps, c.depsDiffs)
+			compare(t, "Reach", before.reach, after.reach, c.reachDiffs)
 			compare(t, "Test", before.tests, after.tests, c.testDiffs)
+			if got := before.init != after.init; got != c.initDiff {
+				t.Errorf("Init changed = %t, want %t", got, c.initDiff)
+			}
+			// 書き換えた字句の区間を差分とみなす。
+			start := strings.Index(edited, c.new)
+			changed := after.keys.ChangedTests(func(p string, s, e int) bool {
+				return p == path && s < start+len(c.new) && start < e
+			})
+			var got []string
+			for _, name := range []string{"TestF", "TestG"} {
+				if changed[name] {
+					got = append(got, name)
+				}
+			}
+			if strings.Join(got, " ") != strings.Join(c.changed, " ") {
+				t.Errorf("ChangedTests = %v, want %v", got, c.changed)
+			}
 		})
 	}
 }
@@ -110,10 +140,12 @@ func take(t *testing.T, dir string) snapshot {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := snapshot{decl: map[string]string{}, deps: map[string]string{}, tests: map[string]string{}}
+	s := snapshot{decl: map[string]string{}, deps: map[string]string{}, reach: map[string]string{}, tests: map[string]string{},
+		init: keys.Init(), keys: keys}
 	for _, m := range mutant.Enumerate(pkgs[0], mutant.AllTypes) {
 		s.decl[m.Scope] = keys.Decl(m)
 		s.deps[m.Scope] = keys.Deps(m)
+		s.reach[m.Scope] = keys.Reach(m)
 	}
 	for _, name := range []string{"TestF", "TestG"} {
 		s.tests[name] = keys.Test(name)

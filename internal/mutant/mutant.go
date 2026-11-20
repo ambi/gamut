@@ -9,9 +9,11 @@ import (
 	"go/parser"
 	"go/token"
 	"go/types"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/ambi/gamut/internal/load"
 )
@@ -51,6 +53,23 @@ type Mutant struct {
 	Scope string
 	// Viable は、変異後のパッケージが型検査を通るかである。
 	Viable bool
+	// SiteKey は、変異箇所の行と列に依存しない鍵である。同じ箇所の変異体は同じ鍵を持つ。
+	// 被覆の記録を実行をまたいで引き継ぐときに、書き換えごとに変わる箇所の番号の代わりに使う。
+	SiteKey string
+
+	// path は、囲む宣言の中での構文木の経路である。
+	path []int
+}
+
+// Key は、識別子のハッシュの部分を返す。パッケージの中で変異体を区別する短い鍵として使う。
+func (m *Mutant) Key() string {
+	return m.ID[strings.LastIndex(m.ID, "::")+2:]
+}
+
+// IDAt は、変異体のファイルがモジュール相対のパス rel にあったときの識別子を返す。
+// ファイルの名前の変更の前の識別子を求め、前の判定を引き継ぐために使う。
+func (m *Mutant) IDAt(rel string) string {
+	return identity(rel, m.Scope, m.path, m.Type, m.Replacement)
 }
 
 type rule struct {
@@ -167,6 +186,8 @@ func enumerateFile(pkg *load.Package, file *load.File, enabled []Type) []*Mutant
 				Column:      pos.Column,
 				Site:        n,
 				Scope:       scope,
+				SiteKey:     siteKey(file.Rel, scope, rel),
+				path:        slices.Clone(rel),
 			}
 			m.ID = identity(file.Rel, scope, rel, r.typ, r.to)
 			out = append(out, m)
@@ -177,12 +198,21 @@ func enumerateFile(pkg *load.Package, file *load.File, enabled []Type) []*Mutant
 }
 
 func identity(rel, scope string, path []int, typ Type, to token.Token) string {
+	sum := sha256.Sum256([]byte(strings.Join([]string{rel, scope, joinPath(path), string(typ), to.String()}, "\x00")))
+	return fmt.Sprintf("%s::%s::%s::%s", rel, typ, scope, hex.EncodeToString(sum[:5]))
+}
+
+func siteKey(rel, scope string, path []int) string {
+	sum := sha256.Sum256([]byte(strings.Join([]string{rel, scope, joinPath(path)}, "\x00")))
+	return hex.EncodeToString(sum[:5])
+}
+
+func joinPath(path []int) string {
 	parts := make([]string, len(path))
 	for i, p := range path {
 		parts[i] = strconv.Itoa(p)
 	}
-	sum := sha256.Sum256([]byte(strings.Join([]string{rel, scope, strings.Join(parts, "."), string(typ), to.String()}, "\x00")))
-	return fmt.Sprintf("%s::%s::%s::%s", rel, typ, scope, hex.EncodeToString(sum[:5]))
+	return strings.Join(parts, ".")
 }
 
 func declName(n ast.Node) string {
@@ -251,22 +281,52 @@ func (m *Mutant) Apply(src []byte) []byte {
 
 // CheckViability は、変異体ごとに変異後のパッケージを型検査し、Viable を設定する。
 func CheckViability(pkg *load.Package, mutants []*Mutant) {
+	CheckViabilityWith(pkg, mutants, nil)
+}
+
+// CheckViabilityWith は、known が結果を知っている変異体（2 つ目の戻り値が真）はその結果を使い、
+// 残りの変異体を CPU の数まで並列に型検査して、Viable を設定する。
+// 検査が読む import 先のオブジェクトは、パッケージの最初の型検査で解決済みなので、並列に読んでよい。
+func CheckViabilityWith(pkg *load.Package, mutants []*Mutant, known func(*Mutant) (viable, ok bool)) {
+	var todo []*Mutant
 	for _, m := range mutants {
-		mutated := m.Apply(m.File.Src)
-		f, err := parser.ParseFile(pkg.Fset, m.File.Path, mutated, parser.SkipObjectResolution)
-		if err != nil {
-			m.Viable = false
-			continue
-		}
-		files := make([]*ast.File, 0, len(pkg.Files)+len(pkg.Others))
-		for _, other := range pkg.AllASTs() {
-			if other == m.File.AST {
-				files = append(files, f)
-			} else {
-				files = append(files, other)
+		if known != nil {
+			if v, ok := known(m); ok {
+				m.Viable = v
+				continue
 			}
 		}
-		_, errs := pkg.Check(pkg.Fset, files, nil)
-		m.Viable = len(errs) == 0
+		todo = append(todo, m)
 	}
+	ch := make(chan *Mutant)
+	var wg sync.WaitGroup
+	for range min(runtime.NumCPU(), max(len(todo), 1)) {
+		wg.Go(func() {
+			for m := range ch {
+				m.Viable = typeChecks(pkg, m)
+			}
+		})
+	}
+	for _, m := range todo {
+		ch <- m
+	}
+	close(ch)
+	wg.Wait()
+}
+
+func typeChecks(pkg *load.Package, m *Mutant) bool {
+	f, err := parser.ParseFile(pkg.Fset, m.File.Path, m.Apply(m.File.Src), parser.SkipObjectResolution)
+	if err != nil {
+		return false
+	}
+	files := make([]*ast.File, 0, len(pkg.Files)+len(pkg.Others))
+	for _, other := range pkg.AllASTs() {
+		if other == m.File.AST {
+			files = append(files, f)
+		} else {
+			files = append(files, other)
+		}
+	}
+	_, errs := pkg.Check(pkg.Fset, files, nil)
+	return len(errs) == 0
 }

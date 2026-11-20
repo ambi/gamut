@@ -87,8 +87,40 @@ func TestBuild_ConstantContextIsUntouched(t *testing.T) {
 			t.Errorf("%s: level = %d, want Untouched", key, level)
 		}
 	}
+	// 関数の宣言がなければ、入口の記録も差し込まない。
 	if len(res.Files) != 0 {
 		t.Errorf("no file should be rewritten, got %d", len(res.Files))
+	}
+}
+
+func TestBuild_RecordsFunctionEntriesWithoutShiftingLines(t *testing.T) {
+	const src = "package m\n\nfunc F(a int) int {\n\treturn a + 1\n}\n\nfunc G() {}\n\n//go:nosplit\nfunc H() {}\n\nfunc (T) M() {}\n\ntype T struct{}\n"
+	res := build(t, src)
+	var names []string
+	for _, fd := range res.Funcs {
+		names = append(names, fd.Name.Name)
+	}
+	// //go:nosplit の関数には差し込まない。
+	if got := strings.Join(names, " "); got != "F G M" {
+		t.Fatalf("Funcs = %s, want F G M", got)
+	}
+	var out string
+	for _, b := range res.Files {
+		out = string(b)
+	}
+	want := []string{
+		"func F(a int) int { if gamutCovering { gamutEnter(1) };\n",
+		"func G() { if gamutCovering { gamutEnter(2) };}",
+		"func H() {}",
+		"func (T) M() { if gamutCovering { gamutEnter(3) };}",
+	}
+	for _, w := range want {
+		if !strings.Contains(out, w) {
+			t.Errorf("rewritten source lacks %q:\n%s", w, out)
+		}
+	}
+	if strings.Count(out, "\n") != strings.Count(src, "\n") {
+		t.Errorf("the rewrite changed the number of lines:\n%s", out)
 	}
 }
 

@@ -49,10 +49,11 @@ CLI のヘルプ、エラーメッセージ、ログ、コミットメッセー�
 | --- | --- |
 | `cmd/gamut` | 引数の解釈と終了コード。判断を持たない |
 | `internal/load` | `go list` による読み込みと型検査 |
+| `internal/diff` | `git diff` から、作業ツリーで変わった字句の区間を求める |
 | `internal/mutant` | 変異箇所の列挙、識別子、構築可能性の判定 |
 | `internal/schemata` | schemata の書き換えと、選択と被覆の記録の補助ファイルの生成 |
-| `internal/run` | ビルド、被覆の記録、変異体の実行、判定 |
-| `internal/cache` | 判定の再利用の鍵の計算と、キャッシュファイルの読み書き。再利用の規則は `internal/run` が持つ |
+| `internal/run` | ビルド、被覆の記録とその再利用、変異体の選択と実行、判定 |
+| `internal/cache` | 判定と被覆の記録の再利用の鍵の計算と、キャッシュファイルの読み書き。再利用の規則は `internal/run` が持つ |
 | `internal/report` | JSON の報告と標準出力の要約 |
 | `testdata/` | 端から端までのテストが使う、独立した Go モジュールの固定データ |
 

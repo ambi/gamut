@@ -71,3 +71,13 @@ created_at: 2026-11-20
 | [025](025-benchmark-on-public-projects.md) | 公開 | 公開プロジェクトで gomutants と Gremlins と比べる | 004、007 |
 | [026](026-sharding-and-time-budget.md) | 4 | CI のシャードと時間予算を持つ | 004 |
 | [027](027-watch-mode.md) | 4 | 保存のたびに差分を判定する | 007 |
+| [028](028-fast-unchanged-rerun.md) | 2 | 変更のない再実行を 1 秒未満にする | 005 |
+| [029](029-single-process-coverage.md) | 2 | 被覆の記録を、テストバイナリごとに 1 つのプロセスで行う | 005 |
+| [030](030-reuse-test-processes.md) | 2 | 変異体の判定に、テストプロセスを使い回す | 006、029 |
+| [031](031-fast-rerun-after-edit.md) | 2 | 1 関数を変えた後の再実行を短くする | 005、007、030 |
+| [032](032-batch-revdep-coverage.md) | 2 | 統合モードで、逆依存パッケージのテストの被覆をまとめて測る（取りやめ） | 009、029 |
+| [033](033-windows-support.md) | 公開 | Windows で判定が macOS と Linux と一致することを確かめる | 002、030 |
+| [034](034-cgo-packages.md) | 3 | cgo を使うパッケージを判定する | |
+| [035](035-comparison-matrix.md) | 公開 | README に、主要なミューテーションテストツールとの機能の比較表を置く | 024 |
+| [036](036-checkpoint-cache.md) | 3 | 実行中の判定を、一定の間隔でキャッシュに書き出す | 004 |
+| [037](037-list-and-disable-mutators.md) | 3 | 変異演算子の一覧を出し、演算子を個別に無効にできるようにする | |

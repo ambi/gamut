@@ -3,7 +3,6 @@ package run
 import (
 	"maps"
 	"slices"
-	"strings"
 
 	"github.com/ambi/gamut/internal/cache"
 )
@@ -16,7 +15,7 @@ func reuse(jobs []job, store *cache.Store, dup map[string]bool) []job {
 	for _, j := range jobs {
 		m := j.unit.Mutants[j.index]
 		cur := j.entry()
-		if cur == nil || dup[m.ID] {
+		if cur == nil || dup[m.ID] || j.forced {
 			pending = append(pending, j)
 			continue
 		}
@@ -31,7 +30,7 @@ func reuse(jobs []job, store *cache.Store, dup map[string]bool) []job {
 		}
 		j.unit.results[j.index] = &Result{
 			Mutant: m, Status: Status(old.Status), Reason: old.Reason, Mode: old.Mode,
-			Tests: tests, KilledBy: old.KilledBy, Cached: true,
+			Tests: tests, KilledBy: old.KilledBy, Killer: old.Killer, Cached: true,
 		}
 	}
 	return pending
@@ -40,7 +39,7 @@ func reuse(jobs []job, store *cache.Store, dup map[string]bool) []job {
 // reusable は、今の鍵 cur の下で、前の判定 old を再利用してよいかを返す。
 //
 //   - どの状態も、囲む宣言と判定の方式が変わらないことを求める。
-//   - KILLED：依存が変わらず、検出したテストが変わらずに今も実行される。検出したテストが分からなければ LIVED と同じ規則にする。
+//   - KILLED：依存が変わらず、検出したテスト（トップレベル）が変わらずに今も実行される。検出したテストが分からなければ LIVED と同じ規則にする。
 //   - LIVED：依存が変わらず、到達したテストと実行するテストの集合が同じで、そのどれも変わらない。
 //   - TIMED OUT と個別ビルドの NOT VIABLE：依存が変わらない。
 func reusable(old, cur *cache.Entry) bool {
@@ -55,13 +54,11 @@ func reusable(old, cur *cache.Entry) bool {
 		if !sameDeps {
 			return false
 		}
-		if old.KilledBy == "" {
+		if old.Killer == "" {
 			return sameTests(old, cur)
 		}
-		// 失敗の行はサブテストの名前を含みうるが、鍵はトップレベルのテストにある。
-		killer, _, _ := strings.Cut(old.KilledBy, "/")
-		key, ok := old.TestKeys[killer]
-		return ok && slices.Contains(cur.Ran, killer) && key == cur.TestKeys[killer]
+		key, ok := old.TestKeys[old.Killer]
+		return ok && slices.Contains(cur.Ran, old.Killer) && key == cur.TestKeys[old.Killer]
 	case Lived:
 		return sameDeps && sameTests(old, cur)
 	}
@@ -84,8 +81,12 @@ func (j job) entry() *cache.Entry {
 		Decl: keys.Decl(m), Deps: keys.Deps(m), Imports: keys.Imports(),
 		Reached: sortedNames(j.reached), Ran: sortedNames(j.ran), TestKeys: map[string]string{},
 	}
-	for _, name := range slices.Concat(e.Reached, e.Ran) {
-		e.TestKeys[name] = keys.Test(name)
+	for _, t := range slices.Concat(j.reached, j.ran) {
+		if t.key == "" {
+			// 鍵のないテスト（キャッシュの鍵を持たない逆依存パッケージのもの）が関わる判定は記録しない。
+			return nil
+		}
+		e.TestKeys[t.name] = t.key
 	}
 	return e
 }
@@ -99,7 +100,7 @@ func (j job) record(store *cache.Store, r *Result) {
 	if e == nil {
 		return
 	}
-	e.Status, e.Reason, e.Mode, e.KilledBy = string(r.Status), r.Reason, r.Mode, r.KilledBy
+	e.Status, e.Reason, e.Mode, e.KilledBy, e.Killer = string(r.Status), r.Reason, r.Mode, r.KilledBy, r.Killer
 	store.Put(j.unit.Mutants[j.index].ID, e)
 }
 

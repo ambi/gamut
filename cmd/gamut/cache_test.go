@@ -17,6 +17,9 @@ type mutation struct {
 	Reason string `json:"reason"`
 	Mode   string `json:"mode"`
 	Cached bool   `json:"cached"`
+	// KilledBy と PreviouslyKilledBy は、検出したテストと、消えた前回の検出テストである。
+	KilledBy           string `json:"killed_by"`
+	PreviouslyKilledBy string `json:"previously_killed_by"`
 }
 
 // scope は識別子から囲む宣言の名前を取り出す。
@@ -218,6 +221,64 @@ func replace(t *testing.T, dir, name, old, repl string) {
 		t.Fatalf("%s does not contain %q", name, old)
 	}
 	if err := os.WriteFile(path, []byte(strings.Replace(string(data), old, repl, 1)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestCache_ReportsUnchangedInputsWithoutLoading は、入力が前回と同じ再実行が、読み込みもビルドもせずに同じ判定を返し、
+// パッケージのディレクトリへのファイルの追加、testdata の変更、フラグの変更では近道を使わないことを確かめる。
+func TestCache_ReportsUnchangedInputsWithoutLoading(t *testing.T) {
+	dir := copyModule(t, "../../testdata/reuse")
+	cachePath := filepath.Join(t.TempDir(), "cache.json")
+	first, _ := mustGamut(t, "-cache", cachePath, dir)
+	again, stderr := mustGamut(t, "-cache", cachePath, dir)
+	if !strings.Contains(stderr, "no input changed") || strings.Contains(stderr, "load:") {
+		t.Fatalf("want the unchanged rerun to skip loading, log:\n%s", stderr)
+	}
+	if len(again) != len(first) {
+		t.Fatalf("replayed %d mutants, want %d", len(again), len(first))
+	}
+	for i, m := range again {
+		f := first[i]
+		if m.ID != f.ID || m.Status != f.Status || m.Reason != f.Reason {
+			t.Errorf("%s: replayed %s/%s, first %s/%s", m.ID, m.Status, m.Reason, f.Status, f.Reason)
+		}
+		if m.executed() || (f.executed() && !m.Cached) {
+			t.Errorf("%s: a replayed verdict that needs a run must be marked cached", m.ID)
+		}
+	}
+	steps := []struct {
+		name string
+		edit func()
+		args []string
+	}{
+		{"a new file in the package", func() {
+			write(t, dir, "extra.go", "package reuse\n\nfunc Extra(v int) int { return v - 1 }\n")
+		}, nil},
+		{"a new testdata file", func() {
+			write(t, filepath.Join(dir, "testdata"), "in.txt", "x\n")
+		}, nil},
+		{"another flag", nil, []string{"-only", "ARITHMETIC_BASE"}},
+	}
+	for _, step := range steps {
+		// 直前の状態を近道に記録する。
+		mustGamut(t, append(slices.Clone(step.args), "-cache", cachePath, dir)...)
+		if step.edit != nil {
+			step.edit()
+		}
+		_, stderr := mustGamut(t, append(slices.Clone(step.args), "-cache", cachePath, dir)...)
+		if step.edit != nil && strings.Contains(stderr, "no input changed") {
+			t.Errorf("%s: the rerun used the shortcut, log:\n%s", step.name, stderr)
+		}
+	}
+}
+
+func write(t *testing.T, dir, name, src string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(src), 0o600); err != nil {
 		t.Fatal(err)
 	}
 }
