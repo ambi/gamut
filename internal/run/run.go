@@ -31,12 +31,16 @@ const (
 	TimedOut   Status = "TIMED OUT"
 	// Pending は、選択（差分や識別子の指定）の外にあり、判定しなかったことを表す。
 	Pending Status = "PENDING"
+	// Equivalent は、生き残った変異体のコンパイル結果が元と同じで、どのテストでも検出できないことを表す。gomutants と同じ名前である。
+	Equivalent Status = "EQUIVALENT"
 )
 
 // 生き残りの理由。
 const (
 	ReasonNotInfected = "not infected"
 	ReasonNotDetected = "not detected"
+	// ReasonSameCode は、EQUIVALENT の理由である。
+	ReasonSameCode = "same machine code"
 )
 
 // 判定の方式。

@@ -51,8 +51,30 @@ type Package struct {
 	// Types と Info は Files と Others をまとめて検査した結果である。
 	Types *types.Package
 	Info  *types.Info
+	// GoVersion は、モジュールの go.mod の go の版（"1.27.4" など）である。
+	GoVersion string
+	// Direct は、go tool compile でこのパッケージを直接コンパイルできるかである。
+	// 埋め込みファイルやアセンブリのファイルを持つパッケージは、それらの設定が要るので偽にする。
+	Direct bool
 
-	importer types.Importer
+	importer  types.Importer
+	exports   map[string]string
+	importMap map[string]string
+}
+
+// ImportConfig は、go tool compile の -importcfg に渡す内容を返す。依存のエクスポートデータを指す。
+// ビルドキャッシュを使わずに、このパッケージを書き換えたソースでコンパイルするのに使う。
+func (p *Package) ImportConfig() string {
+	var b strings.Builder
+	for _, path := range slices.Sorted(maps.Keys(p.exports)) {
+		if file := p.exports[path]; file != "" {
+			fmt.Fprintf(&b, "packagefile %s=%s\n", path, file)
+		}
+	}
+	for _, from := range slices.Sorted(maps.Keys(p.importMap)) {
+		fmt.Fprintf(&b, "importmap %s=%s\n", from, p.importMap[from])
+	}
+	return b.String()
 }
 
 // File はパッケージの 1 ファイルである。
@@ -78,9 +100,12 @@ type listedPackage struct {
 	XTestGoFiles []string
 	ImportMap    map[string]string
 	Imports      []string
+	EmbedFiles   []string
+	SFiles       []string
 	Module       *struct {
-		Path string
-		Dir  string
+		Path      string
+		Dir       string
+		GoVersion string
 	}
 	Error *struct{ Err string }
 }
@@ -92,7 +117,7 @@ func Load(patterns []string, tags []string) ([]*Package, error) {
 }
 
 // listFields は、読み込みが go list から受け取るフィールドである。
-const listFields = "Dir,ImportPath,Name,DepOnly,GoFiles,CgoFiles,TestGoFiles,XTestGoFiles,ImportMap,Imports,Module,Error"
+const listFields = "Dir,ImportPath,Name,DepOnly,GoFiles,CgoFiles,TestGoFiles,XTestGoFiles,ImportMap,Imports,EmbedFiles,SFiles,Module,Error"
 
 // WithHint は、Load と同じく読み込む。型検査が要るエクスポートデータを持つパッケージの import パスを、次の読み込みの hint として返す。
 //
@@ -199,6 +224,7 @@ func WithHint(patterns, tags, hint []string) ([]*Package, []string, error) {
 		if err != nil {
 			return nil, nil, err
 		}
+		pkg.exports, pkg.importMap = exports, target.ImportMap
 		pkgs = append(pkgs, pkg)
 	}
 	return pkgs, needed, nil
@@ -255,6 +281,8 @@ func newPackage(target *listedPackage, tags []string, fset *token.FileSet, imp t
 		Tags:       tags,
 		HasTests:   len(target.TestGoFiles)+len(target.XTestGoFiles) > 0,
 		Fset:       fset,
+		GoVersion:  target.Module.GoVersion,
+		Direct:     len(target.EmbedFiles) == 0 && len(target.SFiles) == 0,
 		importer:   imp,
 	}
 	for _, name := range slices.Concat(target.TestGoFiles, target.XTestGoFiles) {

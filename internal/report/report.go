@@ -82,6 +82,9 @@ type Report struct {
 	// Ignored は、無効化コメントで止めた変異体である。gomutants の状態の名前を保つため、files[].mutations には入れない。
 	// gomutants にはないフィールドである。
 	Ignored []IgnoredMutation `json:"ignored,omitempty"`
+	// MutantsEquivalent は、コンパイル結果が元と同じで EQUIVALENT とした変異体の数である。MutantsTotal と効率の計算には含めない。
+	// gomutants にはないフィールドである。
+	MutantsEquivalent int `json:"mutants_equivalent,omitempty"`
 	// MutantsAccepted は、受理した変異体のうち判定したものの数である。MutantsTotal と効率の計算には含めない。gomutants にはないフィールドである。
 	MutantsAccepted int `json:"mutants_accepted,omitempty"`
 	// StaleAccepted は、判定したパッケージの受理のうち、もう要らないものである。gomutants にはないフィールドである。
@@ -151,13 +154,16 @@ func Build(module, label string, packages []string, results []*run.Result, elaps
 // count は、変異体の状態の数と効率を数え直す。PENDING と受理した変異体は数えない。
 func (r *Report) count() {
 	r.MutantsTotal, r.MutantsKilled, r.MutantsLived, r.MutantsNotViable = 0, 0, 0, 0
-	r.MutantsNotCovered, r.MutantsTimedOut, r.MutantsPending, r.MutantsAccepted = 0, 0, 0, 0
+	r.MutantsNotCovered, r.MutantsTimedOut, r.MutantsPending, r.MutantsAccepted, r.MutantsEquivalent = 0, 0, 0, 0, 0
 	r.TestEfficacy, r.MutationsCoverage = 0, 0
 	for _, f := range r.Files {
 		for _, m := range f.Mutations {
 			switch {
 			case m.Status == string(run.Pending):
 				r.MutantsPending++
+				continue
+			case m.Status == string(run.Equivalent):
+				r.MutantsEquivalent++
 				continue
 			case m.Accepted != "":
 				r.MutantsAccepted++
@@ -303,6 +309,9 @@ func WriteSummary(w io.Writer, r *Report) {
 	if r.MutantsAccepted > 0 {
 		reused += fmt.Sprintf(", %d accepted", r.MutantsAccepted)
 	}
+	if r.MutantsEquivalent > 0 {
+		reused += fmt.Sprintf(", %d equivalent by machine code", r.MutantsEquivalent)
+	}
 	if r.MutantsPending > 0 {
 		reused += fmt.Sprintf(", %d pending outside the selection", r.MutantsPending)
 	}
@@ -313,14 +322,14 @@ func WriteSummary(w io.Writer, r *Report) {
 		r.MutantsKilled, r.MutantsLived, r.MutantsNotCovered, r.MutantsNotViable, r.MutantsTimedOut, r.TestEfficacy, r.ElapsedTime, reused)
 }
 
-// MarkReused は、実行して決まる判定（KILLED、TIMED OUT、not detected の LIVED、個別ビルドの NOT VIABLE）を、キャッシュから再利用したとする。
-// 保存した報告を、変更のない再実行の報告として返すときに使う。
+// MarkReused は、実行して決まる判定（KILLED、TIMED OUT、not detected の LIVED、EQUIVALENT、個別ビルドの NOT VIABLE）を、
+// キャッシュから再利用したとする。保存した報告を、変更のない再実行の報告として返すときに使う。
 func (r *Report) MarkReused() {
 	for i := range r.Files {
 		for k := range r.Files[i].Mutations {
 			m := &r.Files[i].Mutations[k]
 			switch {
-			case m.Status == string(run.Killed), m.Status == string(run.TimedOut),
+			case m.Status == string(run.Killed), m.Status == string(run.TimedOut), m.Status == string(run.Equivalent),
 				m.Status == string(run.Lived) && m.Reason == run.ReasonNotDetected,
 				m.Status == string(run.NotViable) && m.Mode == run.ModeStandalone:
 				m.Cached = true

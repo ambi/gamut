@@ -25,6 +25,7 @@ import (
 	"github.com/ambi/gamut/internal/cache"
 	"github.com/ambi/gamut/internal/config"
 	"github.com/ambi/gamut/internal/diff"
+	"github.com/ambi/gamut/internal/equiv"
 	"github.com/ambi/gamut/internal/load"
 	"github.com/ambi/gamut/internal/mutant"
 	"github.com/ambi/gamut/internal/report"
@@ -121,6 +122,7 @@ func judge(args []string, stdout, stderr io.Writer, prune bool) int {
 	isolate := fs.Bool("isolate", false, "start a new test process for every mutant instead of reusing test processes during the run")
 	cpuProfile := fs.String("cpuprofile", "", "write a CPU profile of gamut itself to this path (for developing gamut)")
 	integration := fs.Bool("integration", false, "also try to detect mutants with the tests of module packages that import the target packages")
+	detectEquivalent := fs.Bool("detect-equivalent", false, "compile each surviving mutant and report it as EQUIVALENT when its machine code equals the original's (one package compile per survivor, outside the build cache)")
 	var excludes multiFlag
 	fs.Var(&excludes, "exclude-files", "do not mutate files whose module-relative path matches this regular expression (repeatable)")
 	configPath := fs.String("config", "", "read settings from this JSON file instead of "+config.FileName+" at the module root; flags override it")
@@ -215,7 +217,7 @@ func judge(args []string, stdout, stderr io.Writer, prune bool) int {
 	}
 	var quickKey string
 	if quickable {
-		quickKey = cache.QuickKey(slices.Concat(abs, settings, []string{fmt.Sprintf("integration=%t", *integration), "exclude=" + strings.Join(excludes, "\x00")})...)
+		quickKey = cache.QuickKey(slices.Concat(abs, settings, []string{fmt.Sprintf("integration=%t", *integration), fmt.Sprintf("detect-equivalent=%t", *detectEquivalent), "exclude=" + strings.Join(excludes, "\x00")})...)
 		if early != nil {
 			if code, ok := replay(early, quickKey, *output, stdout, stderr, logw, start); ok {
 				return code
@@ -360,6 +362,25 @@ func judge(args []string, stdout, stderr io.Writer, prune bool) int {
 	if err != nil {
 		fmt.Fprintln(stderr, "gamut:", err)
 		return exitCode(err)
+	}
+	if *detectEquivalent {
+		work, err := os.MkdirTemp("", "gamut-equiv-")
+		if err != nil {
+			fmt.Fprintln(stderr, "gamut:", err)
+			return 1
+		}
+		estart := time.Now()
+		stats, err := equiv.Mark(ctx, targets, perPackage, opts.Cache, *workers, work)
+		_ = os.RemoveAll(work)
+		if err != nil {
+			fmt.Fprintln(stderr, "gamut:", err)
+			return 1
+		}
+		for _, p := range stats.Skipped {
+			fmt.Fprintf(stderr, "gamut: warning: %s: not checked for equivalent mutants: %s\n", p, equiv.ErrUnsupported)
+		}
+		fmt.Fprintf(logw, "equivalent: %d survivors compiled, %d reused from the cache, %d equivalent in %s\n",
+			stats.Checked, stats.Reused, stats.Equivalent, time.Since(estart).Round(time.Millisecond))
 	}
 	var results []*run.Result
 	for _, rs := range perPackage {

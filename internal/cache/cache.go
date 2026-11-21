@@ -72,14 +72,22 @@ type Viability struct {
 	Viable  bool   `json:"viable"`
 }
 
+// Equivalence は、1 体の生き残りの変異体のコンパイル結果が元と同じかと、比べたときの鍵（Keys.Viability）である。
+type Equivalence struct {
+	Package string `json:"package"`
+	Key     string `json:"key"`
+	Equal   bool   `json:"equal"`
+}
+
 type fileFormat struct {
-	Version   int                   `json:"version"`
-	Env       string                `json:"env"`
-	Mutants   map[string]*Entry     `json:"mutants"`
-	Coverage  map[string]*Coverage  `json:"coverage,omitempty"`
-	Viability map[string]*Viability `json:"viability,omitempty"`
-	Quick     map[string]*Quick     `json:"quick,omitempty"`
-	LoadHints map[string][]string   `json:"load_hints,omitempty"`
+	Version     int                     `json:"version"`
+	Env         string                  `json:"env"`
+	Mutants     map[string]*Entry       `json:"mutants"`
+	Coverage    map[string]*Coverage    `json:"coverage,omitempty"`
+	Viability   map[string]*Viability   `json:"viability,omitempty"`
+	Equivalence map[string]*Equivalence `json:"equivalence,omitempty"`
+	Quick       map[string]*Quick       `json:"quick,omitempty"`
+	LoadHints   map[string][]string     `json:"load_hints,omitempty"`
 }
 
 // Store は、キャッシュファイルの内容を持つ。並行に使える。
@@ -95,6 +103,8 @@ type Store struct {
 	coverage map[string]*Coverage
 	// viability は、変異体の識別子から構築可能性の判定を引く。
 	viability map[string]*Viability
+	// equivalence は、変異体の識別子から、コンパイル結果の比較を引く。
+	equivalence map[string]*Equivalence
 	// quick は、実行の引数と設定の鍵から、前回の実行の入力の指紋と報告を引く。
 	quick map[string]*Quick
 	// loadHints は、読み込みのパターンと設定の鍵から、前回の読み込みでエクスポートデータを求めたパッケージを引く。
@@ -106,7 +116,8 @@ func pairKey(target, binary string) string { return target + " " + binary }
 // Open は path のキャッシュを読む。env が記録と違えば、記録をすべて捨てた空の Store を返す。
 // ファイルがないか、壊れているか、形式の版が違うときも空の Store を返す。
 func Open(path, env string) (*Store, error) {
-	s := &Store{path: path, env: env, entries: map[string]*Entry{}, coverage: map[string]*Coverage{}, viability: map[string]*Viability{}, quick: map[string]*Quick{}, loadHints: map[string][]string{}}
+	s := &Store{path: path, env: env, entries: map[string]*Entry{}, coverage: map[string]*Coverage{}, viability: map[string]*Viability{},
+		equivalence: map[string]*Equivalence{}, quick: map[string]*Quick{}, loadHints: map[string][]string{}}
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return s, nil
@@ -144,7 +155,11 @@ func Open(path, env string) (*Store, error) {
 				s.viability[k] = v
 			}
 		}
-
+		for k, v := range f.Equivalence {
+			if v != nil {
+				s.equivalence[k] = v
+			}
+		}
 	}
 	return s, nil
 }
@@ -196,6 +211,24 @@ func (s *Store) PutViable(id string, v *Viability) {
 	s.viability[id] = v
 }
 
+// Equivalent は、識別子 id の変異体のコンパイル結果の比較が鍵 key のものなら、その結果を返す。2 つ目の戻り値は記録を使えたかである。
+func (s *Store) Equivalent(id, key string) (bool, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	v := s.equivalence[id]
+	if v == nil || key == "" || v.Key != key {
+		return false, false
+	}
+	return v.Equal, true
+}
+
+// PutEquivalent は、識別子 id の変異体のコンパイル結果の比較を記録する。
+func (s *Store) PutEquivalent(id string, v *Equivalence) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.equivalence[id] = v
+}
+
 // Inherit は、from の記録を to へ写す。to に記録があれば何もしない。ファイルの名前を変えたときに前の判定を引き継ぐ。
 func (s *Store) Inherit(from, to string) bool {
 	s.mu.Lock()
@@ -235,12 +268,18 @@ func (s *Store) Prune(packages []string, live func(id string) bool) {
 			delete(s.viability, id)
 		}
 	}
+	for id, v := range s.equivalence {
+		if in[v.Package] && !live(id) {
+			delete(s.equivalence, id)
+		}
+	}
 }
 
 // Save は記録をファイルへ書く。同じディレクトリの一時ファイルに書いてから改名するので、途中で止まっても前のファイルは壊れない。
 func (s *Store) Save() (err error) {
 	s.mu.Lock()
-	data, err := json.Marshal(fileFormat{Version: formatVersion, Env: s.env, Mutants: s.entries, Coverage: s.coverage, Viability: s.viability, Quick: s.quick, LoadHints: s.loadHints})
+	data, err := json.Marshal(fileFormat{Version: formatVersion, Env: s.env, Mutants: s.entries, Coverage: s.coverage, Viability: s.viability,
+		Equivalence: s.equivalence, Quick: s.quick, LoadHints: s.loadHints})
 	s.mu.Unlock()
 	if err != nil {
 		return err

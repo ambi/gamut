@@ -45,6 +45,7 @@ go build -o bin/gamut ./cmd/gamut
 | `-mutant` | なし | この識別子（一意な前方一致でもよい）の変異体だけを、キャッシュを使わずに判定する。繰り返し指定できる |
 | `-integration` | false | 対象パッケージを import するモジュール内のパッケージのテストでも検出を試す |
 | `-isolate` | false | テストプロセスを変異体の間で使い回さず、変異体ごとに起動する |
+| `-detect-equivalent` | false | 生き残りごとにパッケージをコンパイルし、機械語が元と同じなら `EQUIVALENT` にする（ビルドキャッシュには書かない） |
 | `-cpuprofile` | なし | gamut 自身の CPU プロファイルの書き出し先（gamut の開発用） |
 
 フラグの既定値は、モジュールのルートの `gamut.json` で変えられる。
@@ -126,10 +127,15 @@ func Fast(a, b int) bool {
 要らなくなった受理は、要約と報告の `stale_accepted` に並ぶ。
 規則は [設計](docs/design.md#等価な変異体の受理) が定める。
 
+`-detect-equivalent` は、生き残りごとに変異を当てたパッケージをコンパイルし、機械語が元と同じもの（`x * 1` を `x / 1` にする変異体など）を `EQUIVALENT` にする。
+`go tool compile` を直接呼ぶので、共有のビルドキャッシュは増えない。
+規則は [設計](docs/design.md#等価な変異体の自動検出) が定める。
+
 JSON の報告は gomutants と同じ `files[].mutations[]` の形に、`reason`、`mode`、`tests`、`killed_by`、`cached`、`previously_killed_by` を足したものである。
 `-since` の外の変異体は `PENDING` で、最上位の `mutants_pending` に数え、`mutants_total` と効率には含めない。
 コメントで止めた変異体は `files[].mutations[]` に入れず、最上位の `ignored` に理由とともに並べ、`mutants_ignored` に数える。
 受理した変異体は `files[].mutations[]` に本当の状態のまま `accepted` を付け、`mutants_accepted` に数える。
+`EQUIVALENT` の変異体は `mutants_equivalent` に数え、`mutants_total` と効率には含めない。
 `files[].path` はモジュール相対のパスである。
 最上位の `package` は、1 パッケージならその import パス、複数なら引数に指定したパターンで、`packages` に判定したパッケージの import パスを並べる。
 
