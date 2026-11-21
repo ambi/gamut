@@ -151,6 +151,7 @@ func judge(args []string, stdout, stderr io.Writer, prune bool) int {
 	fs.Var(&reporterKinds, "reporter", "report format: text (the summary on stdout), gomutants (JSON), json (mutation-testing-elements), html, agent (one JSON document on stdout for coding agents), or simplify (surviving removals by function, as candidates for unneeded code) (repeatable; default text, plus gomutants with -o)")
 	reportDir := fs.String("report-dir", filepath.Join(".gamut", "report"), "write the json, html, and gomutants (without -o) reports to this directory")
 	annotations := fs.String("annotations", "", "also print the survivors to fix as CI annotations on stdout (values: github)")
+	maxDepth := fs.Int("max-depth", 0, "count a test as reaching a mutated site only within this many calls of module functions from the test function (0: no limit)")
 	var aridCalls, aridPackages multiFlag
 	fs.Var(&aridCalls, "arid-call", "do not mutate the arguments of, or remove, calls matching this glob on <package>.<Func> or <package>.<Type>.<Method> (repeatable)")
 	fs.Var(&aridPackages, "arid-package", "do not mutate the arguments of, or remove, calls into this package or its subpackages (repeatable)")
@@ -251,6 +252,10 @@ func judge(args []string, stdout, stderr io.Writer, prune bool) int {
 		"tags=" + *tags,
 		"test-flags=" + strings.Join(flags, " "),
 		fmt.Sprintf("timeout=%g,%s", *timeoutFactor, *timeoutMin),
+	}
+	// 深さの制限は到達の記録を変えるので、キャッシュの環境に含める。付けないときは足さず、既存のキャッシュを保つ。
+	if *maxDepth > 0 {
+		settings = append(settings, fmt.Sprintf("max-depth=%d", *maxDepth))
 	}
 	// 選択のない実行は、入力が前回と同じなら、読み込みもビルドもせずに前回の報告を返す。
 	quickable := !*noCache && !*dryRun && len(ids) == 0 && *since == "" && !prune
@@ -360,8 +365,20 @@ func judge(args []string, stdout, stderr io.Writer, prune bool) int {
 		Workers: *workers, TimeoutFactor: *timeoutFactor, TimeoutMin: *timeoutMin, Log: logw, Warn: stderr, TestFlags: flags,
 		Isolate: *isolate,
 	}
+	if *maxDepth < 0 {
+		fmt.Fprintln(stderr, "gamut: -max-depth must not be negative")
+		return exitError
+	}
+	opts.MaxDepth = *maxDepth
 	var unrepeatableMu sync.Mutex
 	var unrepeatable []string
+	depthTests, depthReaches := 0, 0
+	opts.DepthExcluded = func(_ string, tests, reaches int) {
+		unrepeatableMu.Lock()
+		defer unrepeatableMu.Unlock()
+		depthTests += tests
+		depthReaches += reaches
+	}
 	opts.Unrepeatable = func(pkg string, tests []string) {
 		unrepeatableMu.Lock()
 		defer unrepeatableMu.Unlock()
@@ -493,6 +510,7 @@ func judge(args []string, stdout, stderr io.Writer, prune bool) int {
 	rep.AddIgnored(ignored)
 	rep.MutantsArid = aridSkipped
 	rep.UnrepeatableTests = slices.Sorted(slices.Values(unrepeatable))
+	rep.MaxDepthExcludedTests, rep.MaxDepthExcludedReaches = depthTests, depthReaches
 	for _, s := range skippedPkgs {
 		rep.SkippedPackages = append(rep.SkippedPackages, report.SkippedPackage{Package: s.ImportPath, Reason: s.Reason})
 	}

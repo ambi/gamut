@@ -22,7 +22,7 @@ import (
 )
 
 // HelperImports は、schemata の補助ファイルが import する標準パッケージである。
-var HelperImports = []string{"os", "strconv", "sync", "sync/atomic"}
+var HelperImports = []string{"os", "runtime", "strconv", "strings", "sync", "sync/atomic"}
 
 // Package は、変異の対象とする 1 つのパッケージである。
 type Package struct {

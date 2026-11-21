@@ -119,6 +119,10 @@ type Report struct {
 	// UnrepeatableTests は、同じプロセスで 2 回目に失敗したテストの名前である。それが到達する変異体は、プロセスを使い回さずに判定した。
 	// gomutants にはないフィールドである。
 	UnrepeatableTests []string `json:"unrepeatable_tests,omitempty"`
+	// MaxDepthExcludedTests は、-max-depth を超えてだけ変異箇所に到達したので、その箇所の到達から除いたテストの数である。
+	// MaxDepthExcludedReaches は、除いた到達（テストと変異箇所の組）の数である。gomutants にはないフィールドである。
+	MaxDepthExcludedTests   int `json:"max_depth_excluded_tests,omitempty"`
+	MaxDepthExcludedReaches int `json:"max_depth_excluded_reaches,omitempty"`
 	// SkippedPackages は、パターンに当たったが判定できずに飛ばしたパッケージ（cgo の前処理ができないものなど）である。
 	// gomutants にはないフィールドである。
 	SkippedPackages []SkippedPackage `json:"skipped_packages,omitempty"`
@@ -426,6 +430,9 @@ func WriteSummary(w io.Writer, r *Report) {
 	}
 	if r.MutantsIgnored > 0 {
 		reused += fmt.Sprintf(", %d ignored by comments", r.MutantsIgnored)
+	}
+	if r.MaxDepthExcludedTests > 0 {
+		reused += fmt.Sprintf(", %d tests reaching %d sites only beyond -max-depth not counted", r.MaxDepthExcludedTests, r.MaxDepthExcludedReaches)
 	}
 	if r.MutantsArid > 0 {
 		reused += fmt.Sprintf(", %d skipped in arid code", r.MutantsArid)

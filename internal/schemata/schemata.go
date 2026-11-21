@@ -745,7 +745,9 @@ package %s
 
 import (
 	"os"
+	gamutRuntime "runtime"
 	"strconv"
+	gamutStrings "strings"
 	"sync"
 	"sync/atomic"
 )
@@ -754,10 +756,17 @@ var gamutActive = gamutEnvInt("GAMUT_MUTANT")
 
 var gamutCovering = os.Getenv("GAMUT_COVER") != ""
 
+// gamutMaxDepth が正なら、被覆の記録で、テスト関数から gamutModule の関数のフレームを数えてこの深さを超える到達と感染を記録しない。
 var (
-	gamutHits     [%d]atomic.Bool
-	gamutInfected [%d]atomic.Bool
-	gamutEntered  [%d]atomic.Bool
+	gamutMaxDepth = gamutEnvInt("GAMUT_MAX_DEPTH")
+	gamutModule   = os.Getenv("GAMUT_MODULE")
+)
+
+var (
+	gamutHits     [%[2]d]atomic.Bool
+	gamutDeep     [%[2]d]atomic.Bool
+	gamutInfected [%[3]d]atomic.Bool
+	gamutEntered  [%[4]d]atomic.Bool
 	gamutMu       sync.Mutex
 	gamutOut      *os.File
 )
@@ -767,15 +776,53 @@ func gamutEnvInt(name string) int {
 	return v
 }
 
-// gamutHit は到達を記録する。GAMUT_MUTANT が %d なら、選択の変数が読まれたことを示すために panic する。
+// gamutHit は到達を記録する。GAMUT_MUTANT が %[5]d なら、選択の変数が読まれたことを示すために panic する。
+// 深さの制限を超える到達は、到達ではなく「d」として記録する。
 func gamutHit(i int) {
-	if gamutActive == %d {
+	if gamutActive == %[5]d {
 		panic("gamut: forced fail")
+	}
+	if gamutHits[i].Load() {
+		return
+	}
+	if gamutMaxDepth > 0 && gamutTooDeep() {
+		gamutRecord(&gamutDeep[i], 'd', i)
+		return
 	}
 	gamutRecord(&gamutHits[i], 'h', i)
 }
 
-func gamutInfect(i int) { gamutRecord(&gamutInfected[i], 'i', i) }
+func gamutInfect(i int) {
+	if gamutInfected[i].Load() || gamutMaxDepth > 0 && gamutTooDeep() {
+		return
+	}
+	gamutRecord(&gamutInfected[i], 'i', i)
+}
+
+// gamutTooDeep は、呼び出し元の変異箇所が、テスト関数（testing.tRunner が呼ぶ関数）から gamutModule の関数のフレームを数えて
+// gamutMaxDepth より深いかを返す。変異箇所を含む関数を 1 と数え、テスト関数自身は数えない。gamut の補助の関数は数えない。
+// 同じ宣言の関数のフレームが続けば（関数リテラル、schemata が包む関数、再帰）、1 つと数える。
+// テスト関数の下にない呼び出し（パッケージの初期化、テストが起動したゴルーチン）は制限しない。
+func gamutTooDeep() bool {
+	var pcs [256]uintptr
+	n := gamutRuntime.Callers(3, pcs[:])
+	frames := gamutRuntime.CallersFrames(pcs[:n])
+	depth, last := 0, ""
+	for {
+		f, more := frames.Next()
+		if f.Function == "testing.tRunner" {
+			return depth-1 > gamutMaxDepth
+		}
+		if decl := gamutDecl(f.Function); decl != "" && decl != last {
+			depth++
+			last = decl
+		}
+		if !more {
+			// 記録しきれないほど深いなら、制限を超えるとみなす。
+			return n == len(pcs)
+		}
+	}
+}
 
 // GamutSetActive は、有効にする変異体を i に切り替える。1 つのテストプロセスで変異体を順に判定するときに、テストの合間に呼ばれる。
 func GamutSetActive(i int) { gamutActive = i }
@@ -801,6 +848,7 @@ func GamutTestStart(name string) {
 	defer gamutMu.Unlock()
 	for i := range gamutHits {
 		gamutHits[i].Store(false)
+		gamutDeep[i].Store(false)
 	}
 	for i := range gamutInfected {
 		gamutInfected[i].Store(false)
@@ -811,6 +859,25 @@ func GamutTestStart(name string) {
 	if gamutOpen() {
 		_, _ = gamutOut.Write([]byte("t " + name + "\n"))
 	}
+}
+
+// gamutDecl は、関数名 fn（<import パス>.<名前>[型引数]）が gamutModule の関数なら、それを囲む宣言の名前を返す。
+// 関数リテラル（<宣言>.funcN、<宣言>.funcN.M）は囲む宣言の名前にする。gamut の補助の関数とモジュールの外の関数は空を返す。
+func gamutDecl(fn string) string {
+	fn, _, _ = gamutStrings.Cut(fn, "[")
+	if !gamutStrings.HasPrefix(fn, gamutModule+"/") && !gamutStrings.HasPrefix(fn, gamutModule+".") {
+		return ""
+	}
+	slash := gamutStrings.LastIndex(fn, "/") + 1
+	if gamutStrings.Contains(fn[slash:], ".gamut") {
+		return ""
+	}
+	for i := slash; i < len(fn); i++ {
+		if gamutStrings.HasPrefix(fn[i:], ".func") && i+5 < len(fn) && fn[i+5] >= '0' && fn[i+5] <= '9' {
+			return fn[:i]
+		}
+	}
+	return fn
 }
 
 // gamutOpen は、記録のファイルを開く。gamutMu を持って呼ぶ。

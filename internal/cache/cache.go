@@ -63,6 +63,8 @@ type TestRecord struct {
 	Infected []string `json:"infected,omitempty"`
 	// Duration は、被覆の記録の実行時間（ナノ秒）である。
 	Duration int64 `json:"duration"`
+	// Deep は、深さの制限を超えてだけ到達した変異箇所の鍵である。到達には数えない。
+	Deep []string `json:"deep,omitempty"`
 	// Unrepeatable は、同じプロセスで 2 回目に失敗したかである。
 	Unrepeatable bool `json:"unrepeatable,omitempty"`
 }

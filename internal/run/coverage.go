@@ -60,6 +60,26 @@ type testCase struct {
 	measured bool
 	// unrepeatable は、同じプロセスで 2 回目に失敗したかである。そのようなテストを含む変異体は、プロセスを使い回さずに判定する。
 	unrepeatable bool
+	// deep は、深さの制限（Options.MaxDepth）を超えて到達した変異箇所の番号である。到達には数えない。
+	deep map[int]bool
+}
+
+func (t *testCase) markDeep(site int) {
+	if t.deep == nil {
+		t.deep = map[int]bool{}
+	}
+	t.deep[site] = true
+}
+
+// deepOnly は、深さの制限を超えてだけ到達した変異箇所の数を返す。
+func (t *testCase) deepOnly() int {
+	n := 0
+	for site := range t.deep {
+		if !t.hits[site] {
+			n++
+		}
+	}
+	return n
 }
 
 func newTestCase(b *binary, local, key string) *testCase {
@@ -513,6 +533,18 @@ func cover(ctx context.Context, active []*unit, opts Options, p *pool, logf func
 	for _, u := range active {
 		u.changed = opts.Select.changedTests(u)
 		u.saveCoverage(opts.Cache)
+		if opts.DepthExcluded != nil {
+			tests, reaches := 0, 0
+			for _, t := range u.tests {
+				if n := t.deepOnly(); n > 0 {
+					tests++
+					reaches += n
+				}
+			}
+			if tests > 0 {
+				opts.DepthExcluded(u.Pkg.ImportPath, tests, reaches)
+			}
+		}
 		if opts.Unrepeatable != nil {
 			var names []string
 			for _, t := range u.tests {
@@ -602,7 +634,7 @@ func coverChunk(ctx context.Context, tests []*testCase, path string, opts Option
 		quoted[i] = regexp.QuoteMeta(t.local)
 	}
 	start := time.Now()
-	cmd := testCommand(ctx, b.dir, b.path, opts.TestFlags, []string{"GAMUT_COVER=" + path, "GAMUT_MUTANT=0"},
+	cmd := testCommand(ctx, b.dir, b.path, opts.TestFlags, opts.coverEnv(path, "GAMUT_MUTANT=0"),
 		"-test.run", "^(?:"+strings.Join(quoted, "|")+")$", "-test.count=1", "-test.parallel=1", "-test.v", "-test.paniconexit0")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -617,13 +649,22 @@ func coverChunk(ctx context.Context, tests []*testCase, path string, opts Option
 	return splitRecords(tests, path, durations, time.Since(start))
 }
 
+// coverEnv は、被覆を path に記録させる環境変数に、extra と深さの制限を足して返す。
+func (o Options) coverEnv(path string, extra ...string) []string {
+	env := append([]string{"GAMUT_COVER=" + path}, extra...)
+	if o.MaxDepth > 0 {
+		env = append(env, "GAMUT_MAX_DEPTH="+strconv.Itoa(o.MaxDepth), "GAMUT_MODULE="+o.module)
+	}
+	return env
+}
+
 // coverServed は、tests を判定のテストのプロセスで変異なしで実行して被覆を記録し、記録を境目で振り分ける。
 // 成功したら、そのプロセスは被覆の記録を止めて、変異体の判定のために p に戻る。テストの変数の初期化を、被覆と判定で 1 回にする。
 // 失敗したら、プロセスを捨てて偽を返す。
 func coverServed(ctx context.Context, tests []*testCase, path string, opts Options, p *pool) bool {
 	b := tests[0].bin
 	start := time.Now()
-	s, err := startServer(ctx, b, opts, []string{"GAMUT_COVER=" + path})
+	s, err := startServer(ctx, b, opts, opts.coverEnv(path))
 	if err != nil {
 		return false
 	}
@@ -681,11 +722,13 @@ func splitRecords(tests []*testCase, path string, durations map[string]time.Dura
 			cur.infected[n] = true
 		case "e":
 			cur.entered[n] = true
+		case "d":
+			cur.markDeep(n)
 		}
 	}
 	if cur == nil || len(seen) != len(tests) {
 		for _, t := range tests {
-			t.hits, t.infected, t.entered = map[int]bool{}, map[int]bool{}, map[int]bool{}
+			t.hits, t.infected, t.entered, t.deep = map[int]bool{}, map[int]bool{}, map[int]bool{}, nil
 		}
 		return false
 	}
@@ -693,6 +736,9 @@ func splitRecords(tests []*testCase, path string, durations map[string]time.Dura
 		maps.Copy(t.hits, common.hits)
 		maps.Copy(t.infected, common.infected)
 		maps.Copy(t.entered, common.entered)
+		for n := range common.deep {
+			t.markDeep(n)
+		}
 		t.duration = durations[t.local]
 		if t.duration == 0 {
 			t.duration = elapsed / time.Duration(len(tests))
@@ -729,7 +775,7 @@ func probeRevDeps(ctx context.Context, measure []*testCase, opts Options) []*tes
 		for k, t := range ts {
 			quoted[k] = regexp.QuoteMeta(t.local)
 		}
-		cmd := testCommand(ctx, b.dir, b.path, opts.TestFlags, []string{"GAMUT_COVER=" + path, "GAMUT_MUTANT=0"},
+		cmd := testCommand(ctx, b.dir, b.path, opts.TestFlags, opts.coverEnv(path, "GAMUT_MUTANT=0"),
 			"-test.run", "^(?:"+strings.Join(quoted, "|")+")$", "-test.count=1", "-test.paniconexit0")
 		if err := cmd.Run(); err != nil {
 			return
@@ -865,6 +911,11 @@ func (r *restorer) restore(t *testCase, rec *cache.TestRecord) {
 	}
 	t.duration = time.Duration(rec.Duration)
 	t.unrepeatable = rec.Unrepeatable
+	for _, d := range rec.Deep {
+		if s := r.sites[d]; s != nil {
+			t.markDeep(s.Index)
+		}
+	}
 	for _, h := range rec.Hits {
 		t.hits[r.sites[h].Index] = true
 	}
@@ -911,6 +962,12 @@ func (u *unit) saveCoverage(store *cache.Store) {
 			for i := range t.infected {
 				rec.Infected = append(rec.Infected, mutantByIndex[i])
 			}
+			for i := range t.deep {
+				if s := siteByIndex[i]; s != nil && !t.hits[i] {
+					rec.Deep = append(rec.Deep, s.Mutants[0].SiteKey)
+				}
+			}
+			slices.Sort(rec.Deep)
 			rec.Reach = slices.Sorted(maps.Keys(reach))
 			slices.Sort(rec.Hits)
 			slices.Sort(rec.Infected)
@@ -924,7 +981,7 @@ func (u *unit) saveCoverage(store *cache.Store) {
 func coverTest(ctx context.Context, t *testCase, path string, opts Options) error {
 	b := t.bin
 	start := time.Now()
-	cmd := testCommand(ctx, b.dir, b.path, opts.TestFlags, []string{"GAMUT_COVER=" + path, "GAMUT_MUTANT=0"},
+	cmd := testCommand(ctx, b.dir, b.path, opts.TestFlags, opts.coverEnv(path, "GAMUT_MUTANT=0"),
 		"-test.run", "^"+regexp.QuoteMeta(t.local)+"$", "-test.count=1", "-test.paniconexit0")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -948,6 +1005,8 @@ func coverTest(ctx context.Context, t *testCase, path string, opts Options) erro
 			t.infected[n] = true
 		case "e":
 			t.entered[n] = true
+		case "d":
+			t.markDeep(n)
 		}
 	}
 	return nil

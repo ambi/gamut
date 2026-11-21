@@ -1,5 +1,5 @@
 ---
-status: pending
+status: done
 stage: 4
 depends_on: []
 created_at: 2026-11-20
@@ -35,3 +35,12 @@ created_at: 2026-11-20
 ## 検証
 
 - 端から端までのテスト。
+
+## 要約
+
+- `-max-depth` を足した。被覆の記録のときだけ、補助の `gamutHit` と `gamutInfect` が `runtime.Callers` で最も近い `testing.tRunner` までのフレームをたどり、モジュール内の関数を数える。制限を超える到達は「d」として記録し、到達にも感染にも数えない。
+- schemata が変異箇所を関数リテラルで包むので、同じ宣言の関数のフレームが続けば 1 つと数えることにした（設計の「呼び出しの深さの制限」）。
+- 補助が新たに import する `runtime` と `strings` は、対象パッケージの識別子と衝突しないよう別名で import する。
+- 深さの制限をキャッシュの環境に含め、制限を超えてだけ到達した箇所を被覆の記録の `deep` に残す。除いたテストと到達の数を、報告の `max_depth_excluded_tests`、`max_depth_excluded_reaches` と要約に出す。
+- 固定モジュール `testdata/depth`（深さ 3 で到達するテストと、サブテストから深さ 1 で到達するテスト）の端から端までのテスト（`TestMaxDepth`）で、制限 2 では深いテストが到達から除かれ、制限 3 と制限なしでは除かれないことを、被覆を測る実行と記録を戻す実行の両方で表明した。
+- idmagic の `usecases` では、制限 4 で 9 件のテストの 123 の到達を除き、6.9 秒が 5.7 秒になった。`NOT COVERED` は 113 体から 136 体に増えた。

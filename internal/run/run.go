@@ -75,6 +75,13 @@ type Options struct {
 	TimeoutMin time.Duration
 	// Log は進行状況の出力先である。nil なら出さない。
 	Log io.Writer
+	// module は対象のモジュールのパスで、深さを数える関数を見分けるために、All が入れる。
+	module string
+	// MaxDepth が正なら、被覆の記録で、テスト関数から変異箇所までのモジュール内の関数の呼び出しの深さがこれを超える到達を数えない。
+	MaxDepth int
+	// DepthExcluded は、パッケージごとに、深さの制限で到達から除いたテストの数と、除いた到達（テストと変異箇所の組）の数を受け取る。
+	// 被覆の記録の後に呼ぶ。
+	DepthExcluded func(pkg string, tests, reaches int)
 	// Unrepeatable は、パッケージごとに、同じプロセスで 2 回目に失敗したテストの名前を受け取る。被覆の記録の後に呼ぶ。
 	// パッケージは並列に進むので、複数のゴルーチンから呼ばれうる。
 	Unrepeatable func(pkg string, tests []string)
@@ -180,6 +187,9 @@ type job struct {
 func All(ctx context.Context, targets []Target, opts Options) ([][]*Result, error) {
 	if opts.Workers < 1 {
 		opts.Workers = 1
+	}
+	if len(targets) > 0 {
+		opts.module = targets[0].Pkg.ModulePath
 	}
 	// パッケージごとの準備と自己検査は並列に進むので、出力先への書き込みを直列にする。
 	var outMu sync.Mutex

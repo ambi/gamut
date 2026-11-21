@@ -20,6 +20,8 @@ type mutation struct {
 	// KilledBy と PreviouslyKilledBy は、検出したテストと、消えた前回の検出テストである。
 	KilledBy           string `json:"killed_by"`
 	PreviouslyKilledBy string `json:"previously_killed_by"`
+	// Tests は、変異箇所に到達したテストである。
+	Tests []string `json:"tests"`
 }
 
 // scope は識別子から囲む宣言の名前を取り出す。
