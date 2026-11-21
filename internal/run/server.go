@@ -125,20 +125,21 @@ const (
 // run は、変異体 index を有効にして names を順に実行する。最初に失敗したテストの名前を返す。
 // プロセスが落ちたら（panic、os.Exit）、そのとき実行していたテストが検出したとする。
 func (s *server) run(ctx context.Context, index int, names []string, limit time.Duration) (served, string) {
-	outcome, name, _ := s.do(ctx, strconv.Itoa(index), names, limit)
+	outcome, name, _, _ := s.do(ctx, strconv.Itoa(index), names, limit)
 	return outcome, name
 }
 
-// cover は、names を変異なしで順に実行して被覆を記録させ、各テストの所要時間を返す。終わると、プロセスは被覆の記録を止める。
-func (s *server) cover(ctx context.Context, names []string) (served, map[string]time.Duration) {
-	outcome, _, durations := s.do(ctx, "cover", names, 0)
-	return outcome, durations
+// cover は、names を変異なしで順に実行して被覆を記録させ、各テストの所要時間と、同じプロセスで 2 回目に失敗したテストの名前を返す。
+// 終わると、プロセスは被覆の記録を止める。
+func (s *server) cover(ctx context.Context, names []string) (served, map[string]time.Duration, []string) {
+	outcome, _, durations, unrepeatable := s.do(ctx, "cover", names, 0)
+	return outcome, durations, unrepeatable
 }
 
 // do は、命令 head と names を送り、結果を待つ。limit が 0 なら時間を区切らない。
-func (s *server) do(ctx context.Context, head string, names []string, limit time.Duration) (served, string, map[string]time.Duration) {
+func (s *server) do(ctx context.Context, head string, names []string, limit time.Duration) (outcome served, failed string, durations map[string]time.Duration, unrepeatable []string) {
 	if _, err := fmt.Fprintf(s.in, "%s %s\n", head, strings.Join(names, " ")); err != nil {
-		return servedDied, "", nil
+		return servedDied, "", nil, nil
 	}
 	var expired <-chan time.Time
 	if limit > 0 {
@@ -147,13 +148,13 @@ func (s *server) do(ctx context.Context, head string, names []string, limit time
 		expired = timer.C
 	}
 	current := ""
-	durations := map[string]time.Duration{}
+	durations = map[string]time.Duration{}
 	for {
 		select {
 		case line, ok := <-s.lines:
 			switch {
 			case !ok:
-				return servedDied, current, durations
+				return servedDied, current, durations, unrepeatable
 			case strings.HasPrefix(line, "run "):
 				current = strings.TrimPrefix(line, "run ")
 			case strings.HasPrefix(line, "d "):
@@ -162,15 +163,17 @@ func (s *server) do(ctx context.Context, head string, names []string, limit time
 						durations[name] = time.Duration(n)
 					}
 				}
+			case strings.HasPrefix(line, "u "):
+				unrepeatable = append(unrepeatable, strings.TrimPrefix(line, "u "))
 			case line == "pass":
-				return servedPass, "", durations
+				return servedPass, "", durations, unrepeatable
 			case strings.HasPrefix(line, "fail "):
-				return servedFail, strings.TrimPrefix(line, "fail "), durations
+				return servedFail, strings.TrimPrefix(line, "fail "), durations, unrepeatable
 			}
 		case <-expired:
-			return servedTimeout, current, durations
+			return servedTimeout, current, durations, unrepeatable
 		case <-ctx.Done():
-			return servedTimeout, current, durations
+			return servedTimeout, current, durations, unrepeatable
 		}
 	}
 }

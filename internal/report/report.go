@@ -110,6 +110,9 @@ type Report struct {
 	// MutantsArid は、テストが観測しないことの多いコード（ログ出力など、arid）の中なので作らなかった変異体の数である。
 	// gomutants にはないフィールドである。
 	MutantsArid int `json:"mutants_arid,omitempty"`
+	// UnrepeatableTests は、同じプロセスで 2 回目に失敗したテストの名前である。それが到達する変異体は、プロセスを使い回さずに判定した。
+	// gomutants にはないフィールドである。
+	UnrepeatableTests []string `json:"unrepeatable_tests,omitempty"`
 	// MutantsIgnored は、無効化コメントで止めた変異体の数である。MutantsTotal と効率の計算には含めない。gomutants にはないフィールドである。
 	MutantsIgnored int     `json:"mutants_ignored,omitempty"`
 	ElapsedTime    float64 `json:"elapsed_time"`
@@ -385,6 +388,12 @@ func WriteSummary(w io.Writer, r *Report) {
 		fmt.Fprintf(w, "\n"+why.title+"\n", len(stale))
 		for _, s := range stale {
 			fmt.Fprintf(w, "  %s  (%s)\n", s.ID, s.Reason)
+		}
+	}
+	if len(r.UnrepeatableTests) > 0 {
+		fmt.Fprintf(w, "\nunrepeatable tests (%d): these fail when run twice in one process, so mutants they reach ran in fresh processes; reset the state they leave behind (t.Cleanup) to make the run faster\n", len(r.UnrepeatableTests))
+		for _, name := range r.UnrepeatableTests {
+			fmt.Fprintf(w, "  %s\n", name)
 		}
 	}
 	reused := ""

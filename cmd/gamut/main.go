@@ -357,6 +357,19 @@ func judge(args []string, stdout, stderr io.Writer, prune bool) int {
 		Workers: *workers, TimeoutFactor: *timeoutFactor, TimeoutMin: *timeoutMin, Log: logw, Warn: stderr, TestFlags: flags,
 		Isolate: *isolate,
 	}
+	var unrepeatableMu sync.Mutex
+	var unrepeatable []string
+	opts.Unrepeatable = func(pkg string, tests []string) {
+		unrepeatableMu.Lock()
+		defer unrepeatableMu.Unlock()
+		for _, name := range tests {
+			// 複数のパッケージを判定するときは、どのパッケージのテストかを名前に付ける。
+			if len(targets) > 1 {
+				name = pkg + "." + name
+			}
+			unrepeatable = append(unrepeatable, name)
+		}
+	}
 	var changes *diff.Changes
 	switch {
 	case len(ids) > 0:
@@ -476,6 +489,7 @@ func judge(args []string, stdout, stderr io.Writer, prune bool) int {
 	rep := report.Build(pkgs[0].ModulePath, label, paths, results, time.Since(start))
 	rep.AddIgnored(ignored)
 	rep.MutantsArid = aridSkipped
+	rep.UnrepeatableTests = slices.Sorted(slices.Values(unrepeatable))
 	rep.MarkCritical(criticalIDs)
 	rep.Thresholds = &thresholds
 	// 識別子で指定したときは、ほかの変異体を報告しないので、受理の「なくなった」は判定できない。

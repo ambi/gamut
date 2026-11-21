@@ -99,6 +99,9 @@ func (r *Report) Agent(moduleDir string) (*AgentReport, error) {
 	for _, d := range slices.Sorted(maps.Keys(dirs)) {
 		out.Warnings = append(out.Warnings, testWarnings(moduleDir, d)...)
 	}
+	for _, name := range r.UnrepeatableTests {
+		out.Warnings = append(out.Warnings, fmt.Sprintf("%s fails when run twice in one process (go test -count=2), so it leaves state behind; reset that state with t.Cleanup so the test is independent of earlier runs", name))
+	}
 	return out, nil
 }
 

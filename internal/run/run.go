@@ -75,6 +75,9 @@ type Options struct {
 	TimeoutMin time.Duration
 	// Log は進行状況の出力先である。nil なら出さない。
 	Log io.Writer
+	// Unrepeatable は、パッケージごとに、同じプロセスで 2 回目に失敗したテストの名前を受け取る。被覆の記録の後に呼ぶ。
+	// パッケージは並列に進むので、複数のゴルーチンから呼ばれうる。
+	Unrepeatable func(pkg string, tests []string)
 	// Warn は警告の出力先である。nil なら出さない。
 	Warn io.Writer
 	// TestFlags は、テストバイナリのすべての実行に渡すフラグである。ParseTestFlags で作る。
@@ -371,7 +374,7 @@ func (u *unit) jobs(ctx context.Context, opts Options, srv *pool) []job {
 		default:
 			j = &job{mode: ModeSchemata, reached: reached, ran: infected, estimate: total(infected), run: func() *Result {
 				var r *Result
-				if srv != nil && u.canServe(infected) {
+				if srv != nil && u.canServe(infected) && !slices.ContainsFunc(infected, func(t *testCase) bool { return t.unrepeatable }) {
 					r = u.serve(ctx, m, infected, opts, srv)
 				} else {
 					r = u.execute(ctx, m, infected, opts, func(b *binary) (string, error) { return b.path, nil })

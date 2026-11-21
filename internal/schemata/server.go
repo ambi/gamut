@@ -24,6 +24,7 @@ const ServerFileName = "gamut_server_test.go"
 // 各テストを始める前に「run <名前>」を、終わったら「pass」か「fail <名前>」を、ファイル記述子 3 へ書く。
 // 「cover テスト名...」の行は、変異なしでテストを順に実行して被覆を記録し、各テストの所要時間を「d <名前> <ナノ秒>」で書き、
 // 最後に被覆の記録を止める。被覆を測ったプロセスを、そのまま変異体の判定に使い回すために使う。
+// 各テストは同じプロセスでもう一度実行し、2 回目に失敗すれば「u <名前>」を書く（繰り返し実行できないテスト）。
 type Server struct {
 	// Path と Src は、overlay で足すファイルのパスと内容である。
 	Path string
@@ -133,6 +134,10 @@ func %s(t *testing.T) {
 			}
 			if cover {
 				fmt.Fprintf(out, "d %%s %%d\n", name, time.Since(start))
+				// 同じプロセスでもう一度実行する。失敗するテストは状態を持ち越すので、使い回すプロセスでは判定を誤りうる。
+				if !t.Run("g", func(t *testing.T) { t.Run(name, fn) }) {
+					fmt.Fprintln(out, "u "+name)
+				}
 			}
 		}
 		if cover {

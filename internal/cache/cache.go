@@ -63,6 +63,8 @@ type TestRecord struct {
 	Infected []string `json:"infected,omitempty"`
 	// Duration は、被覆の記録の実行時間（ナノ秒）である。
 	Duration int64 `json:"duration"`
+	// Unrepeatable は、同じプロセスで 2 回目に失敗したかである。
+	Unrepeatable bool `json:"unrepeatable,omitempty"`
 }
 
 // Viability は、1 体の変異体の構築可能性の判定と、判定したときの鍵（Keys.Viability）である。

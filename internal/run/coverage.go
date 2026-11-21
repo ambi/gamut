@@ -58,6 +58,8 @@ type testCase struct {
 	key string
 	// measured は、今回の実行で被覆を測ったかである。偽ならキャッシュの記録から戻した。
 	measured bool
+	// unrepeatable は、同じプロセスで 2 回目に失敗したかである。そのようなテストを含む変異体は、プロセスを使い回さずに判定する。
+	unrepeatable bool
 }
 
 func newTestCase(b *binary, local, key string) *testCase {
@@ -511,6 +513,17 @@ func cover(ctx context.Context, active []*unit, opts Options, p *pool, logf func
 	for _, u := range active {
 		u.changed = opts.Select.changedTests(u)
 		u.saveCoverage(opts.Cache)
+		if opts.Unrepeatable != nil {
+			var names []string
+			for _, t := range u.tests {
+				if t.unrepeatable {
+					names = append(names, t.name)
+				}
+			}
+			if len(names) > 0 {
+				opts.Unrepeatable(u.Pkg.ImportPath, names)
+			}
+		}
 		for _, b := range u.bins[1:] {
 			if !slices.ContainsFunc(b.tests, func(t *testCase) bool { return len(t.hits) > 0 }) {
 				logf("integration: %s: no test of %s reaches a mutated site", u.Pkg.ImportPath, b.pkg)
@@ -614,7 +627,7 @@ func coverServed(ctx context.Context, tests []*testCase, path string, opts Optio
 	if err != nil {
 		return false
 	}
-	outcome, durations := s.cover(ctx, testNames(tests))
+	outcome, durations, unrepeatable := s.cover(ctx, testNames(tests))
 	if outcome != servedPass {
 		s.close()
 		return false
@@ -622,6 +635,9 @@ func coverServed(ctx context.Context, tests []*testCase, path string, opts Optio
 	if !splitRecords(tests, path, durations, time.Since(start)) {
 		s.close()
 		return false
+	}
+	for _, t := range tests {
+		t.unrepeatable = slices.Contains(unrepeatable, t.local)
 	}
 	p.put(b, s)
 	return true
@@ -848,6 +864,7 @@ func (r *restorer) restore(t *testCase, rec *cache.TestRecord) {
 		return
 	}
 	t.duration = time.Duration(rec.Duration)
+	t.unrepeatable = rec.Unrepeatable
 	for _, h := range rec.Hits {
 		t.hits[r.sites[h].Index] = true
 	}
@@ -881,7 +898,7 @@ func (u *unit) saveCoverage(store *cache.Store) {
 	for _, b := range u.bins {
 		cov := &cache.Coverage{Imports: u.Keys.Imports(), Init: u.Keys.Init(), Levels: levels, Tests: map[string]*cache.TestRecord{}}
 		for _, t := range b.tests {
-			rec := &cache.TestRecord{Key: t.key, Duration: int64(t.duration)}
+			rec := &cache.TestRecord{Key: t.key, Duration: int64(t.duration), Unrepeatable: t.unrepeatable}
 			reach := map[string]bool{}
 			for i := range t.entered {
 				reach[u.Keys.ReachOf(u.sch.Funcs[i-1])] = true
