@@ -1,5 +1,5 @@
 ---
-status: pending
+status: done
 stage: 3
 depends_on: []
 created_at: 2026-11-21
@@ -34,3 +34,10 @@ created_at: 2026-11-21
 ## 検証
 
 - 引数の解釈の単体テストと、`-disable` を付けた端から端までのテスト。
+
+## 要約
+
+- 演算子の説明と例を `mutant.Infos`（`internal/mutant/info.go`）に 1 か所で定めた。`-list-mutators` は、名前、既定（`default`）か既定で無効（`opt-in`）か、説明、例を表にして出し、パッケージの指定なしで終わる。
+- README の一覧は自動では作らず、全演算子の名前を挙げることを単体テスト（`TestInfos_MatchTheReadme`）で確かめる形にした。README は日本語の説明を持ち、`-list-mutators` の英語の説明と文が違うためである。
+- `-disable` は既定の集合から演算子を外す。`-only` との併用と未知の名前は終了コード 1 にした（014 で引数の誤りを 1 にしたので、作業項目の「終了コード 2」から変わった）。
+- 端から端までのテスト（`TestListMutators`、`TestDisable_RemovesOperatorsFromTheDefaultSet`）で、一覧の行と、外した演算子の変異体が列挙されないことを表明した。

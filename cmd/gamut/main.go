@@ -20,6 +20,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"text/tabwriter"
 	"time"
 
 	"github.com/ambi/gamut/internal/accept"
@@ -118,7 +119,9 @@ func judge(args []string, stdout, stderr io.Writer, prune bool) int {
 	fs := flag.NewFlagSet("gamut", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	workers := fs.Int("workers", max(1, runtime.NumCPU()/2), "number of parallel test processes")
-	only := fs.String("only", "", "comma-separated mutator types to run (default: all)")
+	only := fs.String("only", "", "comma-separated mutator types to run, opt-in ones included (default: the default set; see -list-mutators)")
+	disable := fs.String("disable", "", "comma-separated mutator types to remove from the default set; cannot be combined with -only")
+	listMutators := fs.Bool("list-mutators", false, "print every mutator type with its description, example, and whether it is in the default set, then exit")
 	output := fs.String("o", "", "write the JSON report to this path")
 	dryRun := fs.Bool("dry-run", false, "list mutants and their viability without running tests")
 	timeoutFactor := fs.Float64("timeout-factor", 5, "multiply the selected tests' baseline time by this for the per-mutant timeout")
@@ -161,6 +164,10 @@ func judge(args []string, stdout, stderr io.Writer, prune bool) int {
 	if err := fs.Parse(args); err != nil {
 		return exitError
 	}
+	if *listMutators {
+		writeMutators(stdout)
+		return exitOK
+	}
 	if fs.NArg() < 1 {
 		fs.Usage()
 		return exitError
@@ -188,7 +195,7 @@ func judge(args []string, stdout, stderr io.Writer, prune bool) int {
 		fmt.Fprintln(stderr, "gamut:", err)
 		return exitError
 	}
-	types, err := parseTypes(*only)
+	types, err := selectTypes(*only, *disable)
 	if err != nil {
 		fmt.Fprintln(stderr, "gamut:", err)
 		return exitError
@@ -966,19 +973,47 @@ func splitTags(s string) []string {
 	return out
 }
 
-func parseTypes(s string) ([]mutant.Type, error) {
-	if s == "" {
+// selectTypes は、-only と -disable から有効な変異演算子を決める。どちらもなければ既定の集合である。
+func selectTypes(only, disable string) ([]mutant.Type, error) {
+	if only != "" && disable != "" {
+		return nil, errors.New("-only and -disable cannot be combined")
+	}
+	if disable != "" {
+		off, err := parseTypes(disable)
+		if err != nil {
+			return nil, err
+		}
+		return slices.DeleteFunc(slices.Clone(mutant.AllTypes), func(t mutant.Type) bool { return slices.Contains(off, t) }), nil
+	}
+	if only == "" {
 		return mutant.AllTypes, nil
 	}
+	return parseTypes(only)
+}
+
+func parseTypes(s string) ([]mutant.Type, error) {
 	var out []mutant.Type
 	for name := range strings.SplitSeq(s, ",") {
 		t := mutant.Type(strings.TrimSpace(name))
 		if !slices.Contains(mutant.Known, t) {
-			return nil, fmt.Errorf("unknown mutator type %q", t)
+			return nil, fmt.Errorf("unknown mutator type %q; see -list-mutators", t)
 		}
 		out = append(out, t)
 	}
 	return out, nil
+}
+
+// writeMutators は、変異演算子の一覧を書く。
+func writeMutators(w io.Writer) {
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	for _, info := range mutant.Infos() {
+		set := "opt-in"
+		if info.Default {
+			set = "default"
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", info.Type, set, info.Description, info.Example)
+	}
+	_ = tw.Flush()
 }
 
 func writeReport(path string, rep *report.Report) error {

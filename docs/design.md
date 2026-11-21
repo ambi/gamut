@@ -303,6 +303,8 @@ Go ではパッケージごとにテストバイナリが分かれるので、�
 | `CONDITIONS_CONSTANT`（既定で無効） | `if` と `for` の条件、`&&` と `\|\|` の被演算子（定数の式を除く） | `if`：`true` と `false`。`for`：`false`。`&&` の被演算子：`true`。`\|\|` の被演算子：`false` |
 
 名前と置き換えは Gremlins と gomutants に合わせる。
+各演算子の説明と例は `internal/mutant` の 1 か所（`mutant.Infos`）で定め、`-list-mutators` はそこから出す。README の一覧が全演算子の名前を挙げることは、テストで確かめる。
+`-disable` は既定の集合から演算子を外す。`-only` とは併用できない（終了コード 1）。
 既定で無効な演算子は、`-only`（設定の `mutators`）で選んだときだけ列挙する。実在のパッケージで生き残りの数と仕分けの内訳を測ってから、既定の集合に入れるかを決める（[018](../work-items/018-more-mutators.md)）。
 
 ### 既定の集合
