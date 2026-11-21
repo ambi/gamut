@@ -66,6 +66,12 @@ func SumAll(xs []int) int {
 	return s
 }
 
+// Area の本体を 0 を返す文にすると、テストが値を確かめるので検出される。
+func Area(w, h int) int { return w * h }
+
+// Describe の本体を空の文字列を返す文にしても、テストが値を確かめないので生き残る。
+func Describe(n int) string { return "n" }
+
 var recorded []string
 
 func record(s string) { recorded = append(recorded, s) }

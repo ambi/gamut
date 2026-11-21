@@ -58,7 +58,7 @@ type Site struct {
 
 func (s *Site) next() Level {
 	switch s.Node.(type) {
-	case *ast.IncDecStmt, *ast.AssignStmt, *ast.BranchStmt, *ast.ExprStmt:
+	case *ast.IncDecStmt, *ast.AssignStmt, *ast.BranchStmt, *ast.ExprStmt, *mutant.BodySite:
 		// 文は値を返さないので gamutMark で包めない。
 		return Untouched
 	}
@@ -472,6 +472,19 @@ func (r *renderer) renderSite(buf *bytes.Buffer, f *load.File, sites []*Site, s 
 		m := s.Mutants[0]
 		fmt.Fprintf(buf, "func() { if gamutCovering { gamutHit(%d); gamutInfect(%d) }; if gamutActive == %d { %s%s } else { %s%s } }()",
 			s.Index, m.Index, m.Index, target, m.Replacement, target, n.Tok)
+
+	case *mutant.BodySite:
+		// RETURN_ZERO：本体の { の直後で、有効な変異体ならゼロ値を返す。関数に入るたびに到達し、返す値は変わるので感染したとする。
+		// 関数の入口の記録も { の直後に差し込むが、この箇所が { を書き換えるので、ここで書く。
+		m := s.Mutants[0]
+		zeros := strings.TrimSuffix(strings.TrimPrefix(m.ReplacementText, "{ return "), ";")
+		buf.WriteString("{")
+		for _, e := range r.entries[f.Path] {
+			if e.offset == s.end {
+				buf.WriteString(e.text)
+			}
+		}
+		fmt.Fprintf(buf, " if gamutCovering { gamutHit(%d); gamutInfect(%d) }; if gamutActive == %d { return %s };", s.Index, m.Index, m.Index, zeros)
 
 	case *ast.ExprStmt:
 		// STATEMENT_REMOVE：有効な変異体なら呼び出しの文を実行しない。引数の中の変異箇所は、実行する側の中で書き換える。

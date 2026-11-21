@@ -266,6 +266,42 @@ func TestBuild_RemovedStatementsKeepTheirArguments(t *testing.T) {
 	}
 }
 
+func TestBuild_ReturnZeroKeepsTheEntryRecord(t *testing.T) {
+	dir := t.TempDir()
+	src := "package m\n\nfunc F(a int) (int, error) {\n\treturn a + 1, nil\n}\n"
+	for name, s := range map[string]string{"go.mod": "module m\n\ngo 1.27.4\n", "m.go": src} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(s), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pkg, err := loadOne(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ms := mutant.Enumerate(pkg, []mutant.Type{mutant.ReturnZero, mutant.ArithmeticBase})
+	mutant.CheckViability(pkg, ms)
+	res, err := schemata.Build(pkg, ms)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range res.Sites {
+		if s.Level != schemata.Wrapped {
+			t.Errorf("%s site: level %d, want Wrapped", s.Mutants[0].Type, s.Level)
+		}
+	}
+	var out string
+	for _, b := range res.Files {
+		out = string(b)
+	}
+	// 関数の入口の記録と、ゼロ値を返す分岐が、どちらも本体の { の直後にある。行は変わらない。
+	if !strings.Contains(out, "(int, error) { if gamutCovering { gamutEnter(1) }; if gamutCovering { gamutHit(1); gamutInfect(1) }; if gamutActive == 1 { return *new(int), *new(error) };") {
+		t.Errorf("the entry record or the zero return is missing:\n%s", out)
+	}
+	if strings.Count(out, "\n") != strings.Count(src, "\n") {
+		t.Errorf("the rewrite shifted lines:\n%s", out)
+	}
+}
+
 func TestBuild_PureOperandsNeedNoTypeName(t *testing.T) {
 	// *url.URL は、このファイルが net/url を import しないので書けない。被演算子を本文へ写せば型は要らない。
 	res := build(t, "package m\n\nimport \"net/http\"\n\nfunc F(a, b *http.Request) bool { return a.URL == b.URL }\n")

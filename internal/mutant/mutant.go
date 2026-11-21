@@ -44,7 +44,23 @@ const (
 	ConditionsConstant Type = "CONDITIONS_CONSTANT"
 	// StatementRemove は、値を返さない呼び出しの文を実行しないようにする。
 	StatementRemove Type = "STATEMENT_REMOVE"
+	// ReturnZero は、戻り値を持つ関数の本体の先頭で、戻り値の型のゼロ値を返すようにする。
+	ReturnZero Type = "RETURN_ZERO"
 )
+
+// zeroID は、RETURN_ZERO の識別子の置き換え後の部分である。置き換え後の文字列は戻り値の型を含むので、固定の文字列を使う。
+const zeroID = "<zero>"
+
+// BodySite は、RETURN_ZERO の変異箇所である。関数の本体の { の 1 字だけを範囲にし、本体の中の箇所とは別の箇所にする。
+type BodySite struct {
+	Func *ast.FuncDecl
+}
+
+// Pos は本体の { の位置である。
+func (b *BodySite) Pos() token.Pos { return b.Func.Body.Lbrace }
+
+// End は本体の { の直後である。
+func (b *BodySite) End() token.Pos { return b.Func.Body.Lbrace + 1 }
 
 // removedID は、STATEMENT_REMOVE の識別子の置き換え後の部分である。置き換え後の文字列は文の中身を含むので、
 // 引数を書き換えても識別子が変わらないよう、識別子には固定の文字列を使う。
@@ -67,7 +83,7 @@ var AllTypes = []Type{ArithmeticBase, ConditionalsBoundary, ConditionalsNegation
 
 // OptIn は、既定では無効で、-only や設定で選んだときだけ有効になる変異演算子である。
 // 実在のパッケージで生き残りの数と仕分けの内訳を測ってから、既定の集合に入れるかを決める。
-var OptIn = []Type{InvertBitwise, InvertAssignments, InvertBitwiseAssignments, InvertLoopCtrl, InvertLogical, RemoveLogicalNot, BooleanLiteral, ConditionsConstant, StatementRemove}
+var OptIn = []Type{InvertBitwise, InvertAssignments, InvertBitwiseAssignments, InvertLoopCtrl, InvertLogical, RemoveLogicalNot, BooleanLiteral, ConditionsConstant, StatementRemove, ReturnZero}
 
 // Known は、gamut が知っているすべての変異演算子である。-only、設定、無効化コメント、受理の名前はこれで確かめる。
 var Known = slices.Concat(AllTypes, OptIn)
@@ -103,6 +119,8 @@ type Mutant struct {
 
 	// path は、囲む宣言の中での構文木の経路である。
 	path []int
+	// idTo は、識別子に入れる置き換え後の部分である。ふつうは ReplacementText で、文や型を含む変異では固定の文字列である。
+	idTo string
 }
 
 // Key は、識別子のハッシュの部分を返す。パッケージの中で変異体を区別する短い鍵として使う。
@@ -113,7 +131,13 @@ func (m *Mutant) Key() string {
 // IDAt は、変異体のファイルがモジュール相対のパス rel にあったときの識別子を返す。
 // ファイルの名前の変更の前の識別子を求め、前の判定を引き継ぐために使う。
 func (m *Mutant) IDAt(rel string) string {
-	return identity(rel, m.Scope, m.path, m.Type, m.ReplacementText)
+	return identity(rel, m.Scope, m.path, m.Type, m.idTo)
+}
+
+// setID は、置き換え後の部分 to で識別子を作る。
+func (m *Mutant) setID(rel string, to string) {
+	m.idTo = to
+	m.ID = identity(rel, m.Scope, m.path, m.Type, to)
 }
 
 // rule は、字句 from を to に置き換える規則である。to が token.ILLEGAL なら、from を取り除く。
@@ -266,7 +290,7 @@ func enumerateFile(pkg *load.Package, file *load.File, enabled []Type) []*Mutant
 				Line: pos.Line, Column: pos.Column, Site: n, Scope: scope,
 				SiteKey: siteKey(file.Rel, scope, rel), path: slices.Clone(rel),
 			}
-			m.ID = identity(file.Rel, scope, rel, typ, toText)
+			m.setID(file.Rel, toText)
 			out = append(out, m)
 		}
 		// 条件の式なら、その中の変異体より先に、条件を定数にする変異体を並べる。
@@ -284,7 +308,7 @@ func enumerateFile(pkg *load.Package, file *load.File, enabled []Type) []*Mutant
 						// 包む箇所は式そのものの箇所と範囲が同じなので、経路に印を足して別の鍵にする。
 						SiteKey: siteKey(file.Rel, scope, append(slices.Clone(rel), -1)), path: slices.Clone(rel),
 					}
-					m.ID = identity(file.Rel, scope, rel, ConditionsConstant, c)
+					m.setID(file.Rel, c)
 					out = append(out, m)
 				}
 			}
@@ -300,6 +324,21 @@ func enumerateFile(pkg *load.Package, file *load.File, enabled []Type) []*Mutant
 			rules, opPos, op = assignRules, x.TokPos, x.Tok
 		case *ast.BranchStmt:
 			rules, opPos, op = branchRules, x.TokPos, x.Tok
+		case *ast.FuncDecl:
+			// 戻り値を持つ関数の本体の { の直後に、戻り値の型のゼロ値を返す文を差し込む。型はシグネチャの字句を写すので、そのファイルで必ず書ける。
+			if zeros := zeroValues(file, pkg.Fset, x); zeros != "" && slices.Contains(enabled, ReturnZero) {
+				site := &BodySite{Func: x}
+				pos := pkg.Fset.Position(site.Pos())
+				m := &Mutant{
+					Type: ReturnZero, File: file, Offset: pos.Offset,
+					Original: token.ILLEGAL, Replacement: token.ILLEGAL, OriginalText: "{", ReplacementText: "{ return " + zeros + ";",
+					Line: pos.Line, Column: pos.Column, Site: site, Scope: scope,
+					SiteKey: siteKey(file.Rel, scope, []int{-2}),
+				}
+				m.setID(file.Rel, zeroID)
+				out = append(out, m)
+			}
+			return true
 		case *ast.ExprStmt:
 			// 値を返さない呼び出しの文を if false { ... } にする。引数でだけ使う変数や import が使われなくならないよう、文は消さずに残す。
 			// ログ出力の呼び出しは、テストが観測しないことが多いので消さない（arid）。
@@ -307,7 +346,7 @@ func enumerateFile(pkg *load.Package, file *load.File, enabled []Type) []*Mutant
 				text := string(file.Src[pkg.Fset.Position(x.Pos()).Offset:pkg.Fset.Position(x.End()).Offset])
 				before := len(out)
 				add(StatementRemove, x.Pos(), token.ILLEGAL, token.ILLEGAL, text, "if false { "+text+" }")
-				out[before].ID = identity(file.Rel, scope, path[2:], StatementRemove, removedID)
+				out[before].setID(file.Rel, removedID)
 			}
 			return true
 		case *ast.Ident:
@@ -355,6 +394,21 @@ func conditionConstants(parent ast.Node, expr ast.Expr) []string {
 		}
 	}
 	return nil
+}
+
+// zeroValues は、関数の戻り値の型のゼロ値（*new(T)）をカンマで並べて返す。戻り値がない、本体がない、init なら空を返す。
+func zeroValues(file *load.File, fset *token.FileSet, fd *ast.FuncDecl) string {
+	if fd.Body == nil || fd.Type.Results == nil || fd.Name.Name == "init" && fd.Recv == nil {
+		return ""
+	}
+	var zeros []string
+	for _, field := range fd.Type.Results.List {
+		typ := string(file.Src[fset.Position(field.Type.Pos()).Offset:fset.Position(field.Type.End()).Offset])
+		for range max(1, len(field.Names)) {
+			zeros = append(zeros, "*new("+typ+")")
+		}
+	}
+	return strings.Join(zeros, ", ")
 }
 
 // returnsNothing は、call が値を返さない関数の呼び出しかを返す。型の変換や組み込み関数の呼び出しは含めない（panic は含める）。

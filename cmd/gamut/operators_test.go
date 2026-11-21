@@ -24,6 +24,7 @@ func TestOperators_OptInVerdicts(t *testing.T) {
 		{"BOOLEAN_LITERAL", map[string]string{"Enabled": "KILLED", "Verbose": "LIVED"}},
 		{"CONDITIONS_CONSTANT", map[string]string{"Positive": "KILLED", "SumAll": "LIVED"}},
 		{"STATEMENT_REMOVE", map[string]string{"Record": "KILLED", "Notify": "LIVED"}},
+		{"RETURN_ZERO", map[string]string{"Area": "KILLED", "Describe": "LIVED"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.only, func(t *testing.T) {

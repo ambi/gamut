@@ -62,6 +62,10 @@ func (s *Selection) direct(u *unit, m *mutant.Mutant) bool {
 		return s.Mutants[m]
 	}
 	node := m.Site
+	// RETURN_ZERO の箇所は本体の { だけだが、変異は本体全体を置き換えるので、関数の本体の変更で選ぶ。
+	if b, ok := m.Site.(*mutant.BodySite); ok {
+		node = b.Func.Body
+	}
 	if s.DeclScope {
 		for _, d := range m.File.AST.Decls {
 			if d.Pos() <= m.Site.Pos() && m.Site.End() <= d.End() {

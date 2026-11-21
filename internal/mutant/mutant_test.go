@@ -34,6 +34,9 @@ func enumerate(t *testing.T, src string) []*mutant.Mutant {
 	return ms
 }
 
+// everywhere は、ほとんどの条件と関数に現れる変異演算子である。それを確かめる例でだけ数える。
+var everywhere = []mutant.Type{mutant.ConditionsConstant, mutant.ReturnZero}
+
 // TestKnown_NewOperatorsAreOffByDefault は、測ってから既定の集合を決める演算子が、既定では列挙されないことを確かめる。
 func TestKnown_NewOperatorsAreOffByDefault(t *testing.T) {
 	for _, typ := range mutant.Known {
@@ -56,8 +59,9 @@ func TestKnown_NewOperatorsAreOffByDefault(t *testing.T) {
 func TestEnumerate_IDsDoNotDependOnLinesAndColumns(t *testing.T) {
 	before := enumerate(t, "package m\n\nfunc F(a, b int) bool { return a < b }\n")
 	after := enumerate(t, "package m\n\n// 説明を足しても識別子は変わらない。\nvar X = 1\n\nfunc F(a, b int) bool {\n\treturn a < b\n}\n")
-	if len(before) != 2 || len(after) != 2 {
-		t.Fatalf("got %d and %d mutants, want 2 each", len(before), len(after))
+	// 比較の 2 体と、関数の本体の RETURN_ZERO の 1 体。RETURN_ZERO の識別子も、行と列によらない。
+	if len(before) != 3 || len(after) != 3 {
+		t.Fatalf("got %d and %d mutants, want 3 each", len(before), len(after))
 	}
 	for i := range before {
 		if before[i].ID != after[i].ID {
@@ -140,16 +144,20 @@ func TestEnumerate_Operators(t *testing.T) {
 			[]string{"STATEMENT_REMOVE g(n + 1)->if false { g(n + 1) } true", "ARITHMETIC_BASE +->- true"}},
 		{"log calls are arid", "package m\n\nimport \"log\"\n\nfunc F(n int) { log.Println(n) }\n",
 			nil},
+		{"functions with results return zero values", "package m\n\ntype T struct{}\n\nfunc (T) Name() string { return \"t\" }\n\nfunc F(a int) (n, m int, err error) { return a, a, nil }\n\nfunc G[E any](e E) E { return e }\n\nfunc init() {}\n\nfunc H() {}\n",
+			[]string{"RETURN_ZERO {->{ return *new(string); true", "RETURN_ZERO {->{ return *new(int), *new(int), *new(error); true", "RETURN_ZERO {->{ return *new(E); true"}},
 		{"plain assignments are not mutated", "package m\n\nfunc F(a int) int { b := a; b = 2; return b }\n",
 			nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// CONDITIONS_CONSTANT はほとんどの式に現れるので、それを期待しない例では数えない。
-			conditions := slices.ContainsFunc(tt.want, func(w string) bool { return strings.HasPrefix(w, string(mutant.ConditionsConstant)) })
+			// CONDITIONS_CONSTANT と RETURN_ZERO はほとんどの条件と関数に現れるので、それを期待しない例では数えない。
+			expected := func(typ mutant.Type) bool {
+				return slices.ContainsFunc(tt.want, func(w string) bool { return strings.HasPrefix(w, string(typ)+" ") })
+			}
 			var got []string
 			for _, m := range enumerate(t, tt.src) {
-				if m.Type == mutant.ConditionsConstant && !conditions {
+				if slices.Contains(everywhere, m.Type) && !expected(m.Type) {
 					continue
 				}
 				got = append(got, string(m.Type)+" "+m.OriginalText+"->"+m.ReplacementText+" "+map[bool]string{true: "true", false: "false"}[m.Viable])
@@ -180,7 +188,8 @@ func TestEnumerate_SiteKeysGroupMutantsOfOneSite(t *testing.T) {
 	after := enumerate(t, "package m\n\n// 行をずらす。\n\nfunc F(a, b int) bool {\n\treturn a < b && b > 0\n}\n")
 	sites := map[string][]string{}
 	for i, m := range before {
-		if m.Type == mutant.ConditionsConstant {
+		// 条件と関数の本体を包む箇所は、演算子の箇所と別に確かめる。
+		if m.Type == mutant.ConditionsConstant || m.Type == mutant.ReturnZero {
 			continue
 		}
 		sites[m.SiteKey] = append(sites[m.SiteKey], m.Original.String())
@@ -205,7 +214,17 @@ func TestEnumerate_SiteKeysGroupMutantsOfOneSite(t *testing.T) {
 
 func TestMutant_IDAtReproducesTheIDUnderAnotherPath(t *testing.T) {
 	ms := enumerate(t, "package m\n\nfunc F(a, b int) int { return a + b }\n")
-	m := ms[0]
+	i := slices.IndexFunc(ms, func(m *mutant.Mutant) bool { return m.Type == mutant.ArithmeticBase })
+	if i < 0 {
+		t.Fatal("no ARITHMETIC_BASE mutant")
+	}
+	m := ms[i]
+	for _, other := range ms {
+		// 固定の文字列で識別子を作る変異体（RETURN_ZERO など）も、自分のパスでは同じ識別子を再現する。
+		if got := other.IDAt(other.File.Rel); got != other.ID {
+			t.Errorf("%s: IDAt(own path) = %s", other.ID, got)
+		}
+	}
 	if got := m.IDAt(m.File.Rel); got != m.ID {
 		t.Errorf("IDAt(own path) = %s, want %s", got, m.ID)
 	}

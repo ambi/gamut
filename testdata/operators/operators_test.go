@@ -27,6 +27,13 @@ func TestConditions(t *testing.T) {
 	}
 }
 
+func TestReturns(t *testing.T) {
+	if Area(2, 3) != 6 {
+		t.Fatal("wrong")
+	}
+	_ = Describe(1)
+}
+
 func TestStatements(t *testing.T) {
 	// パッケージ変数を戻してから使う。戻さないと、2 回目の実行（go test -count=2 や、gamut の使い回すテストプロセス）で結果が変わる。
 	recorded = nil

@@ -87,6 +87,7 @@ go build -o bin/gamut ./cmd/gamut
 | `INVERT_LOGICAL` | `&&`↔`\|\|`（短絡評価を保つ） |
 | `REMOVE_LOGICAL_NOT` | `!x`→`x` |
 | `BOOLEAN_LITERAL` | `true`↔`false` |
+| `RETURN_ZERO` | 戻り値を持つ関数の本体を、ゼロ値（`error` は `nil`）を返す文にする |
 | `STATEMENT_REMOVE` | 値を返さない呼び出しの文を実行しない（ログ出力を除く） |
 | `CONDITIONS_CONSTANT` | `if` の条件を `true`／`false`、`for` の条件を `false`、`&&` の被演算子を `true`、`\|\|` の被演算子を `false` に |
 テストプロセスは、gamut の 1 回の実行の間、変異体の間で使い回す。
