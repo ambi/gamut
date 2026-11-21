@@ -1,7 +1,6 @@
 package main
 
 import (
-	"maps"
 	"slices"
 	"testing"
 
@@ -23,19 +22,30 @@ func TestOperators_OptInVerdicts(t *testing.T) {
 		{"INVERT_LOGICAL", map[string]string{"Both": "KILLED", "Either": "LIVED"}},
 		{"REMOVE_LOGICAL_NOT", map[string]string{"Closed": "KILLED", "Muted": "LIVED"}},
 		{"BOOLEAN_LITERAL", map[string]string{"Enabled": "KILLED", "Verbose": "LIVED"}},
+		{"CONDITIONS_CONSTANT", map[string]string{"Positive": "KILLED", "SumAll": "LIVED"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.only, func(t *testing.T) {
 			ms, _ := mustGamut(t, "-no-cache", "-only", tc.only, dir)
-			got := map[string]string{}
+			// 挙げた宣言のすべての変異体が、期待する状態を持つ。ほかの宣言の変異体は数えない。
+			seen := map[string]bool{}
 			for _, m := range ms {
 				if m.Type != tc.only {
 					t.Errorf("%s has type %s, want only %s", m.ID, m.Type, tc.only)
 				}
-				got[m.scope()] = m.Status
+				want, ok := tc.want[m.scope()]
+				if !ok {
+					continue
+				}
+				seen[m.scope()] = true
+				if m.Status != want {
+					t.Errorf("%s: %s, want %s", m.ID, m.Status, want)
+				}
 			}
-			if !maps.Equal(got, tc.want) {
-				t.Errorf("verdicts %v, want %v", got, tc.want)
+			for scope := range tc.want {
+				if !seen[scope] {
+					t.Errorf("no %s mutant in %s", tc.only, scope)
+				}
 			}
 		})
 	}

@@ -49,6 +49,23 @@ func Enabled() bool { return true }
 // Verbose の false を true にしても、テストが値を確かめないので生き残る。
 func Verbose() bool { return false }
 
+// Positive の if の条件を true にしても false にしても、テストの入力 1 と -1 のどちらかで値が変わり、検出される。
+func Positive(n int) bool {
+	if n > 0 {
+		return true
+	}
+	return false
+}
+
+// SumAll の for の条件を false にしても、テストが空の入力しか使わないので生き残る。
+func SumAll(xs []int) int {
+	s := 0
+	for i := 0; i < len(xs); i++ {
+		s += xs[i]
+	}
+	return s
+}
+
 // FirstNegative の break を continue にすると最後の負の数を返すようになり、テストの入力 (1, -2, -3) で検出される。
 func FirstNegative(xs []int) int {
 	found := 0

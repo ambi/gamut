@@ -252,7 +252,19 @@ func (r *renderer) renderFile(f *load.File, sites []*Site) []byte {
 		if a.start != b.start {
 			return a.start - b.start
 		}
-		return b.end - a.end
+		if a.end != b.end {
+			return b.end - a.end
+		}
+		// 条件を包む箇所は、包まれる式の箇所と範囲が同じなので先にする。包まれる式はその中で書き換える。
+		_, ca := a.Node.(*mutant.ConditionSite)
+		_, cb := b.Node.(*mutant.ConditionSite)
+		switch {
+		case ca && !cb:
+			return -1
+		case cb && !ca:
+			return 1
+		}
+		return 0
 	})
 	if r.ranges == nil {
 		r.ranges = map[string][]outRange{}
@@ -460,6 +472,26 @@ func (r *renderer) renderSite(buf *bytes.Buffer, f *load.File, sites []*Site, s 
 		m := s.Mutants[0]
 		fmt.Fprintf(buf, "func() { if gamutCovering { gamutHit(%d); gamutInfect(%d) }; if gamutActive == %d { %s%s } else { %s%s } }()",
 			s.Index, m.Index, m.Index, target, m.Replacement, target, n.Tok)
+
+	case *mutant.ConditionSite:
+		// CONDITIONS_CONSTANT：有効な変異体なら条件を評価せずに定数を返し、そうでなければ条件を評価する。
+		// 条件の中の変異箇所は、評価する側の中でそのまま書き換える。
+		resultType, ok := r.resultType(f, n.X)
+		if !ok {
+			fallback()
+			return
+		}
+		fmt.Fprintf(buf, "func() %s { switch gamutActive { ", resultType)
+		for _, m := range s.Mutants {
+			fmt.Fprintf(buf, "case %d: return %s; ", m.Index, m.ReplacementText)
+		}
+		buf.WriteString("}; gamutC := ")
+		r.renderRange(buf, f, without(sites, s), s.start, s.end)
+		fmt.Fprintf(buf, "; if gamutCovering { gamutHit(%d); ", s.Index)
+		for _, m := range s.Mutants {
+			fmt.Fprintf(buf, "if gamutC != %s { gamutInfect(%d) }; ", m.ReplacementText, m.Index)
+		}
+		buf.WriteString("}; return gamutC }()")
 
 	case *ast.Ident:
 		// BOOLEAN_LITERAL：true か false を、その場の型を返す関数呼び出しにする。値は必ず変わるので、到達したら感染したとする。

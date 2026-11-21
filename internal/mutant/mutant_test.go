@@ -126,13 +126,28 @@ func TestEnumerate_Operators(t *testing.T) {
 			[]string{"CONDITIONALS_BOUNDARY >->>= true", "CONDITIONALS_NEGATION >-><= true", "BOOLEAN_LITERAL true->false true", "BOOLEAN_LITERAL false->true true"}},
 		{"a shadowed true is not a literal", "package m\n\nfunc F() bool {\n\ttrue := false\n\treturn true\n}\n",
 			[]string{"BOOLEAN_LITERAL false->true true"}},
+		// 条件の変異体は、条件の式を訪れたときに、その中の変異体より先に並ぶ。
+		{"if conditions become true and false", "package m\n\nfunc F(a int) int {\n\tif a > 0 {\n\t\treturn 1\n\t}\n\treturn 0\n}\n",
+			[]string{"CONDITIONS_CONSTANT a > 0->true true", "CONDITIONS_CONSTANT a > 0->false true", "CONDITIONALS_BOUNDARY >->>= true", "CONDITIONALS_NEGATION >-><= true"}},
+		{"for conditions become false only", "package m\n\nfunc F(n int) int {\n\ts := 0\n\tfor i := 0; i < n; i++ {\n\t\ts++\n\t}\n\treturn s\n}\n",
+			[]string{"CONDITIONS_CONSTANT i < n->false true", "CONDITIONALS_BOUNDARY <-><= true", "CONDITIONALS_NEGATION <->>= true", "INCREMENT_DECREMENT ++->-- true", "INCREMENT_DECREMENT ++->-- true"}},
+		{"operands of && become true, of || become false", "package m\n\nfunc F(a, b, c bool) bool { return (a && b) || c }\n",
+			[]string{"INVERT_LOGICAL ||->&& true", "CONDITIONS_CONSTANT (a && b)->false true", "INVERT_LOGICAL &&->|| true",
+				"CONDITIONS_CONSTANT a->true true", "CONDITIONS_CONSTANT b->true true", "CONDITIONS_CONSTANT c->false true"}},
+		{"constant operands are not mutated", "package m\n\nfunc F(a bool) bool { return true && a }\n",
+			[]string{"INVERT_LOGICAL &&->|| true", "BOOLEAN_LITERAL true->false true", "CONDITIONS_CONSTANT a->true true"}},
 		{"plain assignments are not mutated", "package m\n\nfunc F(a int) int { b := a; b = 2; return b }\n",
 			nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// CONDITIONS_CONSTANT はほとんどの式に現れるので、それを期待しない例では数えない。
+			conditions := slices.ContainsFunc(tt.want, func(w string) bool { return strings.HasPrefix(w, string(mutant.ConditionsConstant)) })
 			var got []string
 			for _, m := range enumerate(t, tt.src) {
+				if m.Type == mutant.ConditionsConstant && !conditions {
+					continue
+				}
 				got = append(got, string(m.Type)+" "+m.OriginalText+"->"+m.ReplacementText+" "+map[bool]string{true: "true", false: "false"}[m.Viable])
 			}
 			if len(got) != len(tt.want) {
@@ -161,6 +176,9 @@ func TestEnumerate_SiteKeysGroupMutantsOfOneSite(t *testing.T) {
 	after := enumerate(t, "package m\n\n// 行をずらす。\n\nfunc F(a, b int) bool {\n\treturn a < b && b > 0\n}\n")
 	sites := map[string][]string{}
 	for i, m := range before {
+		if m.Type == mutant.ConditionsConstant {
+			continue
+		}
 		sites[m.SiteKey] = append(sites[m.SiteKey], m.Original.String())
 		if after[i].SiteKey != m.SiteKey {
 			t.Errorf("%s: site key changed with the line: %s -> %s", m.ID, m.SiteKey, after[i].SiteKey)

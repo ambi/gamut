@@ -21,6 +21,12 @@ func TestLiterals(t *testing.T) {
 	_ = Verbose()
 }
 
+func TestConditions(t *testing.T) {
+	if !Positive(1) || Positive(-1) || SumAll(nil) != 0 {
+		t.Fatal("wrong")
+	}
+}
+
 func TestNot(t *testing.T) {
 	if !Closed(false) {
 		t.Fatal("wrong")

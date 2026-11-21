@@ -40,14 +40,28 @@ const (
 	RemoveLogicalNot Type = "REMOVE_LOGICAL_NOT"
 	// BooleanLiteral は、宇宙スコープの true と false を入れ替える。
 	BooleanLiteral Type = "BOOLEAN_LITERAL"
+	// ConditionsConstant は、if と for の条件と、&& と || の被演算子を定数にする。
+	ConditionsConstant Type = "CONDITIONS_CONSTANT"
 )
+
+// ConditionSite は、CONDITIONS_CONSTANT の変異箇所である。条件の式 X を包み、X そのものの変異箇所とは別の箇所にする。
+// 範囲は X と同じで、schemata は包む側を先に書き換え、X の中の箇所をその中で書き換える。
+type ConditionSite struct {
+	X ast.Expr
+}
+
+// Pos は条件の式の先頭である。
+func (c *ConditionSite) Pos() token.Pos { return c.X.Pos() }
+
+// End は条件の式の終わりである。
+func (c *ConditionSite) End() token.Pos { return c.X.End() }
 
 // AllTypes は既定で有効な変異演算子である。
 var AllTypes = []Type{ArithmeticBase, ConditionalsBoundary, ConditionalsNegation, IncrementDecrement, InvertNegatives}
 
 // OptIn は、既定では無効で、-only や設定で選んだときだけ有効になる変異演算子である。
 // 実在のパッケージで生き残りの数と仕分けの内訳を測ってから、既定の集合に入れるかを決める。
-var OptIn = []Type{InvertBitwise, InvertAssignments, InvertBitwiseAssignments, InvertLoopCtrl, InvertLogical, RemoveLogicalNot, BooleanLiteral}
+var OptIn = []Type{InvertBitwise, InvertAssignments, InvertBitwiseAssignments, InvertLoopCtrl, InvertLogical, RemoveLogicalNot, BooleanLiteral, ConditionsConstant}
 
 // Known は、gamut が知っているすべての変異演算子である。-only、設定、無効化コメント、受理の名前はこれで確かめる。
 var Known = slices.Concat(AllTypes, OptIn)
@@ -249,6 +263,26 @@ func enumerateFile(pkg *load.Package, file *load.File, enabled []Type) []*Mutant
 			m.ID = identity(file.Rel, scope, rel, typ, toText)
 			out = append(out, m)
 		}
+		// 条件の式なら、その中の変異体より先に、条件を定数にする変異体を並べる。
+		if expr, ok := n.(ast.Expr); ok && len(path) > 2 && slices.Contains(enabled, ConditionsConstant) && pkg.Info.Types[expr].Value == nil {
+			if consts := conditionConstants(stack[len(stack)-2].node, expr); len(consts) > 0 {
+				rel := path[2:]
+				site := &ConditionSite{X: expr}
+				pos := pkg.Fset.Position(expr.Pos())
+				text := string(file.Src[pos.Offset:pkg.Fset.Position(expr.End()).Offset])
+				for _, c := range consts {
+					m := &Mutant{
+						Type: ConditionsConstant, File: file, Offset: pos.Offset,
+						Original: token.ILLEGAL, Replacement: token.ILLEGAL, OriginalText: text, ReplacementText: c,
+						Line: pos.Line, Column: pos.Column, Site: site, Scope: scope,
+						// 包む箇所は式そのものの箇所と範囲が同じなので、経路に印を足して別の鍵にする。
+						SiteKey: siteKey(file.Rel, scope, append(slices.Clone(rel), -1)), path: slices.Clone(rel),
+					}
+					m.ID = identity(file.Rel, scope, rel, ConditionsConstant, c)
+					out = append(out, m)
+				}
+			}
+		}
 		switch x := n.(type) {
 		case *ast.BinaryExpr:
 			rules, opPos, op = binaryRules, x.OpPos, x.Op
@@ -277,6 +311,34 @@ func enumerateFile(pkg *load.Package, file *load.File, enabled []Type) []*Mutant
 		return true
 	})
 	return out
+}
+
+// conditionConstants は、parent の子 expr が条件なら、CONDITIONS_CONSTANT で置き換える定数を返す。
+//   - if の条件：true と false。
+//   - for の条件：false だけ。true は無限ループになり、時間切れを待つだけで遅い。
+//   - && の被演算子：true だけ（その条件を外す）。|| の被演算子：false だけ。
+func conditionConstants(parent ast.Node, expr ast.Expr) []string {
+	switch p := parent.(type) {
+	case *ast.IfStmt:
+		if p.Cond == expr {
+			return []string{"true", "false"}
+		}
+	case *ast.ForStmt:
+		if p.Cond == expr {
+			return []string{"false"}
+		}
+	case *ast.BinaryExpr:
+		if p.X != expr && p.Y != expr {
+			return nil
+		}
+		switch p.Op {
+		case token.LAND:
+			return []string{"true"}
+		case token.LOR:
+			return []string{"false"}
+		}
+	}
+	return nil
 }
 
 // isUniverseBool は、id が宇宙スコープの定数 true か false を指すかを返す。

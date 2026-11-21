@@ -200,6 +200,39 @@ func TestBuild_BooleanLiteralsTakeTheirContextType(t *testing.T) {
 	}
 }
 
+func TestBuild_ConditionsWrapTheirInnerSites(t *testing.T) {
+	dir := t.TempDir()
+	src := "package m\n\nfunc F(a, b int) int {\n\tif a < b {\n\t\treturn 1\n\t}\n\treturn 0\n}\n"
+	for name, s := range map[string]string{"go.mod": "module m\n\ngo 1.27.4\n", "m.go": src} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(s), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pkg, err := loadOne(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ms := mutant.Enumerate(pkg, []mutant.Type{mutant.ConditionsConstant, mutant.ConditionalsBoundary})
+	mutant.CheckViability(pkg, ms)
+	res, err := schemata.Build(pkg, ms)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range res.Sites {
+		if s.Level != schemata.Wrapped {
+			t.Errorf("%s site: level %d, want Wrapped", s.Mutants[0].Type, s.Level)
+		}
+	}
+	var out string
+	for _, b := range res.Files {
+		out = string(b)
+	}
+	// 条件を包む関数の中で、条件の式（境界の変異箇所）を 1 回だけ書き換える。
+	if !strings.Contains(out, "case 1: return true; case 2: return false; }; gamutC := func() bool {") || strings.Count(out, "gamutHit(2)") != 1 {
+		t.Errorf("the condition does not wrap its inner site:\n%s", out)
+	}
+}
+
 func TestBuild_PureOperandsNeedNoTypeName(t *testing.T) {
 	// *url.URL は、このファイルが net/url を import しないので書けない。被演算子を本文へ写せば型は要らない。
 	res := build(t, "package m\n\nimport \"net/http\"\n\nfunc F(a, b *http.Request) bool { return a.URL == b.URL }\n")
