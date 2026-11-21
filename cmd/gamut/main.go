@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"runtime/pprof"
 	"slices"
@@ -21,6 +22,7 @@ import (
 	"time"
 
 	"github.com/ambi/gamut/internal/cache"
+	"github.com/ambi/gamut/internal/config"
 	"github.com/ambi/gamut/internal/diff"
 	"github.com/ambi/gamut/internal/load"
 	"github.com/ambi/gamut/internal/mutant"
@@ -54,6 +56,9 @@ func realMain(args []string, stdout, stderr io.Writer) int {
 	isolate := fs.Bool("isolate", false, "start a new test process for every mutant instead of reusing test processes during the run")
 	cpuProfile := fs.String("cpuprofile", "", "write a CPU profile of gamut itself to this path (for developing gamut)")
 	integration := fs.Bool("integration", false, "also try to detect mutants with the tests of module packages that import the target packages")
+	var excludes multiFlag
+	fs.Var(&excludes, "exclude-files", "do not mutate files whose module-relative path matches this regular expression (repeatable)")
+	configPath := fs.String("config", "", "read settings from this JSON file instead of "+config.FileName+" at the module root; flags override it")
 	fs.Usage = func() {
 		fmt.Fprintln(stderr, "usage: gamut [flags] <package-directory>[/...] ...")
 		fs.PrintDefaults()
@@ -63,6 +68,29 @@ func realMain(args []string, stdout, stderr io.Writer) int {
 	}
 	if fs.NArg() < 1 {
 		fs.Usage()
+		return 2
+	}
+	abs, err := load.AbsPatterns(fs.Args())
+	if err != nil {
+		fmt.Fprintln(stderr, "gamut:", err)
+		return 1
+	}
+	earlyDir := load.ModuleRoot(strings.TrimSuffix(abs[0], string(filepath.Separator)+"..."))
+	// 設定ファイルの値は、指定されなかったフラグにだけ入れる。
+	cfg, err := readConfig(*configPath, earlyDir)
+	if err != nil {
+		fmt.Fprintln(stderr, "gamut:", err)
+		return 1
+	}
+	if cfg != nil {
+		if err := applyConfig(fs, cfg); err != nil {
+			fmt.Fprintln(stderr, "gamut:", err)
+			return 1
+		}
+	}
+	excludeFiles, err := compileExcludes(excludes)
+	if err != nil {
+		fmt.Fprintln(stderr, "gamut:", err)
 		return 2
 	}
 	types, err := parseTypes(*only)
@@ -101,6 +129,9 @@ func realMain(args []string, stdout, stderr io.Writer) int {
 	if *quiet {
 		logw = io.Discard
 	}
+	if cfg != nil {
+		fmt.Fprintf(logw, "config: %s\n", cfg.Path)
+	}
 
 	settings := []string{
 		"types=" + strings.Join(slices.Sorted(slices.Values(typeNames(types))), ","),
@@ -110,12 +141,6 @@ func realMain(args []string, stdout, stderr io.Writer) int {
 	}
 	// 選択のない実行は、入力が前回と同じなら、読み込みもビルドもせずに前回の報告を返す。
 	quickable := !*noCache && !*dryRun && len(ids) == 0 && *since == ""
-	abs, err := load.AbsPatterns(fs.Args())
-	if err != nil {
-		fmt.Fprintln(stderr, "gamut:", err)
-		return 1
-	}
-	earlyDir := load.ModuleRoot(strings.TrimSuffix(abs[0], string(filepath.Separator)+"..."))
 	var early *cache.Store
 	if !*noCache && earlyDir != "" {
 		if early, err = openStore(*cachePath, earlyDir, settings); err != nil {
@@ -125,7 +150,7 @@ func realMain(args []string, stdout, stderr io.Writer) int {
 	}
 	var quickKey string
 	if quickable {
-		quickKey = cache.QuickKey(slices.Concat(abs, settings, []string{fmt.Sprintf("integration=%t", *integration)})...)
+		quickKey = cache.QuickKey(slices.Concat(abs, settings, []string{fmt.Sprintf("integration=%t", *integration), "exclude=" + strings.Join(excludes, "\x00")})...)
 		if early != nil {
 			if code, ok := replay(early, quickKey, *output, stdout, stderr, logw, start); ok {
 				return code
@@ -153,7 +178,7 @@ func realMain(args []string, stdout, stderr io.Writer) int {
 	paths := make([]string, len(pkgs))
 	total := 0
 	for i, pkg := range pkgs {
-		mutants := mutant.Enumerate(pkg, types)
+		mutants := mutant.Without(mutant.Enumerate(pkg, types), func(m *mutant.Mutant) bool { return excluded(excludeFiles, m.File.Rel) })
 		targets[i] = run.Target{Pkg: pkg, Mutants: mutants}
 		paths[i] = pkg.ImportPath
 		total += len(mutants)
@@ -493,6 +518,57 @@ func resolveMutants(ids []string, targets []run.Target) (map[*mutant.Mutant]bool
 }
 
 // checkSelectionFlags は、選択のフラグの組み合わせを確かめ、誤りがあればその説明を返す。
+// readConfig は、path が空でなければそのファイルを、空なら moduleDir の設定ファイルを読む。どちらもなければ nil を返す。
+func readConfig(path, moduleDir string) (*config.Config, error) {
+	switch {
+	case path != "":
+		return config.Load(path)
+	case moduleDir != "":
+		return config.Find(moduleDir)
+	}
+	return nil, nil
+}
+
+// applyConfig は、設定の値を、コマンドラインで指定されなかったフラグに入れる。
+func applyConfig(fs *flag.FlagSet, cfg *config.Config) error {
+	explicit := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
+	for name, values := range cfg.Flags() {
+		if explicit[name] {
+			continue
+		}
+		for _, v := range values {
+			if err := fs.Set(name, v); err != nil {
+				return fmt.Errorf("%s: %s: %w", cfg.Path, name, err)
+			}
+		}
+	}
+	return nil
+}
+
+// compileExcludes は、-exclude-files の正規表現をコンパイルする。
+func compileExcludes(patterns []string) ([]*regexp.Regexp, error) {
+	out := make([]*regexp.Regexp, len(patterns))
+	for i, p := range patterns {
+		re, err := regexp.Compile(p)
+		if err != nil {
+			return nil, fmt.Errorf("-exclude-files: %w", err)
+		}
+		out[i] = re
+	}
+	return out, nil
+}
+
+// excluded は、モジュール相対のパス rel が、どれかの正規表現に当たるかを返す。
+func excluded(res []*regexp.Regexp, rel string) bool {
+	for _, re := range res {
+		if re.MatchString(rel) {
+			return true
+		}
+	}
+	return false
+}
+
 func checkSelectionFlags(since, scope string, includeTestChanges bool, ids []string) string {
 	switch {
 	case since != "" && len(ids) > 0:

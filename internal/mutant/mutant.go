@@ -112,10 +112,22 @@ func Enumerate(pkg *load.Package, enabled []Type) []*Mutant {
 	for _, file := range pkg.Files {
 		out = append(out, enumerateFile(pkg, file, enabled)...)
 	}
-	for i, m := range out {
+	number(out)
+	return out
+}
+
+// Without は、ms から drop が真を返す変異体を除き、残りの番号を 1 から振り直す。
+// schemata は番号を補助ファイルの配列の添字に使うので、番号に隙間を残さない。
+func Without(ms []*Mutant, drop func(*Mutant) bool) []*Mutant {
+	out := slices.DeleteFunc(ms, drop)
+	number(out)
+	return out
+}
+
+func number(ms []*Mutant) {
+	for i, m := range ms {
 		m.Index = i + 1
 	}
-	return out
 }
 
 func enumerateFile(pkg *load.Package, file *load.File, enabled []Type) []*Mutant {

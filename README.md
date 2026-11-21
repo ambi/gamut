@@ -28,6 +28,8 @@ go build -o bin/gamut ./cmd/gamut
 | --- | --- | --- |
 | `-workers` | CPU の数の半分（1 以上） | 並列に動かすテストプロセスの数 |
 | `-only` | すべて | 有効にする変異演算子（カンマ区切り） |
+| `-exclude-files` | なし | モジュール相対のパスがこの正規表現に当たるファイルを変異しない。繰り返し指定できる |
+| `-config` | モジュールのルートの `gamut.json` | 設定ファイルのパス |
 | `-o` | なし | JSON の報告の書き出し先 |
 | `-dry-run` | false | 変異体と構築可能性だけを一覧にする |
 | `-timeout-factor` | 5 | 選んだテストの基準の時間に掛ける係数 |
@@ -44,6 +46,22 @@ go build -o bin/gamut ./cmd/gamut
 | `-integration` | false | 対象パッケージを import するモジュール内のパッケージのテストでも検出を試す |
 | `-isolate` | false | テストプロセスを変異体の間で使い回さず、変異体ごとに起動する |
 | `-cpuprofile` | なし | gamut 自身の CPU プロファイルの書き出し先（gamut の開発用） |
+
+フラグの既定値は、モジュールのルートの `gamut.json` で変えられる。
+コマンドラインのフラグは設定ファイルより優先する。
+未知の項目があれば終了コード 1 で止まる。
+形式は [schema/gamut.schema.json](schema/gamut.schema.json) が定める。
+
+```json
+{
+  "mutators": ["ARITHMETIC_BASE", "CONDITIONALS_BOUNDARY", "CONDITIONALS_NEGATION"],
+  "exclude_files": ["_gen\\.go$", "^internal/legacy/"],
+  "timeout": { "factor": 5, "min": "2s" },
+  "workers": 4,
+  "tags": ["integration"],
+  "test_flags": ["-short"]
+}
+```
 
 変異演算子は `ARITHMETIC_BASE`、`CONDITIONALS_BOUNDARY`、`CONDITIONALS_NEGATION`、`INCREMENT_DECREMENT`、`INVERT_NEGATIVES` で、Gremlins と gomutants と同じ名前である。
 テストプロセスは、gamut の 1 回の実行の間、変異体の間で使い回す。

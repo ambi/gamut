@@ -48,6 +48,7 @@ CLI のヘルプ、エラーメッセージ、ログ、コミットメッセー�
 | パス | 責任 |
 | --- | --- |
 | `cmd/gamut` | 引数の解釈と終了コード。判断を持たない |
+| `internal/config` | 設定ファイル `gamut.json` の読み込みと、同じ意味のフラグの値への変換 |
 | `internal/load` | `go list` による読み込みと型検査 |
 | `internal/diff` | `git diff` から、作業ツリーで変わった字句の区間を求める |
 | `internal/mutant` | 変異箇所の列挙、識別子、構築可能性の判定 |

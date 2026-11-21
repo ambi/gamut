@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ambi/gamut/schema/gamut.schema.json",
+  "title": "gamut configuration",
+  "description": "The gamut.json file at the module root. Command-line flags override these values.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "mutators": {
+      "description": "Mutator types to run, the same as -only. Omit to run all.",
+      "type": "array",
+      "items": {
+        "enum": ["ARITHMETIC_BASE", "CONDITIONALS_BOUNDARY", "CONDITIONALS_NEGATION", "INCREMENT_DECREMENT", "INVERT_NEGATIVES"]
+      },
+      "uniqueItems": true
+    },
+    "exclude_files": {
+      "description": "Regular expressions (Go RE2 syntax) on module-relative, slash-separated file paths; matching files are not mutated. The same as -exclude-files.",
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "timeout": {
+      "description": "The per-mutant timeout: the selected tests' baseline time times factor, plus min.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "factor": {
+          "description": "The same as -timeout-factor.",
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "min": {
+          "description": "A Go duration such as \"2s\", the same as -timeout-min.",
+          "type": "string"
+        }
+      }
+    },
+    "workers": {
+      "description": "Parallel test processes, the same as -workers.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "tags": {
+      "description": "Build tags for loading, building, and type-checking, the same as -tags.",
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "test_flags": {
+      "description": "Flags for every test binary run, such as \"-short\", the same as -test-flags.",
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}
