@@ -16,6 +16,8 @@ const (
 	ignoreDirective = "ignore"
 	ignoreStart     = "ignore-start"
 	ignoreEnd       = "ignore-end"
+	// criticalDirective は、関数を重要領域にする指令である。Critical が読む。
+	criticalDirective = "critical"
 )
 
 // Ignored は、無効化コメントで止めた変異体と、コメントに書いた理由である。
@@ -121,6 +123,8 @@ func fileIgnores(pkg *load.Package, f *load.File) ([]ignoreRule, []string, error
 					r.first, r.end = pos.Line+1, pos.Line+1
 				}
 				rules = append(rules, r)
+			case criticalDirective:
+				// 重要領域の指令は Critical が読む。
 			case ignoreEnd:
 				if open == nil {
 					warnings = append(warnings, where+": "+directivePrefix+ignoreEnd+" without a matching "+directivePrefix+ignoreStart)

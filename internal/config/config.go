@@ -39,6 +39,19 @@ type Config struct {
 	Tags []string `json:"tags,omitempty"`
 	// TestFlags はテストバイナリに渡すフラグで、-test-flags と同じ意味である。
 	TestFlags []string `json:"test_flags,omitempty"`
+	// Critical は重要領域のファイルのモジュール相対のパスの glob で、-critical と同じ意味である。
+	Critical []string `json:"critical,omitempty"`
+	// Thresholds は点数の閾値で、-threshold-high、-threshold-low、-threshold-break と同じ意味である。
+	Thresholds *Thresholds `json:"thresholds,omitempty"`
+	// FailOnSurvived は -fail-on-survived と同じ意味である。
+	FailOnSurvived *bool `json:"fail_on_survived,omitempty"`
+}
+
+// Thresholds は点数の閾値（百分率）である。
+type Thresholds struct {
+	High  *float64 `json:"high,omitempty"`
+	Low   *float64 `json:"low,omitempty"`
+	Break *float64 `json:"break,omitempty"`
 }
 
 // Timeout は時間切れの上限の設定である。
@@ -103,6 +116,16 @@ func (c *Config) check() error {
 	if c.Workers != nil && *c.Workers < 1 {
 		return errors.New("workers: must be at least 1")
 	}
+	if t := c.Thresholds; t != nil {
+		for name, v := range map[string]*float64{"high": t.High, "low": t.Low, "break": t.Break} {
+			if v != nil && (*v < 0 || *v > 100) {
+				return fmt.Errorf("thresholds.%s: must be between 0 and 100", name)
+			}
+		}
+		if t.High != nil && t.Low != nil && *t.Low > *t.High {
+			return errors.New("thresholds.low: must not exceed thresholds.high")
+		}
+	}
 	return nil
 }
 
@@ -133,6 +156,19 @@ func (c *Config) Flags() map[string][]string {
 	}
 	if len(c.TestFlags) > 0 {
 		out["test-flags"] = []string{strings.Join(c.TestFlags, " ")}
+	}
+	if len(c.Critical) > 0 {
+		out["critical"] = slices.Clone(c.Critical)
+	}
+	if t := c.Thresholds; t != nil {
+		for name, v := range map[string]*float64{"threshold-high": t.High, "threshold-low": t.Low, "threshold-break": t.Break} {
+			if v != nil {
+				out[name] = []string{strconv.FormatFloat(*v, 'g', -1, 64)}
+			}
+		}
+	}
+	if c.FailOnSurvived != nil {
+		out["fail-on-survived"] = []string{strconv.FormatBool(*c.FailOnSurvived)}
 	}
 	return out
 }

@@ -124,8 +124,8 @@ func TestAccept_RequiresAReasonAndIDs(t *testing.T) {
 		{"accept", "-reason", "r", "-dir", dir},
 		{"accept", "-reason", "r", "-dir", dir, "not-an-id"},
 	} {
-		if code := realMain(args, io.Discard, io.Discard); code != 2 {
-			t.Errorf("%v: exit %d, want 2", args, code)
+		if code := realMain(args, io.Discard, io.Discard); code != 1 {
+			t.Errorf("%v: exit %d, want 1", args, code)
 		}
 	}
 }

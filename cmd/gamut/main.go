@@ -36,6 +36,19 @@ func main() {
 	os.Exit(realMain(os.Args[1:], os.Stdout, os.Stderr))
 }
 
+// 終了コードである。
+const (
+	exitOK = 0
+	// exitError は、引数、設定、読み込み、ビルドなどの誤りである。
+	exitError = 1
+	// exitQuality は、判定を終えたが品質の条件（重要領域、閾値、-fail-on-survived）を満たさないことである。
+	exitQuality = 2
+	// exitBaseline は、変異なしでテストが失敗し、判定しなかったことである。
+	exitBaseline = 4
+	// exitSelfCheck は、forced fail の自己検査で変異がテストに届かないと分かり、判定しなかったことである。
+	exitSelfCheck = 5
+)
+
 func realMain(args []string, stdout, stderr io.Writer) int {
 	if len(args) > 0 && args[0] == "accept" {
 		return acceptMain(args[1:], stdout, stderr)
@@ -62,15 +75,15 @@ func acceptMain(args []string, stdout, stderr io.Writer) int {
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
-		return 2
+		return exitError
 	}
 	if *prune {
 		fmt.Fprintln(stderr, "gamut: -prune must be the first argument of gamut accept")
-		return 2
+		return exitError
 	}
 	if fs.NArg() == 0 || *reason == "" {
 		fs.Usage()
-		return 2
+		return exitError
 	}
 	abs, err := filepath.Abs(*dir)
 	if err != nil {
@@ -89,7 +102,7 @@ func acceptMain(args []string, stdout, stderr io.Writer) int {
 	}
 	if err := f.Add(fs.Args(), *reason); err != nil {
 		fmt.Fprintln(stderr, "gamut:", err)
-		return 2
+		return exitError
 	}
 	if err := f.Save(); err != nil {
 		fmt.Fprintln(stderr, "gamut:", err)
@@ -123,6 +136,12 @@ func judge(args []string, stdout, stderr io.Writer, prune bool) int {
 	cpuProfile := fs.String("cpuprofile", "", "write a CPU profile of gamut itself to this path (for developing gamut)")
 	integration := fs.Bool("integration", false, "also try to detect mutants with the tests of module packages that import the target packages")
 	detectEquivalent := fs.Bool("detect-equivalent", false, "compile each surviving mutant and report it as EQUIVALENT when its machine code equals the original's (one package compile per survivor, outside the build cache)")
+	var critical multiFlag
+	fs.Var(&critical, "critical", "treat files whose module-relative path matches this glob (** for any directories) as a critical region, where every mutant must be detected or accepted (repeatable)")
+	thresholdHigh := fs.Float64("threshold-high", 80, "label a mutation score at or above this percentage high")
+	thresholdLow := fs.Float64("threshold-low", 60, "label a mutation score at or above this percentage low, and below it danger")
+	thresholdBreak := fs.Float64("threshold-break", 0, "exit with code 2 when the mutation score is below this percentage (0 disables)")
+	failOnSurvived := fs.Bool("fail-on-survived", false, "exit with code 2 when any unaccepted mutant survives")
 	var excludes multiFlag
 	fs.Var(&excludes, "exclude-files", "do not mutate files whose module-relative path matches this regular expression (repeatable)")
 	configPath := fs.String("config", "", "read settings from this JSON file instead of "+config.FileName+" at the module root; flags override it")
@@ -131,11 +150,11 @@ func judge(args []string, stdout, stderr io.Writer, prune bool) int {
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
-		return 2
+		return exitError
 	}
 	if fs.NArg() < 1 {
 		fs.Usage()
-		return 2
+		return exitError
 	}
 	abs, err := load.AbsPatterns(fs.Args())
 	if err != nil {
@@ -158,21 +177,26 @@ func judge(args []string, stdout, stderr io.Writer, prune bool) int {
 	excludeFiles, err := compileExcludes(excludes)
 	if err != nil {
 		fmt.Fprintln(stderr, "gamut:", err)
-		return 2
+		return exitError
 	}
 	types, err := parseTypes(*only)
 	if err != nil {
 		fmt.Fprintln(stderr, "gamut:", err)
-		return 2
+		return exitError
 	}
 	flags, err := run.ParseTestFlags(*testFlags)
 	if err != nil {
 		fmt.Fprintln(stderr, "gamut:", err)
-		return 2
+		return exitError
+	}
+	thresholds := report.Thresholds{High: *thresholdHigh, Low: *thresholdLow, Break: *thresholdBreak}
+	if msg := checkThresholds(thresholds); msg != "" {
+		fmt.Fprintln(stderr, "gamut:", msg)
+		return exitError
 	}
 	if msg := checkSelectionFlags(*since, *scope, *includeTestChanges, ids); msg != "" {
 		fmt.Fprintln(stderr, "gamut:", msg)
-		return 2
+		return exitError
 	}
 
 	if *cpuProfile != "" {
@@ -217,9 +241,14 @@ func judge(args []string, stdout, stderr io.Writer, prune bool) int {
 	}
 	var quickKey string
 	if quickable {
-		quickKey = cache.QuickKey(slices.Concat(abs, settings, []string{fmt.Sprintf("integration=%t", *integration), fmt.Sprintf("detect-equivalent=%t", *detectEquivalent), "exclude=" + strings.Join(excludes, "\x00")})...)
+		// 報告を変えるフラグはすべて鍵に入れる。品質の条件の -fail-on-survived は報告を変えず、再生した報告に当てる。
+		quickKey = cache.QuickKey(slices.Concat(abs, settings, []string{
+			fmt.Sprintf("integration=%t", *integration), fmt.Sprintf("detect-equivalent=%t", *detectEquivalent),
+			"exclude=" + strings.Join(excludes, "\x00"), "critical=" + strings.Join(critical, "\x00"),
+			fmt.Sprintf("thresholds=%g,%g,%g", thresholds.High, thresholds.Low, thresholds.Break),
+		})...)
 		if early != nil {
-			if code, ok := replay(early, quickKey, *output, stdout, stderr, logw, start); ok {
+			if code, ok := replay(early, quickKey, *output, stdout, stderr, logw, start, *failOnSurvived); ok {
 				return code
 			}
 		}
@@ -250,6 +279,7 @@ func judge(args []string, stdout, stderr io.Writer, prune bool) int {
 		return 1
 	}
 	var ignored []mutant.Ignored
+	criticalIDs := map[string]bool{}
 	for i, pkg := range pkgs {
 		mutants := mutant.Without(mutant.Enumerate(pkg, types), func(m *mutant.Mutant) bool { return excluded(excludeFiles, m.File.Rel) })
 		mutants, skipped, warnings, err := mutant.Ignores(pkg, mutants)
@@ -257,7 +287,13 @@ func judge(args []string, stdout, stderr io.Writer, prune bool) int {
 			fmt.Fprintln(stderr, "gamut:", err)
 			return 1
 		}
-		for _, w := range warnings {
+		crit, critWarnings, err := mutant.Critical(pkg, mutants, critical)
+		if err != nil {
+			fmt.Fprintln(stderr, "gamut:", err)
+			return exitError
+		}
+		maps.Copy(criticalIDs, crit)
+		for _, w := range slices.Concat(warnings, critWarnings) {
 			fmt.Fprintln(stderr, "gamut: warning:", w)
 		}
 		ignored = append(ignored, skipped...)
@@ -398,6 +434,8 @@ func judge(args []string, stdout, stderr io.Writer, prune bool) int {
 	}
 	rep := report.Build(pkgs[0].ModulePath, label, paths, results, time.Since(start))
 	rep.AddIgnored(ignored)
+	rep.MarkCritical(criticalIDs)
+	rep.Thresholds = &thresholds
 	// 識別子で指定したときは、ほかの変異体を報告しないので、受理の「なくなった」は判定できない。
 	var acceptedHere []string
 	if opts.Select == nil || opts.Select.Mutants == nil {
@@ -431,7 +469,30 @@ func judge(args []string, stdout, stderr io.Writer, prune bool) int {
 			opts.Cache.PutQuick(quickKey, quick)
 		}
 	}
-	return 0
+	return qualityCode(rep, *failOnSurvived, stderr)
+}
+
+// qualityCode は、判定を終えた報告が品質の条件を満たすかを確かめ、満たさなければ理由を書いて exitQuality を返す。
+func qualityCode(rep *report.Report, failOnSurvived bool, stderr io.Writer) int {
+	failures := rep.Quality(failOnSurvived)
+	if len(failures) == 0 {
+		return exitOK
+	}
+	fmt.Fprintln(stderr, "gamut: quality gate failed: "+strings.Join(failures, "; "))
+	return exitQuality
+}
+
+// checkThresholds は、閾値の組み合わせを確かめ、誤りがあればその説明を返す。
+func checkThresholds(t report.Thresholds) string {
+	for _, v := range []float64{t.High, t.Low, t.Break} {
+		if v < 0 || v > 100 {
+			return "thresholds must be between 0 and 100"
+		}
+	}
+	if t.Low > t.High {
+		return "-threshold-low must not exceed -threshold-high"
+	}
+	return ""
 }
 
 // openStore は、moduleDir の環境の下でキャッシュを開く。
@@ -444,7 +505,7 @@ func openStore(path, moduleDir string, settings []string) (*cache.Store, error) 
 }
 
 // replay は、key の前回の実行から入力が変わっていなければ、その報告を書いて終了コードと真を返す。
-func replay(store *cache.Store, key, output string, stdout, stderr, logw io.Writer, start time.Time) (int, bool) {
+func replay(store *cache.Store, key, output string, stdout, stderr, logw io.Writer, start time.Time, failOnSurvived bool) (int, bool) {
 	q := store.Quick(key)
 	if q == nil {
 		return 0, false
@@ -467,7 +528,7 @@ func replay(store *cache.Store, key, output string, stdout, stderr, logw io.Writ
 		}
 	}
 	report.WriteSummary(stdout, &rep)
-	return 0, true
+	return qualityCode(&rep, failOnSurvived, stderr), true
 }
 
 // quickInputs は、前回の報告をそのまま返してよいかを次の実行で確かめるための、入力のファイルとディレクトリを集め、今の状態の指紋を取る。
@@ -753,15 +814,16 @@ func typeNames(types []mutant.Type) []string {
 }
 
 // exitCode は、実行の誤りを終了コードへ対応させる。
-// 4 は、基準のテストが失敗したか、変異がテストに届かないと自己検査で分かり、判定しなかったことを表す。
 func exitCode(err error) int {
 	switch {
 	case err == nil:
-		return 0
-	case errors.Is(err, run.ErrBaseline), errors.Is(err, run.ErrSelfCheck):
-		return 4
+		return exitOK
+	case errors.Is(err, run.ErrBaseline):
+		return exitBaseline
+	case errors.Is(err, run.ErrSelfCheck):
+		return exitSelfCheck
 	}
-	return 1
+	return exitError
 }
 
 func splitTags(s string) []string {

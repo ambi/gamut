@@ -35,6 +35,32 @@ type Mutation struct {
 	// Accepted は、等価な変異体として受理したときの理由である。受理した変異体は判定を保つが、数と効率に含めない。
 	// gomutants にはないフィールドである。
 	Accepted string `json:"accepted,omitempty"`
+	// Critical は、重要領域の変異体かである。重要領域の生き残りは品質の条件を満たさない。gomutants にはないフィールドである。
+	Critical bool `json:"critical,omitempty"`
+}
+
+// survivor は、m が直すべき生き残り（LIVED か NOT COVERED で、受理していない）かを返す。
+func (m Mutation) survivor() bool {
+	return m.Accepted == "" && (m.Status == string(run.Lived) || m.Status == string(run.NotCovered))
+}
+
+// Thresholds は、点数（MutationScore）の閾値である。High 以上を high、Low 以上を low、それ未満を danger とする。
+// Break が正なら、点数が Break 未満のとき品質の条件を満たさない。
+type Thresholds struct {
+	High  float64 `json:"high"`
+	Low   float64 `json:"low"`
+	Break float64 `json:"break,omitempty"`
+}
+
+// Label は、点数 score の閾値によるラベル（high、low、danger）を返す。
+func (t Thresholds) Label(score float64) string {
+	switch {
+	case score >= t.High:
+		return "high"
+	case score >= t.Low:
+		return "low"
+	}
+	return "danger"
 }
 
 // StaleAcceptance は、もう要らない受理である。gamut accept -prune で消せる。
@@ -67,12 +93,18 @@ type Report struct {
 	Packages          []string `json:"packages,omitempty"`
 	TestEfficacy      float64  `json:"test_efficacy"`
 	MutationsCoverage float64  `json:"mutations_coverage"`
-	MutantsTotal      int      `json:"mutants_total"`
-	MutantsKilled     int      `json:"mutants_killed"`
-	MutantsLived      int      `json:"mutants_lived"`
-	MutantsNotViable  int      `json:"mutants_not_viable"`
-	MutantsNotCovered int      `json:"mutants_not_covered"`
-	MutantsTimedOut   int      `json:"mutants_timed_out"`
+	// MutationScore は、検出した変異体（KILLED、TIMED OUT）の、検出したものと生き残り（LIVED、NOT COVERED）の和に対する割合である。
+	// TestEfficacy と違い、どのテストも到達しない変異体も検出できなかったものとして数える。閾値はこの点数に当てる。
+	// gomutants にはないフィールドである。
+	MutationScore float64 `json:"mutation_score"`
+	// Thresholds は、要約のラベルに使った閾値である。gomutants にはないフィールドである。
+	Thresholds        *Thresholds `json:"thresholds,omitempty"`
+	MutantsTotal      int         `json:"mutants_total"`
+	MutantsKilled     int         `json:"mutants_killed"`
+	MutantsLived      int         `json:"mutants_lived"`
+	MutantsNotViable  int         `json:"mutants_not_viable"`
+	MutantsNotCovered int         `json:"mutants_not_covered"`
+	MutantsTimedOut   int         `json:"mutants_timed_out"`
 	// MutantsPending は、選択の外で判定しなかった変異体の数である。MutantsTotal と効率の計算には含めない。gomutants にはないフィールドである。
 	MutantsPending int `json:"mutants_pending,omitempty"`
 	// MutantsIgnored は、無効化コメントで止めた変異体の数である。MutantsTotal と効率の計算には含めない。gomutants にはないフィールドである。
@@ -189,6 +221,53 @@ func (r *Report) count() {
 		r.TestEfficacy = 100 * float64(detected) / float64(covered)
 		r.MutationsCoverage = 100 * float64(covered) / float64(covered+r.MutantsNotCovered)
 	}
+	// 判定する変異体がなければ、検出できなかったものもないので 100 とする。
+	r.MutationScore = 100
+	if all := detected + r.MutantsLived + r.MutantsNotCovered; all > 0 {
+		r.MutationScore = 100 * float64(detected) / float64(all)
+	}
+}
+
+// MarkCritical は、識別子が ids にある変異体を重要領域の変異体にする。
+func (r *Report) MarkCritical(ids map[string]bool) {
+	for i := range r.Files {
+		for k := range r.Files[i].Mutations {
+			m := &r.Files[i].Mutations[k]
+			m.Critical = ids[m.ID]
+		}
+	}
+}
+
+// Quality は、品質の条件を満たさない理由を返す。満たせば空である。
+//   - 重要領域に、受理していない生き残り（LIVED、NOT COVERED）がある。
+//   - Thresholds.Break が正で、点数がそれ未満である。
+//   - failOnSurvived で、受理していない生き残りが 1 体でもある。
+//
+// PENDING、EQUIVALENT、受理した変異体は生き残りに数えない。-since の実行では、選んだ変異体だけに当たる。
+func (r *Report) Quality(failOnSurvived bool) []string {
+	var critical, survivors int
+	for _, f := range r.Files {
+		for _, m := range f.Mutations {
+			if !m.survivor() {
+				continue
+			}
+			survivors++
+			if m.Critical {
+				critical++
+			}
+		}
+	}
+	var out []string
+	if critical > 0 {
+		out = append(out, fmt.Sprintf("%d survivors in critical regions", critical))
+	}
+	if t := r.Thresholds; t != nil && t.Break > 0 && r.MutationScore < t.Break {
+		out = append(out, fmt.Sprintf("mutation score %.2f%% is below the break threshold %g%%", r.MutationScore, t.Break))
+	}
+	if failOnSurvived && survivors > 0 {
+		out = append(out, fmt.Sprintf("%d survivors with -fail-on-survived", survivors))
+	}
+	return out
 }
 
 // ApplyAccepted は、受理を報告に当てる。ids は、判定したパッケージのファイルを指す受理の識別子で、reason はその理由を引く。
@@ -240,6 +319,9 @@ func WriteSummary(w io.Writer, r *Report) {
 		title, hint string
 		match       func(Mutation) bool
 	}{
+		// 重要領域の生き残りは、品質の条件を満たさないので先頭に並べ、ほかの組には並べない。
+		{"critical survivors", "every mutant in a critical region must be detected or accepted",
+			func(x Mutation) bool { return x.Critical && x.survivor() }},
 		{"no longer detected", "the tests that killed these mutants last time are gone and no remaining test fails: restore or replace them",
 			func(x Mutation) bool { return x.PreviouslyKilledBy != "" }},
 		{"not detected", "tests run the mutant and see a different value, but none fails: strengthen an assertion",
@@ -261,12 +343,12 @@ func WriteSummary(w io.Writer, r *Report) {
 			}
 		}
 	}
-	for _, g := range groups {
+	for i, g := range groups {
 		var lines []string
 		for _, f := range r.Files {
 			for _, m := range f.Mutations {
-				// 受理した生き残りは、直すものとして並べない。
-				if m.Accepted != "" || !g.match(m) {
+				// 受理した生き残りは、直すものとして並べない。重要領域の生き残りは、先頭の組にだけ並べる。
+				if m.Accepted != "" || i > 0 && m.Critical && m.survivor() || !g.match(m) {
 					continue
 				}
 				line := fmt.Sprintf("%s:%d:%d %s %s -> %s  [%s]", f.Path, m.Line, m.Column, m.Type, strings.TrimSpace(m.Original), m.Replacement, m.ID)
@@ -320,6 +402,25 @@ func WriteSummary(w io.Writer, r *Report) {
 	}
 	fmt.Fprintf(w, "\nkilled %d, lived %d, not covered %d, not viable %d, timed out %d (efficacy %.2f%%) in %.1fs%s\n",
 		r.MutantsKilled, r.MutantsLived, r.MutantsNotCovered, r.MutantsNotViable, r.MutantsTimedOut, r.TestEfficacy, r.ElapsedTime, reused)
+	score := fmt.Sprintf("mutation score %.2f%%", r.MutationScore)
+	if r.Thresholds != nil {
+		score += " [" + r.Thresholds.Label(r.MutationScore) + "]"
+	}
+	var critical, criticalSurvived int
+	for _, f := range r.Files {
+		for _, m := range f.Mutations {
+			if m.Critical && m.Status != string(run.Pending) {
+				critical++
+				if m.survivor() {
+					criticalSurvived++
+				}
+			}
+		}
+	}
+	if critical > 0 {
+		score += fmt.Sprintf("; critical regions: %d mutants, %d survived", critical, criticalSurvived)
+	}
+	fmt.Fprintln(w, score)
 }
 
 // MarkReused は、実行して決まる判定（KILLED、TIMED OUT、not detected の LIVED、EQUIVALENT、個別ビルドの NOT VIABLE）を、

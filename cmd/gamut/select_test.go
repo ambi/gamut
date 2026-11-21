@@ -232,8 +232,8 @@ func TestMutant_RerunsOnlyTheNamedMutant(t *testing.T) {
 		}
 	})
 	t.Run("-mutant and -since cannot be combined", func(t *testing.T) {
-		if _, _, code := gamut(t, "-q", "-mutant", prefix, "-since", "HEAD", dir); code != 2 {
-			t.Errorf("exit code = %d, want 2", code)
+		if _, _, code := gamut(t, "-q", "-mutant", prefix, "-since", "HEAD", dir); code != 1 {
+			t.Errorf("exit code = %d, want 1", code)
 		}
 	})
 }

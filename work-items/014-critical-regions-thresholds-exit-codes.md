@@ -1,5 +1,5 @@
 ---
-status: pending
+status: done
 stage: 3
 depends_on: [012]
 created_at: 2026-11-20
@@ -36,3 +36,11 @@ created_at: 2026-11-20
 ## 検証
 
 - 端から端までのテスト。
+
+## 要約
+
+- 重要領域は、`-critical`（設定の `critical`）の glob（要素 `**` は 0 個以上のディレクトリ）に当たるファイルと、関数の宣言の Doc の `//gamut:critical` で決める。`mutant.Critical` が識別子の集合を返し、報告の変異体に `critical` を付ける。
+- 閾値は `-threshold-high`、`-threshold-low`、`-threshold-break`（設定の `thresholds`）で、新しい点数 `mutation_score` に当てる。点数は検出した変異体の、検出したものと生き残り（`LIVED`、`NOT COVERED`）の和に対する割合で、`test_efficacy` と違って到達しない変異体も数える。既定は high 80、low 60、break 0（無効）にした。
+- 品質の条件（重要領域の受理していない生き残り、break 未満の点数、`-fail-on-survived` の生き残り）を満たさなければ、報告と要約を書いてから終了コード 2 で終える。変更のない再実行も、再生した報告に条件を当て直す。報告を変えるフラグは、変更のない再実行の鍵に入れた。
+- 終了コードを作業項目の表に合わせた。引数の誤りは 2 から 1 に、自己検査の失敗は 4 から 5 に変わった。gamut はまだ公開していないので、互換のための移行は設けない。完了済みの 001、002、008 の要約の終了コードは当時の記録として残し、design.md と README を今の規則にした。
+- 端から端までのテスト（`quality_test.go`）で、重要領域の生き残りで終了コード 2 になり受理すると 0 になること、glob、break 閾値、`-fail-on-survived`、設定ファイルの各項目、引数の誤り（1）、基準のテストの失敗（4）、`panic` を握りつぶすコードでの自己検査の失敗（5）を再現した。

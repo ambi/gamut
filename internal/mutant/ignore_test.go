@@ -50,7 +50,7 @@ func TestIgnores_AppliesEachCommentForm(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			pkg, err := loadOne(writeModule(t, tc.src), nil)
+			pkg, err := loadOne(writeModule(t, tc.src))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -85,7 +85,7 @@ func TestIgnores_AppliesEachCommentForm(t *testing.T) {
 }
 
 func TestIgnores_RejectsUnknownMutatorTypes(t *testing.T) {
-	pkg, err := loadOne(writeModule(t, "package m\n\nfunc F(a, b int) int {\n\treturn a + b //gamut:ignore ARITHMETIC -- typo\n}\n"), nil)
+	pkg, err := loadOne(writeModule(t, "package m\n\nfunc F(a, b int) int {\n\treturn a + b //gamut:ignore ARITHMETIC -- typo\n}\n"))
 	if err != nil {
 		t.Fatal(err)
 	}

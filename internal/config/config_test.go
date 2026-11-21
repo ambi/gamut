@@ -30,20 +30,28 @@ func TestLoad_ReadsEveryItem(t *testing.T) {
 		"timeout": {"factor": 3, "min": "1500ms"},
 		"workers": 3,
 		"tags": ["integration"],
-		"test_flags": ["-short"]
+		"test_flags": ["-short"],
+		"critical": ["auth/**", "billing/fee.go"],
+		"thresholds": {"high": 90, "low": 70, "break": 50.5},
+		"fail_on_survived": true
 	}`)
 	c, err := config.Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := map[string][]string{
-		"only":           {"ARITHMETIC_BASE,CONDITIONALS_NEGATION"},
-		"exclude-files":  {`_gen\.go$`, "^internal/legacy/"},
-		"timeout-factor": {"3"},
-		"timeout-min":    {"1.5s"},
-		"workers":        {"3"},
-		"tags":           {"integration"},
-		"test-flags":     {"-short"},
+		"only":             {"ARITHMETIC_BASE,CONDITIONALS_NEGATION"},
+		"exclude-files":    {`_gen\.go$`, "^internal/legacy/"},
+		"timeout-factor":   {"3"},
+		"timeout-min":      {"1.5s"},
+		"workers":          {"3"},
+		"tags":             {"integration"},
+		"test-flags":       {"-short"},
+		"critical":         {"auth/**", "billing/fee.go"},
+		"threshold-high":   {"90"},
+		"threshold-low":    {"70"},
+		"threshold-break":  {"50.5"},
+		"fail-on-survived": {"true"},
 	}
 	if got := c.Flags(); !reflect.DeepEqual(got, want) {
 		t.Errorf("Flags() = %v, want %v", got, want)
@@ -71,6 +79,9 @@ func TestLoad_RejectsInvalidFiles(t *testing.T) {
 		{"bad duration", `{"timeout": {"min": "soon"}}`, "timeout.min"},
 		{"non-positive factor", `{"timeout": {"factor": 0}}`, "timeout.factor"},
 		{"non-positive workers", `{"workers": 0}`, "workers"},
+		{"threshold out of range", `{"thresholds": {"break": 120}}`, "thresholds.break"},
+		{"low above high", `{"thresholds": {"high": 60, "low": 80}}`, "thresholds.low"},
+		{"unknown threshold", `{"thresholds": {"medium": 1}}`, "medium"},
 		{"trailing data", `{"workers": 1} {}`, "after"},
 		{"not JSON", `workers: 1`, "invalid"},
 	}

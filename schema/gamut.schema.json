@@ -49,6 +49,25 @@
       "description": "Flags for every test binary run, such as \"-short\", the same as -test-flags.",
       "type": "array",
       "items": { "type": "string" }
+    },
+    "critical": {
+      "description": "Globs on module-relative, slash-separated file paths (** matches any number of directories) whose mutants must all be detected or accepted. The same as -critical.",
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "thresholds": {
+      "description": "Mutation score thresholds in percent. The summary labels the score high, low, or danger; a score below break fails with exit code 2.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "high": { "description": "The same as -threshold-high.", "type": "number", "minimum": 0, "maximum": 100 },
+        "low": { "description": "The same as -threshold-low.", "type": "number", "minimum": 0, "maximum": 100 },
+        "break": { "description": "The same as -threshold-break; 0 disables it.", "type": "number", "minimum": 0, "maximum": 100 }
+      }
+    },
+    "fail_on_survived": {
+      "description": "Fail with exit code 2 when any unaccepted mutant survives. The same as -fail-on-survived.",
+      "type": "boolean"
     }
   }
 }
