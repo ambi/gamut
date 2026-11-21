@@ -293,6 +293,45 @@ func (s *Store) Prune(packages []string, live func(id string) bool) {
 
 // Save は記録をファイルへ書く。同じディレクトリの一時ファイルに書いてから改名するので、途中で止まっても前のファイルは壊れない。
 func (s *Store) Save() (err error) {
+	return s.save()
+}
+
+// Merge は、inputs のキャッシュファイル（シャードごとのもの）の記録を合わせて out に書く。
+// どの入力も同じ形式の版と環境でなければならない。同じ変異体の判定が複数あれば、kill matrix の判定を、なければ後の入力のものを採る。
+// 変更のない再実行の記録（quick）はシャードの指定を鍵に含むので、合わせた後には当たらないため書かない。
+func Merge(inputs []string, out string) error {
+	merged := &Store{path: out, entries: map[string]*Entry{}, coverage: map[string]*Coverage{}, viability: map[string]*Viability{},
+		equivalence: map[string]*Equivalence{}, quick: map[string]*Quick{}, loadHints: map[string][]string{}}
+	for i, in := range inputs {
+		data, err := os.ReadFile(in)
+		if err != nil {
+			return err
+		}
+		var f fileFormat
+		if err := json.Unmarshal(data, &f); err != nil {
+			return fmt.Errorf("read the cache %s: %w", in, err)
+		}
+		switch {
+		case f.Version != formatVersion:
+			return fmt.Errorf("the cache %s has format %d, want %d", in, f.Version, formatVersion)
+		case i > 0 && f.Env != merged.env:
+			return fmt.Errorf("the cache %s was written in another environment than %s (Go, gamut, go.mod, go.sum, or flags differ)", in, inputs[0])
+		}
+		merged.env = f.Env
+		for id, e := range f.Mutants {
+			if old := merged.entries[id]; e != nil && (old == nil || !old.Matrix || e.Matrix) {
+				merged.entries[id] = e
+			}
+		}
+		maps.Copy(merged.coverage, f.Coverage)
+		maps.Copy(merged.viability, f.Viability)
+		maps.Copy(merged.equivalence, f.Equivalence)
+		maps.Copy(merged.loadHints, f.LoadHints)
+	}
+	return merged.save()
+}
+
+func (s *Store) save() (err error) {
 	s.mu.Lock()
 	data, err := json.Marshal(fileFormat{Version: formatVersion, Env: s.env, Mutants: s.entries, Coverage: s.coverage, Viability: s.viability,
 		Equivalence: s.equivalence, Quick: s.quick, LoadHints: s.loadHints})

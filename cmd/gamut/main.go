@@ -55,6 +55,9 @@ func realMain(args []string, stdout, stderr io.Writer) int {
 	if len(args) > 0 && args[0] == "accept" {
 		return acceptMain(args[1:], stdout, stderr)
 	}
+	if len(args) > 0 && args[0] == "merge" {
+		return mergeMain(args[1:], stdout, stderr)
+	}
 	if len(args) > 0 && args[0] == "select-tests" {
 		return judge(args[1:], stdout, stderr, modeSelectTests)
 	}
@@ -72,6 +75,57 @@ const (
 	// modeSelectTests は、何も実行せず、差分が壊しうるテストをキャッシュから選んで出す（gamut select-tests）。
 	modeSelectTests
 )
+
+// mergeMain は、gamut merge を実行する。-shard で分けて実行した報告（gomutants の形式）とキャッシュを、それぞれ 1 つにまとめる。
+// まとめた報告の要約を標準出力に書き、品質の条件を満たさなければ終了コード 2 を返す。
+func mergeMain(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("gamut merge", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	output := fs.String("o", "", "write the merged report (gomutants JSON) to this file")
+	var caches multiFlag
+	fs.Var(&caches, "cache", "a shard's cache file to merge (repeatable)")
+	cacheOut := fs.String("cache-out", "", "write the merged cache to this file; needs -cache")
+	failOnSurvived := fs.Bool("fail-on-survived", false, "exit 2 when any unaccepted mutant survives")
+	fs.Usage = func() {
+		fmt.Fprintln(stderr, "usage: gamut merge [-o <report>] [-cache <shard cache>... -cache-out <cache>] <shard report>...")
+		fs.PrintDefaults()
+	}
+	if err := fs.Parse(args); err != nil {
+		return exitError
+	}
+	if fs.NArg() == 0 || (len(caches) > 0) != (*cacheOut != "") {
+		fs.Usage()
+		return exitError
+	}
+	var reps []*report.Report
+	for _, path := range fs.Args() {
+		r, err := report.Read(path)
+		if err != nil {
+			fmt.Fprintln(stderr, "gamut:", err)
+			return exitError
+		}
+		reps = append(reps, r)
+	}
+	rep, err := report.Merge(reps)
+	if err != nil {
+		fmt.Fprintln(stderr, "gamut:", err)
+		return exitError
+	}
+	if *output != "" {
+		if err := writeReport(*output, rep); err != nil {
+			fmt.Fprintln(stderr, "gamut:", err)
+			return exitError
+		}
+	}
+	if *cacheOut != "" {
+		if err := cache.Merge(caches, *cacheOut); err != nil {
+			fmt.Fprintln(stderr, "gamut:", err)
+			return exitError
+		}
+	}
+	report.WriteSummary(stdout, rep)
+	return qualityCode(rep, *failOnSurvived, stderr)
+}
 
 // acceptMain は、gamut accept を実行する。
 // 識別子を渡せば、モジュールのルートの受理の記録に足す。-prune なら、残りの引数で判定し、要らなくなった受理を消す。
@@ -171,6 +225,8 @@ func judge(args []string, stdout, stderr io.Writer, m mode) int {
 	fs.Var(&reporterKinds, "reporter", "report format: text (the summary on stdout), gomutants (JSON), json (mutation-testing-elements), html, agent (one JSON document on stdout for coding agents), or simplify (surviving removals by function, as candidates for unneeded code) (repeatable; default text, plus gomutants with -o)")
 	reportDir := fs.String("report-dir", filepath.Join(".gamut", "report"), "write the json, html, and gomutants (without -o) reports to this directory")
 	annotations := fs.String("annotations", "", "also print the survivors to fix as CI annotations on stdout (values: github)")
+	shardSpec := fs.String("shard", "", "judge only shard k/n of the mutants, split by a hash of their IDs; combine the shards' reports and caches with gamut merge")
+	timeBudget := fs.Duration("time-budget", 0, "stop starting mutants once the run has taken this long and report the rest as PENDING; the next run with the same cache continues (0: no budget)")
 	killMatrix := fs.Bool("kill-matrix", false, "run every infected test of each mutant in a fresh process instead of stopping at the first failure, record all tests that detect it, and report tests that detect nothing, subsumed tests, and duplicate tests")
 	maxDepth := fs.Int("max-depth", 0, "count a test as reaching a mutated site only within this many calls of module functions from the test function (0: no limit)")
 	var aridCalls, aridPackages multiFlag
@@ -292,7 +348,8 @@ func judge(args []string, stdout, stderr io.Writer, m mode) int {
 		settings = append(settings, fmt.Sprintf("max-depth=%d", *maxDepth))
 	}
 	// 選択のない実行は、入力が前回と同じなら、読み込みもビルドもせずに前回の報告を返す。
-	quickable := !*noCache && !*dryRun && len(ids) == 0 && *since == "" && m == modeJudge
+	// 予算で残した変異体があると、前回の報告は続きを含まないので、近道を使わない。
+	quickable := !*noCache && !*dryRun && len(ids) == 0 && *since == "" && m == modeJudge && *timeBudget == 0
 	var early *cache.Store
 	if !*noCache && earlyDir != "" {
 		if early, err = openStore(*cachePath, earlyDir, settings); err != nil {
@@ -307,7 +364,7 @@ func judge(args []string, stdout, stderr io.Writer, m mode) int {
 			fmt.Sprintf("integration=%t", *integration), fmt.Sprintf("detect-equivalent=%t", *detectEquivalent),
 			"exclude=" + strings.Join(excludes, "\x00"), "critical=" + strings.Join(critical, "\x00"),
 			fmt.Sprintf("arid=%t,%s,%s", *noArid, strings.Join(aridCalls, "\x00"), strings.Join(aridPackages, "\x00")),
-			fmt.Sprintf("kill-matrix=%t", *killMatrix),
+			fmt.Sprintf("kill-matrix=%t", *killMatrix), "shard=" + *shardSpec,
 			fmt.Sprintf("thresholds=%g,%g,%g", thresholds.High, thresholds.Low, thresholds.Break),
 		})...)
 		if early != nil {
@@ -406,6 +463,15 @@ func judge(args []string, stdout, stderr io.Writer, m mode) int {
 	}
 	opts.MaxDepth = *maxDepth
 	opts.KillMatrix = *killMatrix
+	if *shardSpec != "" {
+		if opts.Shard, err = run.ParseShard(*shardSpec); err != nil {
+			fmt.Fprintln(stderr, "gamut:", err)
+			return exitError
+		}
+	}
+	if *timeBudget > 0 {
+		opts.Deadline = start.Add(*timeBudget)
+	}
 	var unrepeatableMu sync.Mutex
 	var unrepeatable []string
 	depthTests, depthReaches := 0, 0

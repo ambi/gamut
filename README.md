@@ -53,6 +53,8 @@ go build -o bin/gamut ./cmd/gamut
 | `-include-test-changes` | false | `-since` で、差分が変えたテストが到達する、差分の外の生き残りも再検査する |
 | `-mutant` | なし | この識別子（一意な前方一致でもよい）の変異体だけを、キャッシュを使わずに判定する。繰り返し指定できる |
 | `-integration` | false | 対象パッケージを import するモジュール内のパッケージのテストでも検出を試す |
+| `-shard` | なし | `k/n` で、変異体を識別子のハッシュで n 個に分けたうちの k 番目だけを判定する。シャードの報告とキャッシュは `gamut merge` でまとめる |
+| `-time-budget` | 0 | この時間を過ぎたら新しい変異体を始めず、残りを `PENDING` にする。同じキャッシュでの次の実行が続きから判定する |
 | `-kill-matrix` | false | 変異体ごとに感染したテストをすべて実行して検出したテストをすべて記録し、何も検出しないテスト、包含されるテスト、重複するテストを報告する。変異体ごとにプロセスを起動するので遅い |
 | `-max-depth` | 0 | テスト関数からモジュール内の関数の呼び出しでこの深さまでの到達だけを、被覆に数える（0 で制限しない）。生き残りと `NOT COVERED` が増える |
 | `-isolate` | false | テストプロセスを変異体の間で使い回さず、変異体ごとに起動する |
@@ -199,6 +201,14 @@ open .gamut/report/mutation.html
 
 ```console
 ./bin/gamut -reporter agent -since main ./path/to/pkg
+```
+
+大きなモジュールは、CI のジョブごとに `-shard` で分けて判定し、`gamut merge` でまとめられる。
+
+```console
+./bin/gamut -shard 1/2 -o r1.json -cache c1.json ./...   # ジョブ 1
+./bin/gamut -shard 2/2 -o r2.json -cache c2.json ./...   # ジョブ 2
+./bin/gamut merge -o report.json -cache c1.json -cache c2.json -cache-out .gamut/cache.json r1.json r2.json
 ```
 
 `gamut select-tests` は、前回の判定から、差分が壊しうるテストを何も実行せずに選ぶ。

@@ -1,5 +1,5 @@
 ---
-status: pending
+status: done
 stage: 4
 depends_on: [004]
 created_at: 2026-11-20
@@ -33,3 +33,10 @@ created_at: 2026-11-20
 ## 検証
 
 - 端から端までのテスト。
+
+## 要約
+
+- `-shard k/n`（`run.Shard`）は、識別子の FNV-1a ハッシュで変異体を分け、シャードの外を `PENDING` にする。作業項目の `--shard` と `--time-budget` は、gamut のほかのフラグに合わせて 1 つのハイフンで書く。
+- `gamut merge` は、報告を `report.Merge`（同じ変異体は `PENDING` でない判定を採り、数え直す）で、キャッシュを `cache.Merge`（同じ版と環境のものだけ、quick の記録は捨てる）でまとめ、要約と品質の条件の終了コードを返す。
+- `-time-budget` は、gamut の起動からの時間で、予算を過ぎたら実行の待ち行列から新しい変異体を始めずに `PENDING` にし、キャッシュに書かない。予算を付けた実行は、変更のない再実行の近道を使わない。
+- 端から端までのテストで、固定モジュールを 2 つのシャードで実行してまとめた報告の状態が 1 回の実行と一致し、各シャードが一部だけを互いに重ならず判定し、まとめたキャッシュで実行し直すと判定をすべて再利用することを表明した（`TestShard_MergeEqualsOneRun`）。予算を 1 ナノ秒にすると実行の要る変異体が `PENDING` になってキャッシュに書かれず、次の実行で判定されることも表明した（`TestTimeBudget_LeavesTheRestPending`）。

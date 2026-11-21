@@ -101,6 +101,10 @@ type Options struct {
 	// Isolate は、変異体ごとに新しいテストプロセスで判定するかである。偽なら、gamut の実行の間だけ動くテストプロセスで、
 	// 複数の変異体を順に判定する（パッケージの初期化を変異体ごとに繰り返さない）。
 	Isolate bool
+	// Shard は、判定する変異体を識別子のハッシュで分けたうちの 1 つに絞る。nil ならすべてを判定する。
+	Shard *Shard
+	// Deadline が零でなければ、この時刻を過ぎたら新しい変異体の実行を始めず、残りを PENDING にする。
+	Deadline time.Time
 	// KillMatrix は、変異体ごとに感染したテストをすべて実行し、検出したテストをすべて記録するかである（kill matrix）。
 	// 最初の失敗で止めず、プロセスは変異体ごとに新しく起動する。
 	KillMatrix bool
@@ -232,6 +236,8 @@ func All(ctx context.Context, targets []Target, opts Options) ([][]*Result, erro
 		viable := 0
 		for k, m := range t.Mutants {
 			switch {
+			case !opts.Shard.Contains(m.ID):
+				u.results[k] = &Result{Mutant: m, Status: Pending}
 			case !opts.Select.direct(u, m) && !opts.Select.mayRecheck():
 				u.results[k] = &Result{Mutant: m, Status: Pending}
 			case !m.Viable:
@@ -300,8 +306,17 @@ func All(ctx context.Context, targets []Target, opts Options) ([][]*Result, erro
 	start := time.Now()
 	var mu sync.Mutex
 	done := 0
+	overBudget := 0
 	parallel(len(jobs), opts.Workers, func(k int) {
 		j := jobs[k]
+		if !opts.Deadline.IsZero() && time.Now().After(opts.Deadline) {
+			// 予算を過ぎたら始めず、キャッシュにも書かない。次の実行がここから続ける。
+			mu.Lock()
+			j.unit.results[j.index] = &Result{Mutant: j.unit.Mutants[j.index], Status: Pending}
+			overBudget++
+			mu.Unlock()
+			return
+		}
 		r := j.run()
 		// 取り消しの後に終わった実行は、テストが失敗したのか止められたのか区別できないので、記録しない。
 		if ctx.Err() == nil {
@@ -321,7 +336,10 @@ func All(ctx context.Context, targets []Target, opts Options) ([][]*Result, erro
 			opts.afterJob()
 		}
 	})
-	logf("execute: %d mutants in %s", len(jobs), time.Since(start).Round(time.Millisecond))
+	logf("execute: %d mutants in %s", len(jobs)-overBudget, time.Since(start).Round(time.Millisecond))
+	if overBudget > 0 {
+		logf("time budget: exhausted; %d mutants left pending for the next run", overBudget)
+	}
 
 	out := make([][]*Result, len(units))
 	for i, u := range units {
