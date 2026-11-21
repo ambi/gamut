@@ -1,5 +1,5 @@
 ---
-status: pending
+status: done
 stage: 3
 depends_on: []
 created_at: 2026-11-20
@@ -36,3 +36,11 @@ Go の指令コメントの慣習（`//go:`、`//nolint:`）に合わせ、`//` 
 ## 検証
 
 - 単体テストと端から端までのテスト。
+
+## 要約
+
+- `mutant.Ignores` が対象ファイルの `//gamut:` で始まるコメントを読み、変異体を判定するものと止めたものに分ける。止めた変異体は列挙の直後に外すので、型検査も実行もせず、数えない。残りの番号は 1 から振り直す。
+- 「次の行または同じ行」は、同じ行にコードがあればその行、なければ次の行と定めた。関数全体は、コメントが関数の宣言の Doc に入っているときとした。Doc の中なら、説明の文の後ろに置いてもよい。
+- 対象範囲の「`IGNORED` として報告」は、状態を足さない形に変えた。gomutants の状態の名前に `IGNORED` がなく、状態を足すと gomutants の報告を読む検査が知らない状態に出会い、不変条件（足すのはフィールドだけ）に反するためである。止めた変異体は最上位の `ignored`（識別子、位置、演算子、理由）と `mutants_ignored` に入れ、要約に「N ignored by comments」を出す。mutation-testing-elements の形式では、015 で `Ignored` の状態にする。
+- 未知の演算子の名前は終了コード 1、理由のないコメント、対応しない `start` と `end`、未知の指令は警告にした。`-mutant` で止めた変異体を指定したら、コメントの位置を示して終了コード 1 にする。
+- 表の単体テスト（`TestIgnores_AppliesEachCommentForm`）と、`testdata/ignore` の端から端までのテスト（`TestIgnore_ReportsCommentedMutantsApart`）で、各形式が対象の変異体だけを止めることを表明した。

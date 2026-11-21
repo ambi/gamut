@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ambi/gamut/internal/mutant"
 	"github.com/ambi/gamut/internal/run"
 )
 
@@ -56,9 +57,45 @@ type Report struct {
 	MutantsNotCovered int      `json:"mutants_not_covered"`
 	MutantsTimedOut   int      `json:"mutants_timed_out"`
 	// MutantsPending は、選択の外で判定しなかった変異体の数である。MutantsTotal と効率の計算には含めない。gomutants にはないフィールドである。
-	MutantsPending int     `json:"mutants_pending,omitempty"`
+	MutantsPending int `json:"mutants_pending,omitempty"`
+	// MutantsIgnored は、無効化コメントで止めた変異体の数である。MutantsTotal と効率の計算には含めない。gomutants にはないフィールドである。
+	MutantsIgnored int     `json:"mutants_ignored,omitempty"`
 	ElapsedTime    float64 `json:"elapsed_time"`
 	Files          []File  `json:"files"`
+	// Ignored は、無効化コメントで止めた変異体である。gomutants の状態の名前を保つため、files[].mutations には入れない。
+	// gomutants にはないフィールドである。
+	Ignored []IgnoredMutation `json:"ignored,omitempty"`
+}
+
+// IgnoredMutation は、無効化コメントで止めた 1 体の変異体である。
+type IgnoredMutation struct {
+	ID          string `json:"id"`
+	Type        string `json:"type"`
+	Path        string `json:"path"`
+	Line        int    `json:"line"`
+	Column      int    `json:"column"`
+	Original    string `json:"original"`
+	Replacement string `json:"replacement"`
+	// Reason は、コメントの -- の後ろに書いた理由である。
+	Reason string `json:"reason,omitempty"`
+}
+
+// AddIgnored は、無効化コメントで止めた変異体を報告に足す。
+func (r *Report) AddIgnored(ignored []mutant.Ignored) {
+	for _, ig := range ignored {
+		m := ig.Mutant
+		r.Ignored = append(r.Ignored, IgnoredMutation{
+			ID: m.ID, Type: string(m.Type), Path: m.File.Rel, Line: m.Line, Column: m.Column,
+			Original: m.Original.String(), Replacement: m.Replacement.String(), Reason: ig.Reason,
+		})
+	}
+	slices.SortFunc(r.Ignored, func(a, b IgnoredMutation) int {
+		if a.Path != b.Path {
+			return strings.Compare(a.Path, b.Path)
+		}
+		return a.Line - b.Line
+	})
+	r.MutantsIgnored = len(r.Ignored)
 }
 
 // Build は判定から報告を作る。label は package フィールドに入れる名前、packages は判定したパッケージの import パスである。
@@ -174,6 +211,9 @@ func WriteSummary(w io.Writer, r *Report) {
 	}
 	if r.MutantsPending > 0 {
 		reused += fmt.Sprintf(", %d pending outside the selection", r.MutantsPending)
+	}
+	if r.MutantsIgnored > 0 {
+		reused += fmt.Sprintf(", %d ignored by comments", r.MutantsIgnored)
 	}
 	fmt.Fprintf(w, "\nkilled %d, lived %d, not covered %d, not viable %d, timed out %d (efficacy %.2f%%) in %.1fs%s\n",
 		r.MutantsKilled, r.MutantsLived, r.MutantsNotCovered, r.MutantsNotViable, r.MutantsTimedOut, r.TestEfficacy, r.ElapsedTime, reused)

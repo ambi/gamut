@@ -177,12 +177,26 @@ func realMain(args []string, stdout, stderr io.Writer) int {
 	targets := make([]run.Target, len(pkgs))
 	paths := make([]string, len(pkgs))
 	total := 0
+	var ignored []mutant.Ignored
 	for i, pkg := range pkgs {
 		mutants := mutant.Without(mutant.Enumerate(pkg, types), func(m *mutant.Mutant) bool { return excluded(excludeFiles, m.File.Rel) })
+		mutants, skipped, warnings, err := mutant.Ignores(pkg, mutants)
+		if err != nil {
+			fmt.Fprintln(stderr, "gamut:", err)
+			return 1
+		}
+		for _, w := range warnings {
+			fmt.Fprintln(stderr, "gamut: warning:", w)
+		}
+		ignored = append(ignored, skipped...)
 		targets[i] = run.Target{Pkg: pkg, Mutants: mutants}
 		paths[i] = pkg.ImportPath
 		total += len(mutants)
-		fmt.Fprintf(logw, "load: %s, %d mutants\n", pkg.ImportPath, len(mutants))
+		if len(skipped) > 0 {
+			fmt.Fprintf(logw, "load: %s, %d mutants, %d ignored by comments\n", pkg.ImportPath, len(mutants), len(skipped))
+		} else {
+			fmt.Fprintf(logw, "load: %s, %d mutants\n", pkg.ImportPath, len(mutants))
+		}
 	}
 	fmt.Fprintf(logw, "load: %d packages, %d mutants in %s\n", len(pkgs), total, time.Since(start).Round(time.Millisecond))
 	if *dryRun {
@@ -202,7 +216,7 @@ func realMain(args []string, stdout, stderr io.Writer) int {
 	var changes *diff.Changes
 	switch {
 	case len(ids) > 0:
-		selected, err := resolveMutants(ids, targets)
+		selected, err := resolveMutants(ids, targets, ignored)
 		if err != nil {
 			fmt.Fprintln(stderr, "gamut:", err)
 			return 1
@@ -292,6 +306,7 @@ func realMain(args []string, stdout, stderr io.Writer) int {
 		label = strings.Join(fs.Args(), " ")
 	}
 	rep := report.Build(pkgs[0].ModulePath, label, paths, results, time.Since(start))
+	rep.AddIgnored(ignored)
 	if *output != "" {
 		if err := writeReport(*output, rep); err != nil {
 			fmt.Fprintln(stderr, "gamut:", err)
@@ -484,7 +499,7 @@ func resolvePath(p string) string {
 
 // resolveMutants は、識別子か、識別子の一意な前方一致から変異体を求める。
 // 当たらないか、複数に当たる指定があれば、候補を並べた誤りを返す。
-func resolveMutants(ids []string, targets []run.Target) (map[*mutant.Mutant]bool, error) {
+func resolveMutants(ids []string, targets []run.Target, ignored []mutant.Ignored) (map[*mutant.Mutant]bool, error) {
 	out := map[*mutant.Mutant]bool{}
 	for _, id := range ids {
 		var hits, exact []*mutant.Mutant
@@ -503,6 +518,11 @@ func resolveMutants(ids []string, targets []run.Target) (map[*mutant.Mutant]bool
 		}
 		switch len(hits) {
 		case 0:
+			for _, ig := range ignored {
+				if strings.HasPrefix(ig.Mutant.ID, id) {
+					return nil, fmt.Errorf("%q matches %s, which a //gamut:ignore comment covers at %s:%d", id, ig.Mutant.ID, ig.Mutant.File.Rel, ig.Mutant.Line)
+				}
+			}
 			return nil, fmt.Errorf("no mutant matches %q", id)
 		case 1:
 			out[hits[0]] = true

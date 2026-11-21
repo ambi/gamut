@@ -90,8 +90,32 @@ Ctrl-C で止めても、それまでの判定は保存される。
 どのテストも変異箇所に到達しない逆依存パッケージは、次の実行からビルドしない。
 規則は [設計](docs/design.md#判定する変異体の選択) と [設計](docs/design.md#統合モード) が定める。
 
+変異しても観測できない箇所は、理由とともにコメントで止める。
+
+```go
+return a * b //gamut:ignore -- the product is only a cache key
+
+//gamut:ignore CONDITIONALS_BOUNDARY -- equal values never reach here
+if a < b {
+
+// Fast は Slow と同じ結果を返す近道である。
+//
+//gamut:ignore -- a fast path with the same result as Slow
+func Fast(a, b int) bool {
+
+//gamut:ignore-start ARITHMETIC_BASE -- defensive arithmetic
+...
+//gamut:ignore-end
+```
+
+行末のコメントはその行、単独の行のコメントは次の行、関数の宣言の直前のコメントは関数全体、`ignore-start` と `ignore-end` はその間を止める。
+演算子を省けばすべての演算子を止める。
+理由のないコメントは警告する。
+規則は [設計](docs/design.md#無効化コメント) が定める。
+
 JSON の報告は gomutants と同じ `files[].mutations[]` の形に、`reason`、`mode`、`tests`、`killed_by`、`cached`、`previously_killed_by` を足したものである。
 `-since` の外の変異体は `PENDING` で、最上位の `mutants_pending` に数え、`mutants_total` と効率には含めない。
+コメントで止めた変異体は `files[].mutations[]` に入れず、最上位の `ignored` に理由とともに並べ、`mutants_ignored` に数える。
 `files[].path` はモジュール相対のパスである。
 最上位の `package` は、1 パッケージならその import パス、複数なら引数に指定したパターンで、`packages` に判定したパッケージの import パスを並べる。
 
