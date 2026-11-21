@@ -108,11 +108,19 @@ type listedPackage struct {
 		GoVersion string
 	}
 	Error *struct{ Err string }
+	// cgoGenerated は、cgo の前処理で生成されたファイルの絶対パスである。型の検査にだけ使う。
+	cgoGenerated []string
+}
+
+// Skipped は、判定できないので読み込みから外したパッケージと、その理由である。
+type Skipped struct {
+	ImportPath string
+	Reason     string
 }
 
 // Load は、ビルドタグ tags の下で patterns に当たるパッケージを読み、型を検査する。
 func Load(patterns []string, tags []string) ([]*Package, error) {
-	pkgs, _, err := WithHint(patterns, tags, nil)
+	pkgs, _, _, err := WithHint(patterns, tags, nil)
 	return pkgs, err
 }
 
@@ -126,13 +134,16 @@ const listFields = "Dir,ImportPath,Name,DepOnly,GoFiles,CgoFiles,TestGoFiles,XTe
 // （schemata のバイナリは書き換えたソースからコンパイルし直す）。そこで、依存の一覧（-export なし）と、
 // hint のパッケージのエクスポートデータとを並行して求め、hint に足りないものだけを後から求める。
 // hint が前回と同じなら、go list の 2 回の実行は並行するので、待つのは 1 回分である。
-func WithHint(patterns, tags, hint []string) ([]*Package, []string, error) {
+//
+// cgo を使うパッケージは、cgo の前処理の後のファイル（go list -compiled）で型を検査し、import "C" を持たないファイルだけを変異の対象にする。
+// 前処理ができなければ（C コンパイラがないなど）、そのパッケージを飛ばし、skipped に理由を返す。
+func WithHint(patterns, tags, hint []string) (pkgs []*Package, needed []string, skipped []Skipped, err error) {
 	if len(patterns) == 0 {
-		return nil, nil, errors.New("no package patterns")
+		return nil, nil, nil, errors.New("no package patterns")
 	}
 	abs, err := AbsPatterns(patterns)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	runDir := strings.TrimSuffix(abs[0], filepath.FromSlash("/..."))
 	exports := map[string]string{}
@@ -150,7 +161,7 @@ func WithHint(patterns, tags, hint []string) ([]*Package, []string, error) {
 	out, err := goList(runDir, args)
 	hinted.Wait()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	var targets []*listedPackage
 	var all []*listedPackage
@@ -160,10 +171,10 @@ func WithHint(patterns, tags, hint []string) ([]*Package, []string, error) {
 		if err := dec.Decode(&p); errors.Is(err, io.EOF) {
 			break
 		} else if err != nil {
-			return nil, nil, fmt.Errorf("decode go list output: %w", err)
+			return nil, nil, nil, fmt.Errorf("decode go list output: %w", err)
 		}
 		if p.Error != nil {
-			return nil, nil, fmt.Errorf("go list %s: %s", p.ImportPath, p.Error.Err)
+			return nil, nil, nil, fmt.Errorf("go list %s: %s", p.ImportPath, p.Error.Err)
 		}
 		all = append(all, &p)
 		if !p.DepOnly && !slices.Contains(HelperImports, p.ImportPath) && len(p.GoFiles)+len(p.CgoFiles) > 0 {
@@ -171,7 +182,7 @@ func WithHint(patterns, tags, hint []string) ([]*Package, []string, error) {
 		}
 	}
 	if len(targets) == 0 {
-		return nil, nil, fmt.Errorf("no packages with non-test Go files match %s", strings.Join(patterns, " "))
+		return nil, nil, nil, fmt.Errorf("no packages with non-test Go files match %s", strings.Join(patterns, " "))
 	}
 	slices.SortFunc(targets, func(a, b *listedPackage) int { return strings.Compare(a.ImportPath, b.ImportPath) })
 
@@ -189,7 +200,7 @@ func WithHint(patterns, tags, hint []string) ([]*Package, []string, error) {
 			imported[path] = true
 		}
 	}
-	var needed, missing []string
+	var missing []string
 	for _, p := range all {
 		if isTarget[p.ImportPath] && !imported[p.ImportPath] || p.ImportPath == "unsafe" {
 			continue
@@ -201,33 +212,95 @@ func WithHint(patterns, tags, hint []string) ([]*Package, []string, error) {
 	}
 	if len(missing) > 0 {
 		if err := listExports(runDir, tags, missing, exports); err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 	}
 	fset := token.NewFileSet()
 	shared := &sharedImporter{exports: exports}
 	shared.imp = importer.ForCompiler(fset, "gc", shared.lookup)
-	var pkgs []*Package
+	var cgoPaths []string
+	for _, t := range targets {
+		if len(t.CgoFiles) > 0 {
+			cgoPaths = append(cgoPaths, t.ImportPath)
+		}
+	}
+	compiled, err := listCompiled(runDir, tags, cgoPaths)
+	if err != nil {
+		return nil, nil, nil, err
+	}
 	for _, target := range targets {
 		if len(target.CgoFiles) > 0 {
-			return nil, nil, fmt.Errorf("package %s uses cgo, which gamut does not support", target.ImportPath)
+			target.cgoGenerated = generatedFiles(target, compiled[target.ImportPath])
+			if len(target.cgoGenerated) == 0 {
+				skipped = append(skipped, Skipped{ImportPath: target.ImportPath, Reason: "cgo preprocessing failed; is a C compiler (go env CC) available?"})
+				continue
+			}
 		}
 		if target.Module == nil {
-			return nil, nil, fmt.Errorf("package %s is not in a module", target.ImportPath)
+			return nil, nil, nil, fmt.Errorf("package %s is not in a module", target.ImportPath)
 		}
 		if len(pkgs) > 0 && pkgs[0].ModuleDir != target.Module.Dir {
 			// 報告のファイルのパスはモジュール相対なので、モジュールをまたぐと区別できない。
-			return nil, nil, fmt.Errorf("packages %s and %s are in different modules; run gamut once per module",
+			return nil, nil, nil, fmt.Errorf("packages %s and %s are in different modules; run gamut once per module",
 				pkgs[0].ImportPath, target.ImportPath)
 		}
 		pkg, err := newPackage(target, tags, fset, &packageImporter{shared: shared, importMap: target.ImportMap})
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		pkg.exports, pkg.importMap = exports, target.ImportMap
 		pkgs = append(pkgs, pkg)
 	}
-	return pkgs, needed, nil
+	if len(pkgs) == 0 {
+		return nil, nil, skipped, fmt.Errorf("no package to judge: %s skipped (%s)", skipped[0].ImportPath, skipped[0].Reason)
+	}
+	return pkgs, needed, skipped, nil
+}
+
+// listCompiled は、paths のパッケージの、cgo の前処理の後のファイル（CompiledGoFiles）を求める。
+// 前処理に失敗したパッケージは、空の一覧になる。
+func listCompiled(dir string, tags, paths []string) (map[string][]string, error) {
+	if len(paths) == 0 {
+		return nil, nil
+	}
+	args := []string{"list", "-e", "-compiled", "-json=ImportPath,CompiledGoFiles"}
+	if len(tags) > 0 {
+		args = append(args, "-tags="+strings.Join(tags, ","))
+	}
+	out, err := goList(dir, append(args, paths...))
+	if err != nil {
+		return nil, err
+	}
+	compiled := map[string][]string{}
+	dec := json.NewDecoder(bytes.NewReader(out))
+	for {
+		var p struct {
+			ImportPath      string
+			CompiledGoFiles []string
+		}
+		if err := dec.Decode(&p); errors.Is(err, io.EOF) {
+			break
+		} else if err != nil {
+			return nil, fmt.Errorf("decode go list output: %w", err)
+		}
+		compiled[p.ImportPath] = p.CompiledGoFiles
+	}
+	return compiled, nil
+}
+
+// generatedFiles は、CompiledGoFiles のうち、GoFiles にない、cgo が生成したファイルの絶対パスを返す。
+func generatedFiles(target *listedPackage, compiled []string) []string {
+	var out []string
+	for _, f := range compiled {
+		if !filepath.IsAbs(f) {
+			f = filepath.Join(target.Dir, f)
+		}
+		if filepath.Dir(f) == target.Dir && slices.Contains(target.GoFiles, filepath.Base(f)) {
+			continue
+		}
+		out = append(out, f)
+	}
+	return out
 }
 
 // goList は、dir で go に args を渡して実行し、標準出力を返す。
@@ -282,8 +355,9 @@ func newPackage(target *listedPackage, tags []string, fset *token.FileSet, imp t
 		HasTests:   len(target.TestGoFiles)+len(target.XTestGoFiles) > 0,
 		Fset:       fset,
 		GoVersion:  target.Module.GoVersion,
-		Direct:     len(target.EmbedFiles) == 0 && len(target.SFiles) == 0,
-		importer:   imp,
+		// cgo のパッケージは、go tool compile に cgo の生成物を渡す手順が要るので、直接コンパイルしない。
+		Direct:   len(target.EmbedFiles) == 0 && len(target.SFiles) == 0 && len(target.CgoFiles) == 0,
+		importer: imp,
 	}
 	for _, name := range slices.Concat(target.TestGoFiles, target.XTestGoFiles) {
 		pkg.TestFiles = append(pkg.TestFiles, filepath.Join(target.Dir, name))
@@ -308,6 +382,18 @@ func newPackage(target *listedPackage, tags []string, fset *token.FileSet, imp t
 		} else {
 			pkg.Files = append(pkg.Files, file)
 		}
+	}
+	// cgo が生成したファイル（import "C" を持つファイルの前処理の後と、C の宣言の Go 側）は、型の検査にだけ使い、変異しない。
+	for _, path := range target.cgoGenerated {
+		src, err := os.ReadFile(path)
+		if err != nil {
+			return nil, err
+		}
+		f, err := parser.ParseFile(pkg.Fset, path, src, parser.ParseComments|parser.SkipObjectResolution)
+		if err != nil {
+			return nil, err
+		}
+		pkg.Others = append(pkg.Others, &File{Path: path, Rel: filepath.Base(path), Src: src, AST: f})
 	}
 	info := NewInfo()
 	tpkg, errs := pkg.Check(pkg.Fset, pkg.AllASTs(), info)

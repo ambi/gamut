@@ -1,5 +1,5 @@
 ---
-status: pending
+status: done
 stage: 3
 depends_on: []
 created_at: 2026-11-21
@@ -36,3 +36,10 @@ C コンパイラがない環境では、前の段階（飛ばして報告する
 ## 検証
 
 - cgo を使うパッケージを含む固定モジュールでの、端から端までのテスト（C コンパイラのある環境で）。
+
+## 要約
+
+- cgo のパッケージがあるときだけ `go list -e -compiled` を実行し、`CompiledGoFiles` のうち `GoFiles` にないもの（cgo の生成物）を、型の検査にだけ使うファイル（`Package.Others`）に加えた。変異の対象は `GoFiles` のままなので、`import "C"` を持つファイルは変異しない。ビルドは `go test -c -overlay` が cgo を処理する。
+- 等価の自動検出は、`go tool compile` に cgo の生成物を渡す手順を持たないので、cgo のパッケージでは行わない。
+- 前処理に失敗すると `CompiledGoFiles` が空になるので、そのパッケージを飛ばし、`load.WithHint` の戻り値の `Skipped` に理由を返す。gamut は警告、報告の `skipped_packages`、要約の節に出す。すべて飛ばしたときは誤り（終了コード 1）にする。
+- 固定モジュール `testdata/cgo`（cgo のファイルと純粋なファイルを持つ `c` と、`plain`）の端から端までのテスト（`TestCgo`）で、C コンパイラがあれば `c/pure.go` と `plain` を判定し `c/c.go` を変異しないこと、`CC` を存在しないパスにすると `cgo/c` を飛ばして報告し `plain` を判定することを表明した。C コンパイラがない環境では、前者を飛ばす。

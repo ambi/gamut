@@ -11,7 +11,7 @@ import (
 // 依存と、別の対象パッケージが import する対象パッケージだけであることを確かめる。
 // multi では b が a を import するので、a は含み、b と c は含まない。
 func TestWithHint_HintNeedsNoTargetExportUnlessImported(t *testing.T) {
-	_, hint, err := load.WithHint([]string{"../../testdata/multi/..."}, nil, nil)
+	_, hint, _, err := load.WithHint([]string{"../../testdata/multi/..."}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,7 +31,7 @@ func TestWithHint_HintNeedsNoTargetExportUnlessImported(t *testing.T) {
 // TestWithHint_StaleHintGivesTheSameTypes は、前回の hint、古い hint（ないパッケージを含む）、hint なしのどれでも、同じ型の検査の結果になることを確かめる。
 func TestWithHint_StaleHintGivesTheSameTypes(t *testing.T) {
 	patterns := []string{"../../testdata/multi/..."}
-	base, hint, err := load.WithHint(patterns, nil, nil)
+	base, hint, _, err := load.WithHint(patterns, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +40,7 @@ func TestWithHint_StaleHintGivesTheSameTypes(t *testing.T) {
 		"stale":    append([]string{"no/such/package"}, hint[:len(hint)/2]...),
 	} {
 		t.Run(name, func(t *testing.T) {
-			pkgs, again, err := load.WithHint(patterns, nil, h)
+			pkgs, again, _, err := load.WithHint(patterns, nil, h)
 			if err != nil {
 				t.Fatal(err)
 			}

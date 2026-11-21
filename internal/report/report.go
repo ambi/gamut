@@ -63,6 +63,12 @@ func (t Thresholds) Label(score float64) string {
 	return "danger"
 }
 
+// SkippedPackage は、判定できずに飛ばしたパッケージと、その理由である。
+type SkippedPackage struct {
+	Package string `json:"package"`
+	Reason  string `json:"reason"`
+}
+
 // StaleAcceptance は、もう要らない受理である。gamut accept -prune で消せる。
 type StaleAcceptance struct {
 	ID     string `json:"id"`
@@ -113,6 +119,9 @@ type Report struct {
 	// UnrepeatableTests は、同じプロセスで 2 回目に失敗したテストの名前である。それが到達する変異体は、プロセスを使い回さずに判定した。
 	// gomutants にはないフィールドである。
 	UnrepeatableTests []string `json:"unrepeatable_tests,omitempty"`
+	// SkippedPackages は、パターンに当たったが判定できずに飛ばしたパッケージ（cgo の前処理ができないものなど）である。
+	// gomutants にはないフィールドである。
+	SkippedPackages []SkippedPackage `json:"skipped_packages,omitempty"`
 	// MutantsIgnored は、無効化コメントで止めた変異体の数である。MutantsTotal と効率の計算には含めない。gomutants にはないフィールドである。
 	MutantsIgnored int     `json:"mutants_ignored,omitempty"`
 	ElapsedTime    float64 `json:"elapsed_time"`
@@ -388,6 +397,12 @@ func WriteSummary(w io.Writer, r *Report) {
 		fmt.Fprintf(w, "\n"+why.title+"\n", len(stale))
 		for _, s := range stale {
 			fmt.Fprintf(w, "  %s  (%s)\n", s.ID, s.Reason)
+		}
+	}
+	if len(r.SkippedPackages) > 0 {
+		fmt.Fprintf(w, "\nskipped packages (%d): not judged; their mutants are not counted\n", len(r.SkippedPackages))
+		for _, s := range r.SkippedPackages {
+			fmt.Fprintf(w, "  %s  (%s)\n", s.Package, s.Reason)
 		}
 	}
 	if len(r.UnrepeatableTests) > 0 {

@@ -293,10 +293,13 @@ func judge(args []string, stdout, stderr io.Writer, prune bool) int {
 	if early != nil {
 		hint = early.LoadHint(loadKey)
 	}
-	pkgs, hint, err := load.WithHint(fs.Args(), splitTags(*tags), hint)
+	pkgs, hint, skippedPkgs, err := load.WithHint(fs.Args(), splitTags(*tags), hint)
 	if err != nil {
 		fmt.Fprintln(stderr, "gamut:", err)
 		return 1
+	}
+	for _, s := range skippedPkgs {
+		fmt.Fprintf(stderr, "gamut: warning: skipping %s: %s\n", s.ImportPath, s.Reason)
 	}
 	targets := make([]run.Target, len(pkgs))
 	paths := make([]string, len(pkgs))
@@ -490,6 +493,9 @@ func judge(args []string, stdout, stderr io.Writer, prune bool) int {
 	rep.AddIgnored(ignored)
 	rep.MutantsArid = aridSkipped
 	rep.UnrepeatableTests = slices.Sorted(slices.Values(unrepeatable))
+	for _, s := range skippedPkgs {
+		rep.SkippedPackages = append(rep.SkippedPackages, report.SkippedPackage{Package: s.ImportPath, Reason: s.Reason})
+	}
 	rep.MarkCritical(criticalIDs)
 	rep.Thresholds = &thresholds
 	// 識別子で指定したときは、ほかの変異体を報告しないので、受理の「なくなった」は判定できない。
