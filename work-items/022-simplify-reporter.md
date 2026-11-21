@@ -1,5 +1,5 @@
 ---
-status: pending
+status: done
 stage: 4
 depends_on: [018]
 created_at: 2026-11-20
@@ -33,3 +33,10 @@ created_at: 2026-11-20
 ## 検証
 
 - 端から端までのテスト。
+
+## 要約
+
+- `-reporter simplify` を足した（`internal/report/simplify.go`）。`STATEMENT_REMOVE` と `CONDITIONS_CONSTANT` の、受理していない `not detected` の生き残りを、ファイルと囲む関数ごとに、消える字句（複数行の文は最初の行）と識別子とともに並べる。
+- 対象範囲では、感染しない生き残りに注記して並べるとしていたが、idmagic の `usecases` で測ると、511 体のうち `not infected` が 254 体、`NOT COVERED` が 170 体で、候補が埋もれた。そこでこの 2 つは数だけを出し、要約の該当する組を見るよう案内する形に変えた。
+- `agent` とは、どちらも標準出力に書くので併用できない。
+- 単体テスト（`TestWriteSimplify`）で選び方と表示を、端から端までのテスト（`TestSimplifyReporter`、固定モジュール `testdata/simplify`）で、不要な分岐（`n == 0` の定数化）と見られない呼び出し（`touch()` の削除）が候補になり、検出された変異体と到達しない関数が候補にならないことを表明した。

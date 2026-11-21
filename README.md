@@ -36,7 +36,7 @@ go build -o bin/gamut ./cmd/gamut
 | `-exclude-files` | なし | モジュール相対のパスがこの正規表現に当たるファイルを変異しない。繰り返し指定できる |
 | `-config` | モジュールのルートの `gamut.json` | 設定ファイルのパス |
 | `-o` | なし | gomutants 互換の JSON の報告の書き出し先 |
-| `-reporter` | `text`（`-o` があれば `gomutants` も） | 報告の形式。`text`（標準出力の要約）、`gomutants`、`json`（mutation-testing-elements）、`html`、`agent`（エージェント向けの JSON を標準出力に）。繰り返し指定できる |
+| `-reporter` | `text`（`-o` があれば `gomutants` も） | 報告の形式。`text`（標準出力の要約）、`gomutants`、`json`（mutation-testing-elements）、`html`、`agent`（エージェント向けの JSON を標準出力に）、`simplify`（不要かもしれないコードの候補を標準出力に）。繰り返し指定できる |
 | `-report-dir` | `.gamut/report` | `json`、`html`、`-o` のない `gomutants` の書き出し先 |
 | `-annotations` | なし | `github` なら、直すべき生き残りを GitHub Actions の注釈として標準出力に書く |
 | `-dry-run` | false | 変異体と構築可能性だけを一覧にする |
@@ -197,6 +197,13 @@ open .gamut/report/mutation.html
 
 ```console
 ./bin/gamut -reporter agent -since main ./path/to/pkg
+```
+
+`-reporter simplify` は、テストが実行するのに、消しても失敗するテストがないコード（文の削除と条件の定数化の生き残り）を、関数ごとに並べる。
+消すか、それを必要とするテストを足すかの見直しの候補である。
+
+```console
+./bin/gamut -only STATEMENT_REMOVE,CONDITIONS_CONSTANT -reporter simplify ./path/to/pkg
 ```
 
 GitHub Actions では、リポジトリのルートの `action.yml` を使える。
