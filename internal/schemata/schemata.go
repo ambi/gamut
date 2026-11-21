@@ -378,6 +378,10 @@ func (r *renderer) renderSite(buf *bytes.Buffer, f *load.File, sites []*Site, s 
 	}
 	switch n := s.Node.(type) {
 	case *ast.BinaryExpr:
+		if n.Op == token.LAND || n.Op == token.LOR {
+			r.renderLogical(buf, f, sites, s, n, fallback)
+			return
+		}
 		resultType, ok := r.resultType(f, n)
 		if !ok {
 			fallback()
@@ -502,6 +506,47 @@ func (r *renderer) renderSite(buf *bytes.Buffer, f *load.File, sites []*Site, s 
 	default:
 		fallback()
 	}
+}
+
+// renderLogical は、&& と || の箇所を書き換える。右辺は短絡評価で評価されないことがあるので、先に評価して引数に渡せない。
+// 左辺だけを引数で渡し、右辺は関数リテラル gamutR の本文に 1 回だけ書いて、元の形と変異後の形のどちらでも必要なときだけ呼ぶ。
+// 右辺の中の変異箇所は、その本文の中でそのまま埋め込む。
+// 変異で値が変わるか（左辺と右辺が違うか）を知るには右辺を評価する必要があり、元のプログラムにない副作用を起こしうるので、
+// 到達したら感染したとみなす。
+func (r *renderer) renderLogical(buf *bytes.Buffer, f *load.File, sites []*Site, s *Site, n *ast.BinaryExpr, fallback func()) {
+	resultType, ok := r.resultType(f, n)
+	if !ok {
+		fallback()
+		return
+	}
+	x, ok := r.operand(f, sites, n.X, "gamutL")
+	if !ok {
+		fallback()
+		return
+	}
+	fmt.Fprintf(buf, "func(%s) %s { gamutR := func() %s { return ", strings.Join(params(x), ""), resultType, resultType)
+	r.renderRange(buf, f, sites, r.offset(n.Y.Pos()), r.offset(n.Y.End()))
+	fmt.Fprintf(buf, " }; if gamutCovering { gamutHit(%d); ", s.Index)
+	for _, m := range s.Mutants {
+		fmt.Fprintf(buf, "gamutInfect(%d); ", m.Index)
+	}
+	buf.WriteString("}; switch gamutActive { ")
+	for _, m := range s.Mutants {
+		fmt.Fprintf(buf, "case %d: return %s %s gamutR(); ", m.Index, x.ref, m.Replacement)
+	}
+	fmt.Fprintf(buf, "}; return %s %s gamutR() }(", x.ref, n.Op)
+	if !x.inline {
+		r.renderArgs(buf, f, sites, []operand{x})
+	}
+	buf.WriteString(")")
+}
+
+// params は、引数で渡す被演算子の仮引数の宣言を返す。本文へ写す被演算子は引数にしない。
+func params(o operand) []string {
+	if o.inline {
+		return nil
+	}
+	return []string{o.ref + " " + o.typ}
 }
 
 func (r *renderer) renderArgs(buf *bytes.Buffer, f *load.File, sites []*Site, args []operand) {

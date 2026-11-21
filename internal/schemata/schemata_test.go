@@ -135,6 +135,41 @@ func TestBuild_LoopControlBecomesTwoBranches(t *testing.T) {
 	}
 }
 
+func TestBuild_LogicalOperatorsKeepShortCircuit(t *testing.T) {
+	dir := t.TempDir()
+	// 右辺の呼び出しは、元の形で左辺が偽なら評価されない。右辺の中の比較も変異箇所である。
+	src := "package m\n\nfunc expensive(n int) int { return n }\n\nfunc F(a bool, n int) bool { return a && expensive(n) > 0 }\n"
+	for name, s := range map[string]string{"go.mod": "module m\n\ngo 1.27.4\n", "m.go": src} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(s), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pkg, err := loadOne(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ms := mutant.Enumerate(pkg, []mutant.Type{mutant.InvertLogical, mutant.ConditionalsBoundary})
+	mutant.CheckViability(pkg, ms)
+	res, err := schemata.Build(pkg, ms)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := levels(res)
+	for _, key := range []string{"INVERT_LOGICAL &&", "CONDITIONALS_BOUNDARY >"} {
+		if got[key] != schemata.Wrapped {
+			t.Errorf("%s: level %d, want Wrapped (levels %v)", key, got[key], got)
+		}
+	}
+	var out string
+	for _, b := range res.Files {
+		out = string(b)
+	}
+	// 右辺は gamutR の本文に 1 回だけ現れ、呼ぶのは && と || の右側だけである。
+	if strings.Count(out, "expensive(n)") != 1 || !strings.Contains(out, "return (a) || gamutR()") || !strings.Contains(out, "return (a) && gamutR()") {
+		t.Errorf("the right operand must stay lazy and appear once:\n%s", out)
+	}
+}
+
 func TestBuild_PureOperandsNeedNoTypeName(t *testing.T) {
 	// *url.URL は、このファイルが net/url を import しないので書けない。被演算子を本文へ写せば型は要らない。
 	res := build(t, "package m\n\nimport \"net/http\"\n\nfunc F(a, b *http.Request) bool { return a.URL == b.URL }\n")

@@ -31,6 +31,12 @@ func SetBit(f uint) uint {
 	return f
 }
 
+// Both の a && b を a || b にすると、テストの入力 (true, false) で値が変わり、検出される。
+func Both(a, b bool) bool { return a && b }
+
+// Either の a || b を a && b にしても、テストの入力 (true, true) では値が変わらないので生き残る。
+func Either(a, b bool) bool { return a || b }
+
 // FirstNegative の break を continue にすると最後の負の数を返すようになり、テストの入力 (1, -2, -3) で検出される。
 func FirstNegative(xs []int) int {
 	found := 0

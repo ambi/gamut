@@ -118,6 +118,8 @@ func TestEnumerate_Operators(t *testing.T) {
 				"CONDITIONALS_BOUNDARY >->>= true", "CONDITIONALS_NEGATION >-><= true", "INVERT_LOOP_CTRL break->continue true", "INCREMENT_DECREMENT ++->-- true"}},
 		{"break in a switch outside a loop is not viable as continue", "package m\n\nfunc F(a int) int {\n\tswitch a {\n\tcase 1:\n\t\tbreak\n\t}\n\treturn a\n}\n",
 			[]string{"INVERT_LOOP_CTRL break->continue false"}},
+		{"logical operators", "package m\n\nfunc F(a, b, c bool) bool { return a && b || c }\n",
+			[]string{"INVERT_LOGICAL ||->&& true", "INVERT_LOGICAL &&->|| true"}},
 		{"plain assignments are not mutated", "package m\n\nfunc F(a int) int { b := a; b = 2; return b }\n",
 			nil},
 	}
@@ -158,13 +160,17 @@ func TestEnumerate_SiteKeysGroupMutantsOfOneSite(t *testing.T) {
 			t.Errorf("%s: site key changed with the line: %s -> %s", m.ID, m.SiteKey, after[i].SiteKey)
 		}
 	}
-	// < と > の箇所がそれぞれ 2 体ずつ（BOUNDARY と NEGATION）の変異体を持つ。
-	if len(sites) != 2 {
-		t.Fatalf("got %d site keys %v, want 2", len(sites), sites)
+	// < と > の箇所がそれぞれ 2 体ずつ（BOUNDARY と NEGATION）、&& の箇所が 1 体（INVERT_LOGICAL）の変異体を持つ。
+	if len(sites) != 3 {
+		t.Fatalf("got %d site keys %v, want 3", len(sites), sites)
 	}
 	for key, ops := range sites {
-		if len(ops) != 2 || ops[0] != ops[1] {
-			t.Errorf("site %s groups %v, want two mutants of one operator", key, ops)
+		want := 2
+		if ops[0] == "&&" {
+			want = 1
+		}
+		if len(ops) != want || slices.ContainsFunc(ops, func(op string) bool { return op != ops[0] }) {
+			t.Errorf("site %s groups %v, want %d mutants of one operator", key, ops, want)
 		}
 	}
 }

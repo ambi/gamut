@@ -84,6 +84,7 @@ go build -o bin/gamut ./cmd/gamut
 | `INVERT_ASSIGNMENTS` | `+=`↔`-=`、`*=`↔`/=`、`%=`→`*=` |
 | `INVERT_BITWISE_ASSIGNMENTS` | `&=`↔`\|=`、`^=`→`&=`、`&^=`→`&=`、`<<=`↔`>>=` |
 | `INVERT_LOOP_CTRL` | `break`↔`continue` |
+| `INVERT_LOGICAL` | `&&`↔`\|\|`（短絡評価を保つ） |
 テストプロセスは、gamut の 1 回の実行の間、変異体の間で使い回す。
 変異体がプロセスの状態を汚したと分かれば、そのプロセスを捨て、新しいプロセスで判定し直す。
 判定の前に、変異がテストに届くことを 1 件のテストで確かめる（forced fail）。

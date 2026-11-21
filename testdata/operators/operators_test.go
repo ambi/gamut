@@ -8,6 +8,12 @@ func TestBitwise(t *testing.T) {
 	}
 }
 
+func TestLogical(t *testing.T) {
+	if Both(true, false) || !Either(true, true) {
+		t.Fatal("wrong")
+	}
+}
+
 func TestLoopControl(t *testing.T) {
 	if FirstNegative([]int{1, -2, -3}) != -2 || CountPositive([]int{1, 2, 0}) != 2 {
 		t.Fatal("wrong")

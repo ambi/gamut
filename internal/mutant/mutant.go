@@ -34,6 +34,8 @@ const (
 	InvertBitwiseAssignments Type = "INVERT_BITWISE_ASSIGNMENTS"
 	// InvertLoopCtrl は、break と continue を入れ替える。
 	InvertLoopCtrl Type = "INVERT_LOOP_CTRL"
+	// InvertLogical は、&& と || を入れ替える。
+	InvertLogical Type = "INVERT_LOGICAL"
 )
 
 // AllTypes は既定で有効な変異演算子である。
@@ -41,7 +43,7 @@ var AllTypes = []Type{ArithmeticBase, ConditionalsBoundary, ConditionalsNegation
 
 // OptIn は、既定では無効で、-only や設定で選んだときだけ有効になる変異演算子である。
 // 実在のパッケージで生き残りの数と仕分けの内訳を測ってから、既定の集合に入れるかを決める。
-var OptIn = []Type{InvertBitwise, InvertAssignments, InvertBitwiseAssignments, InvertLoopCtrl}
+var OptIn = []Type{InvertBitwise, InvertAssignments, InvertBitwiseAssignments, InvertLoopCtrl, InvertLogical}
 
 // Known は、gamut が知っているすべての変異演算子である。-only、設定、無効化コメント、受理の名前はこれで確かめる。
 var Known = slices.Concat(AllTypes, OptIn)
@@ -113,6 +115,8 @@ var binaryRules = []rule{
 	{InvertBitwise, token.AND_NOT, token.AND},
 	{InvertBitwise, token.SHL, token.SHR},
 	{InvertBitwise, token.SHR, token.SHL},
+	{InvertLogical, token.LAND, token.LOR},
+	{InvertLogical, token.LOR, token.LAND},
 }
 
 var unaryRules = []rule{{InvertNegatives, token.SUB, token.ADD}}
