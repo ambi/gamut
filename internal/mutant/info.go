@@ -2,7 +2,7 @@ package mutant
 
 import "slices"
 
-// Info は、変異演算子の説明である。-list-mutators の出力と README の一覧のもとになる。
+// Info は、変異演算子の説明である。-list-mutators の出力と手引き（docs/guide/configuration.md）の一覧のもとになる。
 type Info struct {
 	Type        Type
 	Description string

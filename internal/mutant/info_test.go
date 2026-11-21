@@ -25,15 +25,15 @@ func TestInfos_DescribeEveryKnownOperator(t *testing.T) {
 	}
 }
 
-// TestInfos_MatchTheReadme は、README の変異演算子の説明が、すべての演算子の名前を挙げることを確かめる。
-func TestInfos_MatchTheReadme(t *testing.T) {
-	data, err := os.ReadFile("../../README.md")
+// TestInfos_MatchTheGuide は、手引きの変異演算子の説明が、すべての演算子の名前を挙げることを確かめる。
+func TestInfos_MatchTheGuide(t *testing.T) {
+	data, err := os.ReadFile("../../docs/guide/configuration.md")
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, info := range mutant.Infos() {
 		if !strings.Contains(string(data), "`"+string(info.Type)+"`") {
-			t.Errorf("README does not mention %s", info.Type)
+			t.Errorf("docs/guide/configuration.md does not mention %s", info.Type)
 		}
 	}
 }
