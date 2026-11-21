@@ -78,7 +78,8 @@ created_at: 2026-11-20
 | [032](032-batch-revdep-coverage.md) | 2 | 統合モードで、逆依存パッケージのテストの被覆をまとめて測る（取りやめ） | 009、029 |
 | [033](033-windows-support.md) | 公開 | Windows で判定が macOS と Linux と一致することを確かめる | 002、030 |
 | [034](034-cgo-packages.md) | 3 | cgo を使うパッケージを判定する | |
-| [035](035-comparison-matrix.md) | 公開 | README に、主要なミューテーションテストツールとの機能の比較表を置く | 024 |
+| [035](035-comparison-matrix.md) | 4 | README に、主要なミューテーションテストツールとの機能の比較表を置く | |
 | [036](036-checkpoint-cache.md) | 3 | 実行中の判定を、一定の間隔でキャッシュに書き出す | 004 |
 | [037](037-list-and-disable-mutators.md) | 3 | 変異演算子の一覧を出し、演算子を個別に無効にできるようにする | |
 | [038](038-detect-unrepeatable-tests.md) | 3 | 繰り返し実行できないテストを見つけ、テストプロセスを使い回さずに判定する | 030 |
+| [039](039-literal-and-branch-mutators.md) | 3 | 数値のリテラル、分岐の本体、エラーの包みを変える変異演算子を足す | 018 |

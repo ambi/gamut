@@ -1,7 +1,7 @@
 ---
-status: pending
-stage: 公開
-depends_on: [024]
+status: done
+stage: 4
+depends_on: []
 created_at: 2026-11-21
 ---
 
@@ -38,3 +38,11 @@ README の測定表は速さとビルドキャッシュだけを比べ、機能�
 ## 検証
 
 - 表の各セルと出典を突き合わせて読む。
+
+## 要約
+
+- 版の公開（[024](024-release-and-distribution.md)）の前に行うことにし、段階を 4 に、依存を空にした。gamut の版は「未公開（コミット e1fd6fd の後）」と書いた。
+- 2026-11-21 に、gomutants は手元の v0.7.3 の README と `--help`、ほかは公式の文書とリリースの頁で確かめた。各セルを出典へのリンクにし、表の下に版と出典の URL を並べた。
+- 判断の規則：文書に書かれていないものは「不明」、フラグや設定の一覧が載った文書にないものは「ない」、cgo のように言語に固有の観点は「—」とした。PIT は有償の拡張 Arcmutate を含めず、Arcmutate にある機能はセルに注記した。go-mutesting は、機能の多い avito-tech の fork を比べた。
+- 観点には、対象範囲の一覧に加えて、戻り値の置き換えと文の削除、数値と文字列のリテラル、時間予算の行を足した。
+- gamut の「ない」と「一部」：数値のリテラル、分岐の本体、エラーの包みの演算子は [039](039-literal-and-branch-mutators.md) を起票した（文字列のリテラルは [018](018-more-mutators.md) の対象外の理由で採らない）。CI の注釈は [016](016-github-annotations-and-action.md)、Windows は [033](033-windows-support.md) に紐づけた。
