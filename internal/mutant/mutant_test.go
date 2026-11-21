@@ -122,6 +122,10 @@ func TestEnumerate_Operators(t *testing.T) {
 			[]string{"INVERT_LOGICAL ||->&& true", "INVERT_LOGICAL &&->|| true"}},
 		{"logical not is removed", "package m\n\nfunc F(ok bool) bool { return !ok }\n",
 			[]string{"REMOVE_LOGICAL_NOT !-> true"}},
+		{"boolean literals", "package m\n\nfunc F(a int) bool {\n\tif a > 0 {\n\t\treturn true\n\t}\n\treturn false\n}\n",
+			[]string{"CONDITIONALS_BOUNDARY >->>= true", "CONDITIONALS_NEGATION >-><= true", "BOOLEAN_LITERAL true->false true", "BOOLEAN_LITERAL false->true true"}},
+		{"a shadowed true is not a literal", "package m\n\nfunc F() bool {\n\ttrue := false\n\treturn true\n}\n",
+			[]string{"BOOLEAN_LITERAL false->true true"}},
 		{"plain assignments are not mutated", "package m\n\nfunc F(a int) int { b := a; b = 2; return b }\n",
 			nil},
 	}

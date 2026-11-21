@@ -22,6 +22,7 @@ func TestOperators_OptInVerdicts(t *testing.T) {
 		{"INVERT_LOOP_CTRL", map[string]string{"FirstNegative": "KILLED", "CountPositive": "LIVED"}},
 		{"INVERT_LOGICAL", map[string]string{"Both": "KILLED", "Either": "LIVED"}},
 		{"REMOVE_LOGICAL_NOT", map[string]string{"Closed": "KILLED", "Muted": "LIVED"}},
+		{"BOOLEAN_LITERAL", map[string]string{"Enabled": "KILLED", "Verbose": "LIVED"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.only, func(t *testing.T) {

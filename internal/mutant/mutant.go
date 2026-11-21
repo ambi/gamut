@@ -38,6 +38,8 @@ const (
 	InvertLogical Type = "INVERT_LOGICAL"
 	// RemoveLogicalNot は、論理否定の ! を取り除く。
 	RemoveLogicalNot Type = "REMOVE_LOGICAL_NOT"
+	// BooleanLiteral は、宇宙スコープの true と false を入れ替える。
+	BooleanLiteral Type = "BOOLEAN_LITERAL"
 )
 
 // AllTypes は既定で有効な変異演算子である。
@@ -45,7 +47,7 @@ var AllTypes = []Type{ArithmeticBase, ConditionalsBoundary, ConditionalsNegation
 
 // OptIn は、既定では無効で、-only や設定で選んだときだけ有効になる変異演算子である。
 // 実在のパッケージで生き残りの数と仕分けの内訳を測ってから、既定の集合に入れるかを決める。
-var OptIn = []Type{InvertBitwise, InvertAssignments, InvertBitwiseAssignments, InvertLoopCtrl, InvertLogical, RemoveLogicalNot}
+var OptIn = []Type{InvertBitwise, InvertAssignments, InvertBitwiseAssignments, InvertLoopCtrl, InvertLogical, RemoveLogicalNot, BooleanLiteral}
 
 // Known は、gamut が知っているすべての変異演算子である。-only、設定、無効化コメント、受理の名前はこれで確かめる。
 var Known = slices.Concat(AllTypes, OptIn)
@@ -234,6 +236,19 @@ func enumerateFile(pkg *load.Package, file *load.File, enabled []Type) []*Mutant
 		var rules []rule
 		var opPos token.Pos
 		var op token.Token
+		add := func(typ Type, at token.Pos, from, to token.Token, fromText, toText string) {
+			// 識別子の経路は宣言の中での相対位置にし、前に宣言が増えても変わらないようにする。
+			rel := path[2:]
+			pos := pkg.Fset.Position(at)
+			m := &Mutant{
+				Type: typ, File: file, Offset: pos.Offset,
+				Original: from, Replacement: to, OriginalText: fromText, ReplacementText: toText,
+				Line: pos.Line, Column: pos.Column, Site: n, Scope: scope,
+				SiteKey: siteKey(file.Rel, scope, rel), path: slices.Clone(rel),
+			}
+			m.ID = identity(file.Rel, scope, rel, typ, toText)
+			out = append(out, m)
+		}
 		switch x := n.(type) {
 		case *ast.BinaryExpr:
 			rules, opPos, op = binaryRules, x.OpPos, x.Op
@@ -245,37 +260,31 @@ func enumerateFile(pkg *load.Package, file *load.File, enabled []Type) []*Mutant
 			rules, opPos, op = assignRules, x.TokPos, x.Tok
 		case *ast.BranchStmt:
 			rules, opPos, op = branchRules, x.TokPos, x.Tok
+		case *ast.Ident:
+			// 宇宙スコープの true と false だけを変異する。同じ名前の局所変数は変異しない。
+			if slices.Contains(enabled, BooleanLiteral) && isUniverseBool(pkg.Info, x) {
+				add(BooleanLiteral, x.Pos(), token.ILLEGAL, token.ILLEGAL, x.Name, map[string]string{"true": "false", "false": "true"}[x.Name])
+			}
+			return true
 		default:
 			return true
 		}
-		// 識別子の経路は宣言の中での相対位置にし、前に宣言が増えても変わらないようにする。
-		rel := path[2:]
 		for _, r := range rules {
-			if r.from != op || !slices.Contains(enabled, r.typ) {
-				continue
+			if r.from == op && slices.Contains(enabled, r.typ) {
+				add(r.typ, opPos, r.from, r.to, r.from.String(), r.replacement())
 			}
-			pos := pkg.Fset.Position(opPos)
-			m := &Mutant{
-				Type:            r.typ,
-				File:            file,
-				Offset:          pos.Offset,
-				Original:        r.from,
-				Replacement:     r.to,
-				OriginalText:    r.from.String(),
-				ReplacementText: r.replacement(),
-				Line:            pos.Line,
-				Column:          pos.Column,
-				Site:            n,
-				Scope:           scope,
-				SiteKey:         siteKey(file.Rel, scope, rel),
-				path:            slices.Clone(rel),
-			}
-			m.ID = identity(file.Rel, scope, rel, r.typ, m.ReplacementText)
-			out = append(out, m)
 		}
 		return true
 	})
 	return out
+}
+
+// isUniverseBool は、id が宇宙スコープの定数 true か false を指すかを返す。
+func isUniverseBool(info *types.Info, id *ast.Ident) bool {
+	if id.Name != "true" && id.Name != "false" {
+		return false
+	}
+	return info.Uses[id] == types.Universe.Lookup(id.Name)
 }
 
 // identity は識別子を作る。to は置き換え後の文字列で、演算子の変異では字句の文字列なので、表現を広げる前と同じ識別子になる。

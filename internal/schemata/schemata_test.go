@@ -170,6 +170,36 @@ func TestBuild_LogicalOperatorsKeepShortCircuit(t *testing.T) {
 	}
 }
 
+func TestBuild_BooleanLiteralsTakeTheirContextType(t *testing.T) {
+	dir := t.TempDir()
+	// Flag は名前付きの bool である。const の宣言の中の true は、呼び出しにできないので個別ビルドに回る。
+	src := "package m\n\ntype Flag bool\n\nconst On = true\n\nfunc F() Flag {\n\tvar f Flag = true\n\treturn f\n}\n\nfunc G() bool { return false }\n"
+	for name, s := range map[string]string{"go.mod": "module m\n\ngo 1.27.4\n", "m.go": src} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(s), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pkg, err := loadOne(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ms := mutant.Enumerate(pkg, []mutant.Type{mutant.BooleanLiteral})
+	mutant.CheckViability(pkg, ms)
+	res, err := schemata.Build(pkg, ms)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]schemata.Level{"On": schemata.Untouched, "F": schemata.Wrapped, "G": schemata.Wrapped}
+	for _, s := range res.Sites {
+		if w := want[s.Mutants[0].Scope]; s.Level != w {
+			t.Errorf("%s: level %d, want %d", s.Mutants[0].Scope, s.Level, w)
+		}
+	}
+	if len(res.Sites) != 3 {
+		t.Errorf("%d sites, want 3", len(res.Sites))
+	}
+}
+
 func TestBuild_PureOperandsNeedNoTypeName(t *testing.T) {
 	// *url.URL は、このファイルが net/url を import しないので書けない。被演算子を本文へ写せば型は要らない。
 	res := build(t, "package m\n\nimport \"net/http\"\n\nfunc F(a, b *http.Request) bool { return a.URL == b.URL }\n")

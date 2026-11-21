@@ -14,6 +14,13 @@ func TestLogical(t *testing.T) {
 	}
 }
 
+func TestLiterals(t *testing.T) {
+	if !Enabled() {
+		t.Fatal("wrong")
+	}
+	_ = Verbose()
+}
+
 func TestNot(t *testing.T) {
 	if !Closed(false) {
 		t.Fatal("wrong")

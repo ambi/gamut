@@ -43,6 +43,12 @@ func Closed(open bool) bool { return !open }
 // Muted の !loud を loud にしても、テストが戻り値を確かめないので生き残る。
 func Muted(loud bool) bool { return !loud }
 
+// Enabled の true を false にすると、テストが値を確かめるので検出される。
+func Enabled() bool { return true }
+
+// Verbose の false を true にしても、テストが値を確かめないので生き残る。
+func Verbose() bool { return false }
+
 // FirstNegative の break を continue にすると最後の負の数を返すようになり、テストの入力 (1, -2, -3) で検出される。
 func FirstNegative(xs []int) int {
 	found := 0

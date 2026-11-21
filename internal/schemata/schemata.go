@@ -461,6 +461,18 @@ func (r *renderer) renderSite(buf *bytes.Buffer, f *load.File, sites []*Site, s 
 		fmt.Fprintf(buf, "func() { if gamutCovering { gamutHit(%d); gamutInfect(%d) }; if gamutActive == %d { %s%s } else { %s%s } }()",
 			s.Index, m.Index, m.Index, target, m.Replacement, target, n.Tok)
 
+	case *ast.Ident:
+		// BOOLEAN_LITERAL：true か false を、その場の型を返す関数呼び出しにする。値は必ず変わるので、到達したら感染したとする。
+		// const の宣言の中など、呼び出しを書けない文脈は、書き換え後の型検査で個別ビルドへ回る。
+		resultType, ok := r.resultType(f, n)
+		if !ok {
+			fallback()
+			return
+		}
+		m := s.Mutants[0]
+		fmt.Fprintf(buf, "func() %s { if gamutCovering { gamutHit(%d); gamutInfect(%d) }; if gamutActive == %d { return %s }; return %s }()",
+			resultType, s.Index, m.Index, m.Index, m.ReplacementText, n.Name)
+
 	case *ast.BranchStmt:
 		// break と continue は同じ関数の中のループに作用するので、関数リテラルで包めない。文を 2 つの分岐にする。
 		// 分岐にしたことでループの終端性が変わり、missing return になれば、書き換え後の型検査で個別ビルドへ回る。
