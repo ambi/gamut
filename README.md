@@ -48,9 +48,9 @@ gamut -o report.json ./path/to/module/...
 | `-no-arid` | false | ログ出力など、テストが観測しないことの多いコード（arid）も変異する |
 | `-exclude-files` | なし | モジュール相対のパスがこの正規表現に当たるファイルを変異しない。繰り返し指定できる |
 | `-config` | モジュールのルートの `gamut.json` | 設定ファイルのパス |
-| `-o` | なし | gomutants 互換の JSON の報告の書き出し先 |
-| `-reporter` | `text`（`-o` があれば `gomutants` も） | 報告の形式。`text`（標準出力の要約）、`gomutants`、`json`（mutation-testing-elements）、`html`、`agent`（エージェント向けの JSON を標準出力に）、`simplify`（不要かもしれないコードの候補を標準出力に）。繰り返し指定できる |
-| `-report-dir` | `.gamut/report` | `json`、`html`、`-o` のない `gomutants` の書き出し先 |
+| `-o` | なし | JSON の報告（mutation-testing-elements の形式）の書き出し先 |
+| `-reporter` | `text`（`-o` があれば `json` も） | 報告の形式。`text`（標準出力の要約）、`json`（mutation-testing-elements の形式）、`html`、`agent`（エージェント向けの JSON を標準出力に）、`simplify`（不要かもしれないコードの候補を標準出力に）。繰り返し指定できる |
+| `-report-dir` | `.gamut/report` | `html` と、`-o` のない `json` の書き出し先 |
 | `-annotations` | なし | `github` なら、直すべき生き残りを GitHub Actions の注釈として標準出力に書く |
 | `-dry-run` | false | 変異体と構築可能性だけを一覧にする |
 | `-timeout-factor` | 5 | 選んだテストの基準の時間に掛ける係数 |
@@ -67,7 +67,7 @@ gamut -o report.json ./path/to/module/...
 | `-mutant` | なし | この識別子（一意な前方一致でもよい）の変異体だけを、キャッシュを使わずに判定する。繰り返し指定できる |
 | `-integration` | false | 対象パッケージを import するモジュール内のパッケージのテストでも検出を試す |
 | `-watch` | false | 判定を終えた後も `.go` ファイルを見張り、保存のたびに差分を判定し直す（既定の範囲は `-since HEAD -include-test-changes`）。失敗しても止まらない |
-| `-shard` | なし | `k/n` で、変異体を識別子のハッシュで n 個に分けたうちの k 番目だけを判定する。シャードの報告とキャッシュは `gamut merge` でまとめる |
+| `-shard` | なし | `k/n` で、変異体を識別子のハッシュで n 個に分けたうちの k 番目だけを判定する。シャードのキャッシュは `gamut merge` でまとめる |
 | `-time-budget` | 0 | この時間を過ぎたら新しい変異体を始めず、残りを `PENDING` にする。同じキャッシュでの次の実行が続きから判定する |
 | `-kill-matrix` | false | 変異体ごとに感染したテストをすべて実行して検出したテストをすべて記録し、何も検出しないテスト、包含されるテスト、重複するテストを報告する。変異体ごとにプロセスを起動するので遅い |
 | `-max-depth` | 0 | テスト関数からモジュール内の関数の呼び出しでこの深さまでの到達だけを、被覆に数える（0 で制限しない）。生き残りと `NOT COVERED` が増える |
@@ -129,7 +129,7 @@ gamut -o report.json ./path/to/module/...
 
 認証や金額の計算のような箇所は、重要領域にして、すべての変異体の検出か受理を求められる。
 `-critical` の glob に当たるファイルと、関数の宣言の直前に `//gamut:critical` を書いた関数が重要領域である。
-重要領域に受理していない生き残りがあるか、点数（`mutation_score`：検出した変異体の、検出したものと生き残りの和に対する割合）が `-threshold-break` 未満なら、報告と要約を書いたうえで終了コード 2 で終える。
+重要領域に受理していない生き残りがあるか、点数（報告の `gamut.mutationScore`：検出した変異体の、検出したものと生き残りの和に対する割合）が `-threshold-break` 未満なら、報告と要約を書いたうえで終了コード 2 で終える。
 
 | 終了コード | 意味 |
 | --- | --- |
@@ -191,24 +191,36 @@ gamut accept -reason 'equivalent: callers read only the sign' 'pkg/file.go::ARIT
 gamut accept -prune ./path/to/module/...
 ```
 
-受理した変異体は引き続き判定し、報告に `accepted`（理由）を付けるが、数と効率には含めず、要約の直す一覧にも並べない。
-要らなくなった受理は、要約と報告の `stale_accepted` に並ぶ。
+受理した変異体は引き続き判定するが、報告では `Ignored`（`statusReason` は `accepted: <理由>`）にして数と点数に含めず、要約の直す一覧にも並べない。
+要らなくなった受理は、要約と報告の `gamut.staleAccepted` に並ぶ。
 規則は [設計](docs/design.md#等価な変異体の受理) が定める。
 
 `-detect-equivalent` は、生き残りごとに変異を当てたパッケージをコンパイルし、機械語が元と同じもの（`x * 1` を `x / 1` にする変異体など）を `EQUIVALENT` にする。
 `go tool compile` を直接呼ぶので、共有のビルドキャッシュは増えない。
 規則は [設計](docs/design.md#等価な変異体の自動検出) が定める。
 
-JSON の報告は gomutants と同じ `files[].mutations[]` の形に、`reason`、`mode`、`tests`、`killed_by`、`cached`、`previously_killed_by` を足したものである。
-`-since` の外の変異体は `PENDING` で、最上位の `mutants_pending` に数え、`mutants_total` と効率には含めない。
-コメントで止めた変異体は `files[].mutations[]` に入れず、最上位の `ignored` に理由とともに並べ、`mutants_ignored` に数える。
-受理した変異体は `files[].mutations[]` に本当の状態のまま `accepted` を付け、`mutants_accepted` に数える。
-`EQUIVALENT` の変異体は `mutants_equivalent` に数え、`mutants_total` と効率には含めない。
-`files[].path` はモジュール相対のパスである。
-最上位の `package` は、1 パッケージならその import パス、複数なら引数に指定したパターンで、`packages` に判定したパッケージの import パスを並べる。
-変異体ごとの `critical`（重要領域か）と、最上位の `mutation_score` と `thresholds` も足す。
+JSON の報告（`-o`、`-reporter json`）は [mutation-testing-elements](https://github.com/stryker-mutator/mutation-testing-elements) のスキーマ 2 の形式で、HTML の閲覧画面やダッシュボードがそのまま読める。
+`files` の鍵はモジュール相対のパスで、各ファイルは元のソースを埋め込む。
+変異体の `status` と、gamut の判定の対応は次のとおりである。
 
-`-reporter json` と `-reporter html` は、mutation-testing-elements の形式の `mutation.json` と、それを閲覧画面で表示する `mutation.html` を `-report-dir` に書く。
+| `status` | 判定 | `statusReason` |
+| --- | --- | --- |
+| `Killed` | 検出された | |
+| `Survived` | 生き残った | `not infected`（到達したが値が変わらなかった）か `not detected`（値は変わったが失敗しなかった） |
+| `NoCoverage` | どのテストも到達しなかった | |
+| `CompileError` | 構築できない | |
+| `Timeout` | 時間切れ（検出に数える） | |
+| `Pending` | 選択（`-since`、`-shard`、`-time-budget`）の外で判定しなかった | |
+| `Ignored` | 数えない | `accepted: <理由>`（受理）、`equivalent: <理由>`（等価）、`ignored by comment: <理由>`（無効化コメント） |
+
+`killedBy` は検出したテスト（`-kill-matrix` ならすべて）、`coveredBy` は変異箇所に到達したテストである。
+gamut 固有の情報は `gamut` という名前のオブジェクトにまとめる。
+変異体の `gamut` は、`original`（置き換える前の字句）、`mode`（`schemata` か `standalone`）、`cached`、`critical`（重要領域か）、`previouslyKilledBy`（前回の検出テストが消えた生き残り）、`acceptedStatus`（受理した変異体の判定）を持つ。
+最上位の `gamut` は、`goModule`、`package`、`packages`、`mutationScore`、`counts`（状態ごとの数）、`staleAccepted`（要らなくなった受理）、`killMatrix` などを持つ。
+`Pending` と `Ignored` は、`counts.total` と点数に含めない。
+
+`-reporter html` は、報告を閲覧画面で表示する `mutation.html` を `-report-dir` に書く。
+`-o` がなければ、`-reporter json` は `mutation.json` を `-report-dir` に書く。
 HTML は閲覧画面のスクリプトを、固定した版で CDN から読み込む。
 
 ```console
@@ -224,11 +236,12 @@ gamut -reporter agent -since main ./path/to/pkg
 ```
 
 大きなモジュールは、CI のジョブごとに `-shard` で分けて判定し、`gamut merge` でまとめられる。
+各シャードのキャッシュは、そのシャードの判定を持つ。`gamut merge` はキャッシュだけを読み、報告とまとめたキャッシュを書く。
 
 ```console
-gamut -shard 1/2 -o r1.json -cache c1.json ./...   # ジョブ 1
-gamut -shard 2/2 -o r2.json -cache c2.json ./...   # ジョブ 2
-gamut merge -o report.json -cache c1.json -cache c2.json -cache-out .gamut/cache.json r1.json r2.json
+gamut -shard 1/2 -cache c1.json ./...   # ジョブ 1
+gamut -shard 2/2 -cache c2.json ./...   # ジョブ 2
+gamut merge -o report.json -cache-out .gamut/cache.json c1.json c2.json
 ```
 
 `gamut select-tests` は、前回の判定から、差分が壊しうるテストを何も実行せずに選ぶ。

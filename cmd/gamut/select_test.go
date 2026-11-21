@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"io"
 	"os"
 	"os/exec"
@@ -21,23 +20,7 @@ func gamut(t *testing.T, args ...string) ([]mutation, string, int) {
 	if code != 0 {
 		return nil, stderr.String(), code
 	}
-	data, err := os.ReadFile(reportPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var rep struct {
-		Files []struct {
-			Mutations []mutation `json:"mutations"`
-		} `json:"files"`
-	}
-	if err := json.Unmarshal(data, &rep); err != nil {
-		t.Fatal(err)
-	}
-	var out []mutation
-	for _, f := range rep.Files {
-		out = append(out, f.Mutations...)
-	}
-	return out, stderr.String(), 0
+	return readReport(t, reportPath), stderr.String(), 0
 }
 
 func mustGamut(t *testing.T, args ...string) ([]mutation, string) {
@@ -81,11 +64,11 @@ func byScope(ms []mutation) map[string][]string {
 }
 
 func allPending(statuses []string) bool {
-	return !slices.ContainsFunc(statuses, func(s string) bool { return s != "PENDING" })
+	return !slices.ContainsFunc(statuses, func(s string) bool { return s != "Pending" })
 }
 
 func nonePending(statuses []string) bool {
-	return len(statuses) > 0 && !slices.Contains(statuses, "PENDING")
+	return len(statuses) > 0 && !slices.Contains(statuses, "Pending")
 }
 
 func TestSince_JudgesOnlyMutantsInTheDiff(t *testing.T) {
@@ -127,7 +110,7 @@ func TestSince_JudgesOnlyMutantsInTheDiff(t *testing.T) {
 		with, _ := mustGamut(t, "-q", "-cache", cachePath, "-since", "HEAD", "-include-test-changes", dir)
 		for _, m := range with {
 			// 前回 KILLED でない Score の変異体（生き残り）は、変えたテスト TestScore が到達するので再検査する。
-			if m.scope() == "Score" && m.Status == "PENDING" && !slices.ContainsFunc(before, func(b mutation) bool { return b.ID == m.ID && b.Status == "KILLED" }) {
+			if m.scope() == "Score" && m.Status == "Pending" && !slices.ContainsFunc(before, func(b mutation) bool { return b.ID == m.ID && b.Status == "Killed" }) {
 				t.Errorf("with -include-test-changes: %s stays PENDING", m.ID)
 			}
 		}
@@ -142,7 +125,7 @@ func TestSince_JudgesOnlyMutantsInTheDiff(t *testing.T) {
 		full, _ := mustGamut(t, "-q", "-cache", cachePath, dir)
 		killedByClamp := map[string]bool{}
 		for _, m := range full {
-			if m.Status == "KILLED" && strings.HasPrefix(m.KilledBy, "TestClamp") {
+			if m.Status == "Killed" && strings.HasPrefix(m.KilledBy, "TestClamp") {
 				killedByClamp[m.ID] = true
 			}
 		}
@@ -153,11 +136,11 @@ func TestSince_JudgesOnlyMutantsInTheDiff(t *testing.T) {
 		ms, _ := mustGamut(t, "-q", "-cache", cachePath, "-since", "HEAD", dir)
 		for _, m := range ms {
 			switch {
-			case killedByClamp[m.ID] && m.Status == "PENDING":
+			case killedByClamp[m.ID] && m.Status == "Pending":
 				t.Errorf("%s: killed by the deleted TestClamp but not rechecked", m.ID)
-			case !killedByClamp[m.ID] && m.Status != "PENDING":
+			case !killedByClamp[m.ID] && m.Status != "Pending":
 				t.Errorf("%s: %s, want PENDING outside the diff", m.ID, m.Status)
-			case killedByClamp[m.ID] && m.Status == "KILLED" && m.PreviouslyKilledBy != "":
+			case killedByClamp[m.ID] && m.Status == "Killed" && m.PreviouslyKilledBy != "":
 				t.Errorf("%s: killed again but reported as previously killed by %q", m.ID, m.PreviouslyKilledBy)
 			}
 		}
@@ -172,7 +155,7 @@ func TestSince_JudgesOnlyMutantsInTheDiff(t *testing.T) {
 				continue
 			}
 			regressed++
-			if m.PreviouslyKilledBy != "TestScore" || m.Status != "NOT COVERED" {
+			if m.PreviouslyKilledBy != "TestScore" || m.Status != "NoCoverage" {
 				t.Errorf("%s: %s previously killed by %q, want NOT COVERED previously killed by TestScore", m.ID, m.Status, m.PreviouslyKilledBy)
 			}
 		}
@@ -200,7 +183,7 @@ func TestMutant_RerunsOnlyTheNamedMutant(t *testing.T) {
 			survivor = m
 		}
 	}
-	if survivor.Status != "LIVED" {
+	if survivor.Status != "Survived" {
 		t.Fatalf("fixture: IsAdult boundary mutant is %q, want LIVED", survivor.Status)
 	}
 	prefix := survivor.ID[:len(survivor.ID)-4]
@@ -210,7 +193,7 @@ func TestMutant_RerunsOnlyTheNamedMutant(t *testing.T) {
 	if len(ms) != 1 || ms[0].ID != survivor.ID {
 		t.Fatalf("reported %v, want only %s", ms, survivor.ID)
 	}
-	if ms[0].Status != "KILLED" || ms[0].Cached {
+	if ms[0].Status != "Killed" || ms[0].Cached {
 		t.Errorf("after adding a test: %s cached=%t, want executed and KILLED", ms[0].Status, ms[0].Cached)
 	}
 	// 被覆を測り直すのは、指定した変異体の変異箇所に到達していた（そして変わった）TestIsAdult だけである。
@@ -220,7 +203,7 @@ func TestMutant_RerunsOnlyTheNamedMutant(t *testing.T) {
 	// 判定はキャッシュに書き戻され、次の実行で再利用される。
 	again, _ := mustGamut(t, "-q", "-cache", cachePath, dir)
 	for _, m := range again {
-		if m.ID == survivor.ID && (m.Status != "KILLED" || !m.Cached) {
+		if m.ID == survivor.ID && (m.Status != "Killed" || !m.Cached) {
 			t.Errorf("next run: %s cached=%t, want the written-back KILLED reused", m.Status, m.Cached)
 		}
 	}
@@ -250,15 +233,15 @@ func TestIntegration_DetectsWithReverseDependencyTests(t *testing.T) {
 		return out
 	}
 	alone, _ := mustGamut(t, "-q", "-no-cache", lib)
-	if got := status(alone); got["Add ARITHMETIC_BASE"] != "LIVED" || got["Triple ARITHMETIC_BASE"] != "NOT COVERED" {
+	if got := status(alone); got["Add ARITHMETIC_BASE"] != "Survived" || got["Triple ARITHMETIC_BASE"] != "NoCoverage" {
 		t.Errorf("without -integration: %v, want Add LIVED and Triple NOT COVERED", got)
 	}
 	together, stderr := mustGamut(t, "-cache", cachePath, "-integration", lib)
-	if got := status(together); got["Add ARITHMETIC_BASE"] != "KILLED" || got["Triple ARITHMETIC_BASE"] != "KILLED" {
+	if got := status(together); got["Add ARITHMETIC_BASE"] != "Killed" || got["Triple ARITHMETIC_BASE"] != "Killed" {
 		t.Errorf("with -integration: %v, want both KILLED", got)
 	}
 	for _, m := range together {
-		if m.Status == "KILLED" && !strings.HasPrefix(m.KilledBy, "integration/app.Test") {
+		if m.Status == "Killed" && !strings.HasPrefix(m.KilledBy, "integration/app.Test") {
 			t.Errorf("%s killed by %q, want a test of integration/app", m.ID, m.KilledBy)
 		}
 	}
@@ -274,7 +257,7 @@ func TestIntegration_DetectsWithReverseDependencyTests(t *testing.T) {
 	if strings.Contains(stderr, "build: integration/") && strings.Contains(stderr, "rewritten") {
 		t.Errorf("want no reverse dependency built on an unchanged rerun, log:\n%s", stderr)
 	}
-	if got := status(again); got["Add ARITHMETIC_BASE"] != "KILLED" || got["Triple ARITHMETIC_BASE"] != "KILLED" {
+	if got := status(again); got["Add ARITHMETIC_BASE"] != "Killed" || got["Triple ARITHMETIC_BASE"] != "Killed" {
 		t.Errorf("rerun with -integration: %v, want both KILLED", got)
 	}
 	// app の検出テストを変えると、app のテストバイナリだけをビルドし直し、どのテストも到達しない unrelated はビルドしない。
@@ -283,7 +266,7 @@ func TestIntegration_DetectsWithReverseDependencyTests(t *testing.T) {
 	if !strings.Contains(stderr, "build: integration/app with") || builds(stderr, "integration/unrelated") {
 		t.Errorf("want only app rebuilt, log:\n%s", stderr)
 	}
-	if got := status(third); got["Add ARITHMETIC_BASE"] != "KILLED" {
+	if got := status(third); got["Add ARITHMETIC_BASE"] != "Killed" {
 		t.Errorf("after changing app's test: %v, want Add KILLED", got)
 	}
 }

@@ -1,27 +1,12 @@
 package report
 
 import (
-	"encoding/json"
 	"fmt"
-	"os"
 	"slices"
 	"strings"
 
 	"github.com/ambi/gamut/internal/run"
 )
-
-// Read は、WriteJSON が書いた報告を読む。
-func Read(path string) (*Report, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	var r Report
-	if err := json.Unmarshal(data, &r); err != nil {
-		return nil, fmt.Errorf("read the report %s: %w", path, err)
-	}
-	return &r, nil
-}
 
 // Merge は、シャードごとの報告を 1 つにまとめる。同じ変異体は、PENDING でない判定を採る。
 // 数は数え直し、kill matrix は求め直す。列挙で決まる値（arid の数、無効化した変異体）と被覆の記録で決まる値は、

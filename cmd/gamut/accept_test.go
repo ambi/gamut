@@ -1,9 +1,7 @@
 package main
 
 import (
-	"encoding/json"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -11,23 +9,7 @@ import (
 	"github.com/ambi/gamut/internal/accept"
 )
 
-type acceptReport struct {
-	Total    int `json:"mutants_total"`
-	Accepted int `json:"mutants_accepted"`
-	Files    []struct {
-		Mutations []struct {
-			ID       string `json:"id"`
-			Status   string `json:"status"`
-			Accepted string `json:"accepted"`
-		} `json:"mutations"`
-	} `json:"files"`
-	Stale []struct {
-		ID  string `json:"id"`
-		Why string `json:"why"`
-	} `json:"stale_accepted"`
-}
-
-func runAccepting(t *testing.T, args ...string) (acceptReport, string) {
+func runAccepting(t *testing.T, args ...string) (*mteReport, string) {
 	t.Helper()
 	reportPath := filepath.Join(t.TempDir(), "report.json")
 	var stdout, stderr strings.Builder
@@ -38,15 +20,7 @@ func runAccepting(t *testing.T, args ...string) (acceptReport, string) {
 	if code := realMain(full, &stdout, &stderr); code != 0 {
 		t.Fatalf("gamut %v exited %d:\n%s", full, code, stderr.String())
 	}
-	data, err := os.ReadFile(reportPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var rep acceptReport
-	if err := json.Unmarshal(data, &rep); err != nil {
-		t.Fatal(err)
-	}
-	return rep, stdout.String() + stderr.String()
+	return readMTE(t, reportPath), stdout.String() + stderr.String()
 }
 
 func TestAccept_RecordsSurvivorsAndPrunesStaleOnes(t *testing.T) {
@@ -58,15 +32,13 @@ func TestAccept_RecordsSurvivorsAndPrunesStaleOnes(t *testing.T) {
 
 	first, _ := runAccepting(t, "-cache", cachePath, dir)
 	var lived string
-	for _, f := range first.Files {
-		for _, m := range f.Mutations {
-			if m.Status == "LIVED" && strings.Contains(m.ID, "::Double::") {
-				lived = m.ID
-			}
+	for _, m := range first.mutants() {
+		if m.Status == "Survived" && strings.Contains(m.ID, "::Double::") {
+			lived = m.ID
 		}
 	}
 	if lived == "" {
-		t.Fatalf("no LIVED mutant in Double: %+v", first.Files)
+		t.Fatalf("no survivor in Double: %+v", first.mutants())
 	}
 	gone := "acc.go::ARITHMETIC_BASE::Gone::00deadbeef"
 	var out strings.Builder
@@ -77,30 +49,28 @@ func TestAccept_RecordsSurvivorsAndPrunesStaleOnes(t *testing.T) {
 		t.Errorf("accept output %q", out.String())
 	}
 
-	// 受理した生き残りは、判定を保ったまま数から外れ、要約の直す一覧に並ばない。
+	// 受理した生き残りは、Ignored として数から外れるが、判定した状態を保ち、要約の直す一覧に並ばない。
 	second, log := runAccepting(t, "-cache", cachePath, dir)
-	if second.Total != first.Total-1 || second.Accepted != 1 {
-		t.Errorf("total %d (was %d), accepted %d, want one fewer and 1", second.Total, first.Total, second.Accepted)
+	if second.Gamut.Counts.Total != first.Gamut.Counts.Total-1 || second.Gamut.Counts.Accepted != 1 {
+		t.Errorf("total %d (was %d), accepted %d, want one fewer and 1", second.Gamut.Counts.Total, first.Gamut.Counts.Total, second.Gamut.Counts.Accepted)
 	}
-	for _, f := range second.Files {
-		for _, m := range f.Mutations {
-			if m.ID == lived && (m.Status != "LIVED" || m.Accepted != "equivalent: the sign is all callers read") {
-				t.Errorf("accepted mutant: status %s, accepted %q", m.Status, m.Accepted)
-			}
+	for _, m := range second.mutants() {
+		if m.ID == lived && (m.Status != "Ignored" || m.AcceptedStatus != "Survived" || m.Accepted != "equivalent: the sign is all callers read") {
+			t.Errorf("accepted mutant: status %s, accepted status %s, accepted %q", m.Status, m.AcceptedStatus, m.Accepted)
 		}
 	}
 	if strings.Contains(log, "not detected (") || !strings.Contains(log, ", 1 accepted") {
 		t.Errorf("want the accepted survivor out of the to-do list and counted apart, log:\n%s", log)
 	}
-	if len(second.Stale) != 1 || second.Stale[0].ID != gone || second.Stale[0].Why != "missing" {
-		t.Errorf("stale %+v, want only the gone ID as missing", second.Stale)
+	if stale := second.Gamut.StaleAccepted; len(stale) != 1 || stale[0].ID != gone || stale[0].Why != "missing" {
+		t.Errorf("stale %+v, want only the gone ID as missing", stale)
 	}
 
 	// テストを強めて検出されるようになると、消してよい受理として挙がる。
 	write(t, dir, "acc_test.go", "package acc\n\nimport \"testing\"\n\nfunc TestAll(t *testing.T) {\n\tif Double(2) != 4 || Inc(1) != 2 {\n\t\tt.Fatal(\"wrong\")\n\t}\n}\n")
 	third, log := runAccepting(t, "-cache", cachePath, dir)
-	if len(third.Stale) != 2 || !strings.Contains(log, "accepted but now detected (1)") || !strings.Contains(log, "accepted but gone (1)") {
-		t.Errorf("stale %+v, want detected and gone, log:\n%s", third.Stale, log)
+	if len(third.Gamut.StaleAccepted) != 2 || !strings.Contains(log, "accepted but now detected (1)") || !strings.Contains(log, "accepted but gone (1)") {
+		t.Errorf("stale %+v, want detected and gone, log:\n%s", third.Gamut.StaleAccepted, log)
 	}
 
 	_, log = runAccepting(t, "accept", "-cache", cachePath, dir)

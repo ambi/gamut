@@ -14,7 +14,7 @@ func TestDetectEquivalent_MarksSurvivorsWithTheSameMachineCode(t *testing.T) {
 	dir := "../../testdata/equiv"
 	plain, _ := mustGamut(t, "-no-cache", "-only", "ARITHMETIC_BASE", dir)
 	for _, m := range plain {
-		if m.Status != "LIVED" {
+		if m.Status != "Survived" {
 			t.Fatalf("%s is %s without -detect-equivalent, want every mutant LIVED", m.ID, m.Status)
 		}
 	}
@@ -30,9 +30,12 @@ func TestDetectEquivalent_MarksSurvivorsWithTheSameMachineCode(t *testing.T) {
 		}
 		ms, log := mustGamut(t, "-cache", cachePath, "-only", "ARITHMETIC_BASE", "-detect-equivalent", dir)
 		for _, m := range ms {
-			want := "LIVED"
+			want := "Survived"
 			if m.scope() == "Scale" {
-				want = "EQUIVALENT"
+				want = "Ignored"
+				if !strings.HasPrefix(m.Reason, "equivalent: ") {
+					t.Errorf("run %d: %s has reason %q, want equivalent: ...", i+1, m.ID, m.Reason)
+				}
 			}
 			if m.Status != want {
 				t.Errorf("run %d: %s is %s, want %s", i+1, m.ID, m.Status, want)

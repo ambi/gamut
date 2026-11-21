@@ -1,10 +1,10 @@
 package main
 
 import (
-	"encoding/json"
-	"os"
+	"maps"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -34,34 +34,19 @@ func TestCgo(t *testing.T) {
 			if code := realMain([]string{"-no-cache", "-o", reportPath, "../../testdata/cgo/..."}, &stdout, &stderr); code != 0 {
 				t.Fatalf("exit %d:\n%s", code, stderr.String())
 			}
-			data, err := os.ReadFile(reportPath)
-			if err != nil {
-				t.Fatal(err)
-			}
-			var rep struct {
-				Skipped []struct{ Package, Reason string } `json:"skipped_packages"`
-				Files   []struct {
-					Path      string     `json:"path"`
-					Mutations []mutation `json:"mutations"`
-				} `json:"files"`
-			}
-			if err := json.Unmarshal(data, &rep); err != nil {
-				t.Fatal(err)
-			}
-			var files []string
-			for _, f := range rep.Files {
-				files = append(files, f.Path)
-				for _, m := range f.Mutations {
-					if m.Status != "KILLED" {
-						t.Errorf("%s is %s, want KILLED", m.ID, m.Status)
-					}
+			rep := readMTE(t, reportPath)
+			files := slices.Sorted(maps.Keys(rep.Files))
+			for _, m := range rep.mutants() {
+				if m.Status != "Killed" {
+					t.Errorf("%s is %s, want Killed", m.ID, m.Status)
 				}
 			}
 			if strings.Join(files, " ") != strings.Join(tc.files, " ") {
 				t.Errorf("files %v, want %v", files, tc.files)
 			}
-			if got := len(rep.Skipped) == 1 && rep.Skipped[0].Package == "cgo/c"; got != tc.skippedCgoC {
-				t.Errorf("skipped_packages %v, want cgo/c skipped %t", rep.Skipped, tc.skippedCgoC)
+			skipped := rep.Gamut.SkippedPackages
+			if got := len(skipped) == 1 && skipped[0].Package == "cgo/c"; got != tc.skippedCgoC {
+				t.Errorf("skipped packages %v, want cgo/c skipped %t", skipped, tc.skippedCgoC)
 			}
 			if tc.skippedCgoC && !strings.Contains(stdout.String(), "cgo/c") {
 				t.Errorf("the summary does not name the skipped package:\n%s", stdout.String())

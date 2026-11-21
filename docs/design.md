@@ -31,7 +31,7 @@ gamut は Go のパッケージに機械的な変異を加え、そのパッケ�
 ### 複数のパッケージ
 
 - `go list` の出力のうち、`DepOnly` でなく、テスト以外の Go ファイルを持つパッケージを対象にする。テストファイルしか持たないパッケージは変異の対象がないので外す。補助ファイルのために列挙する標準パッケージも対象にしない。
-- 対象のパッケージは同じモジュールに属することを求める。報告の `files[].path` と変異体の識別子はモジュール相対のパスなので、モジュールをまたぐと区別できない。
+- 対象のパッケージは同じモジュールに属することを求める。報告の `files` の鍵と変異体の識別子はモジュール相対のパスなので、モジュールをまたぐと区別できない。
 - 全パッケージで 1 つの `token.FileSet` と、エクスポートデータの importer を共有する。gc の importer は並行に使えないので mutex で守り、読んだ `types.Package` は全パッケージで再利用する。
 - 対象パッケージ A が対象パッケージ B を import するとき、A の型検査は B の書き換え前のエクスポートデータを使い、A のテストバイナリは B の書き換え前の版にリンクされる。B の変異は B のテストだけで判定し、A のテストでは検出を試さない。逆依存のテストでの検出は統合モードで扱う。
 - schemata の書き換えとビルドとテストの一覧は、パッケージごとにワーカー数まで並列に行う。被覆の記録と変異体の実行は、全パッケージの分を 1 つの作業の列にまとめ、同じワーカーで回す。テストのプロセスの数はパッケージの数によらずワーカー数までになる。
@@ -401,7 +401,8 @@ Go ではパッケージごとにテストバイナリが分かれるので、�
 大きなリポジトリの全体の判定を、複数の CI のジョブに分け、時間内に区切る。
 
 - `-shard k/n` は、変異体の識別子の FNV-1a ハッシュを n で割った余りが k−1 のものだけを判定し、残りを `PENDING` にする。識別子で分けるので、変異体が増えても減っても、ほかの変異体の割り当ては変わらず、シャードごとのキャッシュが効き続ける。ビルドと被覆の記録はシャードごとに全体を行う。
-- `gamut merge [-o <報告>] [-cache <キャッシュ>... -cache-out <キャッシュ>] <報告>...` は、シャードの報告とキャッシュを 1 つにまとめる。同じ変異体は `PENDING` でない判定を採り、数を数え直し、kill matrix を求め直す。キャッシュは同じ形式の版と環境のものだけをまとめ、変更のない再実行の記録（シャードの指定を鍵に含む）は書かない。まとめた報告の要約を出し、品質の条件を満たさなければ終了コード 2 を返す。
+- 判定の実行は、終わるたびにその実行の内部の報告をキャッシュに残す（最後の 1 回分）。
+- `gamut merge [-o <報告>] [-cache-out <キャッシュ>] <シャードのキャッシュ>...` は、各キャッシュに残した報告とキャッシュの記録を 1 つにまとめる。報告のファイルは読まない。同じ変異体は `PENDING` でない判定を採り、数を数え直し、kill matrix を求め直す。報告は元のソースを埋め込むので、シャードが判定したモジュールのディレクトリがあればそこから、なければ作業ディレクトリのモジュールから読む。キャッシュは同じ形式の版と環境のものだけをまとめ、変更のない再実行の記録（シャードの指定を鍵に含む）は書かない。まとめた報告の要約を出し、品質の条件を満たさなければ終了コード 2 を返す。
 - `-time-budget <時間>` は、gamut の起動からその時間を過ぎたら新しい変異体を始めず、残りを `PENDING` にする。実行中の変異体は止めない。始めなかった変異体はキャッシュに書かないので、次の実行は、判定済みのものを再利用して続きから判定する。予算を付けた実行では、変更のない再実行の近道を使わない（前回の報告は続きを含まない）。
 
 ## 変更が壊しうるテストの選択
@@ -481,7 +482,7 @@ cgo を使うパッケージ（`CgoFiles` を持つもの）は、`import "C"` �
 
 - 設定の `arid.calls`（`-arid-call`）は、`<パッケージ>.<名前>` か `<パッケージ>.<型>.<名前>` に当てる glob で、`*` は `/` と `.` にも当たる。`arid.packages`（`-arid-package`）は、そのパッケージとその下のパッケージの呼び出しを出力だけの呼び出しにする。
 - `-no-arid` で、既定の規則も設定の規則も使わない。
-- 除いた変異体の数を、報告の `mutants_arid` と要約に出す。
+- 除いた変異体の数を、報告の `gamut.counts.arid` と要約に出す。
 
 2026-11-21、idmagic で規則を足す前と後を比べた（既定の演算子、`-no-cache`）。
 
@@ -512,7 +513,7 @@ cgo を使うパッケージ（`CgoFiles` を持つもの）は、`import "C"` �
 - 理由のないコメント、対応しない `start` と `end`、未知の指令（`//gamut:` で始まる別の名前）は、警告して続ける。
 - 範囲は `go/ast` のコメントの位置から求めた行で決め、構文木の付属情報には頼らない。関数全体だけは、Doc の付属先の宣言の範囲を使う。
 - 止めた変異体は、列挙の直後に外し、型検査も実行もせず、数えない。残りの番号は 1 から振り直す。
-- 報告では `files[].mutations` に入れず、最上位の `ignored`（識別子、位置、演算子、理由）と `mutants_ignored` に入れる。gomutants の状態の名前に `IGNORED` はなく、状態を足すと gomutants の報告を読む検査が知らない状態に出会うためである。mutation-testing-elements の形式（[015](../work-items/015-mutation-testing-elements-reports.md)）では `Ignored` の状態で出す。
+- 報告では `Ignored` の状態にし、`statusReason` を `ignored by comment: <理由>` にして、`gamut.counts.ignored` に数える。判定しないので、内部の報告では判定した変異体と分けて持つ。
 - `-mutant` で止めた変異体を指定したら、コメントの位置を示して終了コード 1 にする。
 
 ## 等価な変異体の受理
@@ -522,8 +523,8 @@ cgo を使うパッケージ（`CgoFiles` を持つもの）は、`import "C"` �
 
 - `gamut accept -reason <理由> [-dir <ディレクトリ>] <識別子>...` で記録する。識別子は報告の `id` をそのまま使い、前方一致は受け付けない。記録は識別子の順に、項目ごとに行を分けて書く。
 - 受理の記録を書くのは `gamut accept` だけで、判定の実行は書かない。対象のソースツリーへ書き込まない不変条件は、判定の実行についての約束であり、利用者が明示して記録するこのファイルは対象外とする。
-- 受理した変異体は引き続き実行して判定を保ち、報告では `files[].mutations` に本当の状態のまま `accepted`（理由）を付ける。`mutants_total` と効率には含めず、`mutants_accepted` に数える。要約の直す一覧には並べない。無効化コメントと同じく、状態を足さないのは gomutants の状態の名前を保つためである。
-- 判定したパッケージの受理のうち、テストが検出するようになったもの（`KILLED`、`TIMED OUT`）と、変異体がなくなったものを、`stale_accepted` と要約に並べる。ほかのパッケージの受理は、そのパッケージを判定していないので、なくなったとはみなさない。`PENDING` の受理と、`-mutant` で選んだ実行の「なくなった」も判定しない。
+- 受理した変異体は引き続き実行して判定を保つ。報告では `Ignored` の状態にし、`statusReason` を `accepted: <理由>`、判定した状態を `gamut.acceptedStatus` にする。`gamut.counts.total` と点数には含めず、`gamut.counts.accepted` に数える。要約の直す一覧には並べない。
+- 判定したパッケージの受理のうち、テストが検出するようになったもの（`KILLED`、`TIMED OUT`）と、変異体がなくなったものを、報告の `gamut.staleAccepted` と要約に並べる。ほかのパッケージの受理は、そのパッケージを判定していないので、なくなったとはみなさない。`PENDING` の受理と、`-mutant` で選んだ実行の「なくなった」も判定しない。
 - `gamut accept -prune [判定のフラグ] <パターン>...` は、判定してから、要らなくなった受理を消す。検出されるようになったかは判定しないと分からないので、ふだんの判定（キャッシュがあれば速い）を行う。`-prune` は判定のフラグと区別するため、先頭でだけ受け付ける。
 - 識別子は位置に依存しないので、関係ない編集では受理が外れない。囲む宣言の中の構文木の経路が変わると識別子も変わり、「なくなった」として挙がるので、新しい識別子を受理し直す。
 - 受理の記録は、変更のない再実行の入力の指紋に入れる。受理を変えれば報告が変わるためである。判定の鍵には入れない。
@@ -538,7 +539,7 @@ Go のコンパイラは定数の畳み込みと不要な分岐の除去を行�
 - 比べるのはパッケージ全体のアセンブリで、命令に付く位置の注記（`(file.go:12)`）を除く。変異は字句 1 つの置き換えなので、ほかの関数は変わらない。囲む関数が呼び出し元にインライン化されていれば、呼び出し元の違いも捉える。ファイルは一時ディレクトリに写し、`-trimpath` で、元と変異体のパスの違いを消す。
 - 変異体がコンパイルできなければ、等価ではないとする。
 - 埋め込みファイルやアセンブリのファイルを持つパッケージは、`-embedcfg` や `-symabis` が要るので比べず、警告する。
-- `EQUIVALENT` は gomutants と同じ状態の名前である。`mutants_total` と効率には含めず、`mutants_equivalent` に数える。
+- 報告では `Ignored` の状態にし、`statusReason` を `equivalent: same machine code` にする。`gamut.counts.total` と点数には含めず、`gamut.counts.equivalent` に数える。
 - 比較の結果は、構築可能性と同じ鍵（囲む宣言、依存、外の依存）でキャッシュに記録し、鍵の変わらない変異体はコンパイルし直さない。判定の記録は `LIVED` のまま残るので、フラグを外せば `LIVED` に戻る。
 - 既定では無効にする。生き残り 1 体につきパッケージを 1 回コンパイルするためである。
 
@@ -616,28 +617,27 @@ schemata の書き換えがテストバイナリに入っていない、また�
 | `TIMED OUT` | 時間切れの上限を超えた |
 | `PENDING` | 選択（`-since`）の外にあり、判定しなかった。数えない |
 
-JSON の報告は gomutants と同じ `files[].mutations[]` の形にし、各要素に `id`、`type`、`status`、`line`、`column`、`original`、`replacement` を持たせる。
-gamut は加えて `reason`、`tests`（到達したテスト）、`killed_by`、`mode`（`schemata` か `standalone`）、`cached`（判定をキャッシュから再利用したか）、`previously_killed_by`（前回の検出テストが消えて検出されなくなったときの、そのテスト）を持たせる。
-受理した変異体には `accepted`（受理の理由）を持たせる。
-最上位には `mutants_pending`（`PENDING` の数）、`mutants_ignored` と `ignored`（無効化コメントで止めた変異体）、`mutants_accepted` と `stale_accepted`（要らなくなった受理）を足す。`mutants_total` と効率の計算は `PENDING`、止めた変異体、受理した変異体を含めない。
-`files[].path` はモジュール相対のパスである。
-最上位の `package` は、1 パッケージならその import パス、複数なら引数に指定したパターンを空白でつないだものにし、判定したパッケージの import パスを `packages` に並べる。
-gomutants の報告を読む既存の検査は、そのまま gamut の報告を読める。
+状態の名前は、gamut の内部と標準出力の要約で使う。機械向けの報告では、次の節のとおり mutation-testing-elements の状態に写す。
 
 ### 報告の形式
 
-`-reporter` で形式を選ぶ（繰り返し可）。既定は `text` で、`-o` を指定すれば `gomutants` も書く。
+`-reporter` で形式を選ぶ（繰り返し可）。既定は `text` で、`-o` を指定すれば `json` も書く。
 
 | 形式 | 書き出し先 | 中身 |
 | --- | --- | --- |
 | `text` | 標準出力 | 生き残りを理由ごとに並べた要約 |
-| `gomutants` | `-o`（なければ `-report-dir` の `gomutants.json`） | 上の gomutants 互換の JSON |
-| `json` | `-report-dir`（既定 `.gamut/report`）の `mutation.json` | mutation-testing-elements のスキーマ 2 |
+| `json` | `-o`（なければ `-report-dir`（既定 `.gamut/report`）の `mutation.json`） | mutation-testing-elements のスキーマ 2 |
 | `html` | `-report-dir` の `mutation.html` | `json` の報告を埋め込んだ 1 つの HTML |
 
-- mutation-testing-elements の形式は、ミューテーションテストの報告で広く使われ、これを読む閲覧画面やダッシュボードをそのまま使える。ファイルの中身を含むので、モジュールのディレクトリから読む。
-- 状態は、`KILLED`→Killed、`LIVED`→Survived（理由を `statusReason`）、`NOT COVERED`→NoCoverage、`NOT VIABLE`→CompileError、`TIMED OUT`→Timeout、`PENDING`→Pending に対応させる。数えない変異体（無効化コメント、受理、`EQUIVALENT`）は Ignored にし、理由を `statusReason` に入れる。
-- 到達したテストを `coveredBy`、検出したテストを `killedBy` に入れる。gamut はテストのファイルを記録しないので、`testFiles` は名前のないファイル 1 つに、テストの名前を識別子として並べる。
+機械向けの報告は `json` の 1 つだけにする（[040](../work-items/040-mte-only-report.md)）。
+
+- mutation-testing-elements の形式は、公開された JSON Schema に版があり、多くの言語のミューテーションテストツールが書き、これを読む閲覧画面やダッシュボードをそのまま使える。形式を 2 つ保つと、情報を足すたびに両方の形を決めることになる。
+- 報告は出力にだけ使い、gamut のどのコマンドも入力に読まない。シャードのまとめ（`gamut merge`）はキャッシュに残した内部の報告を、変更のない再実行もキャッシュを読む。報告の形を内部の都合に縛らないためである。内部の報告（`report.Report`）の形は外向きの形と切り離し、`report.MTE` で写す。
+- 状態は、`KILLED`→Killed、`LIVED`→Survived（分類を `statusReason`）、`NOT COVERED`→NoCoverage、`NOT VIABLE`→CompileError、`TIMED OUT`→Timeout、`PENDING`→Pending に対応させる。数えない変異体は Ignored にし、理由を `statusReason` に `accepted: `（受理）、`equivalent: `（`EQUIVALENT`）、`ignored by comment: `（無効化コメント）を前に付けて入れる。受理した変異体は判定を保つので、判定した状態を `gamut.acceptedStatus` に残す。
+- 到達したテストを `coveredBy`、検出したテストを `killedBy`（kill matrix ならすべて）に入れる。gamut はテストのファイルを記録しないので、`testFiles` は名前のないファイル 1 つに、テストの名前を識別子として並べる。
+- スキーマにない情報は、`gamut` という名前のオブジェクトにまとめる。スキーマが将来フィールドを足しても衝突しないためである。変異体の `gamut` は `original`、`mode`、`cached`、`critical`、`previouslyKilledBy`、`acceptedStatus` を、最上位の `gamut` は `goModule`、`package`、`packages`、`mutationScore`、`testEfficacy`、`mutationsCoverage`、`thresholdBreak`、`elapsedTime`、`counts`、`staleAccepted`、`unrepeatableTests`、`maxDepthExcluded`、`skippedPackages`、`killMatrix` を持つ。gamut の版は `framework.version` に入れる。
+- `files` の鍵はモジュール相対のパスで、ファイルの中身を含むので、モジュールのディレクトリから読む。`location` の終わりは、置き換える字句が複数行にわたる（`BRANCH_*`、`RETURN_ERROR_NIL`）ときも、最後の改行の後ろの行と列にする。
+- 最上位の `gamut.package` は、1 パッケージならその import パス、複数なら引数に指定したパターンを空白でつないだものにし、判定したパッケージの import パスを `packages` に並べる。
 - 閾値は、スキーマが整数を求めるので、`-threshold-high` と `-threshold-low` を丸めて入れる。
 - HTML は、閲覧画面のスクリプト（`mutation-testing-elements`）を同梱せず、報告のスキーマと同じ版（3.9.0）を固定して CDN から読み込む。同梱すると、版の更新と使用許諾の管理が要る。報告の JSON は `encoding/json` が `<` と `>` をエスケープするので、埋め込んだソースの `</script>` で script 要素が閉じない。
 - スキーマへの適合は、`internal/report/testdata` に固定したスキーマ（mutation-testing-report-schema 3.9.0、Apache License 2.0、同じディレクトリに使用許諾）で検証する。検証は、このスキーマが使うキーワードだけを扱う、テストの中の小さな検証器で行う。外部モジュールを足さず、ネットワークにも依存しない。
@@ -701,7 +701,7 @@ Pull Request では、その行に注釈として表示される。
 全体の点数だけを閾値にすると、等価な変異体のせいで 100% にできず、点数を上げるためのテストが増える。
 そこで、認証、認可、金額の計算のような箇所を重要領域として、領域内ではすべての変異体の検出か明示的な受理を求め、全体には閾値を置く。
 
-- 点数（`mutation_score`）は、検出した変異体（`KILLED`、`TIMED OUT`）の、検出したものと生き残り（`LIVED`、`NOT COVERED`）の和に対する割合である。`test_efficacy` は到達しない変異体を含めないので、テストのない箇所が多くても高く出る。閾値はこの点数に当てる。判定する変異体がなければ 100 とする。
+- 点数（報告の `gamut.mutationScore`）は、検出した変異体（`KILLED`、`TIMED OUT`）の、検出したものと生き残り（`LIVED`、`NOT COVERED`）の和に対する割合である。到達した変異体のうちの検出の割合（`gamut.testEfficacy`）は、到達しない変異体を含めないので、テストのない箇所が多くても高く出る。閾値はこの点数に当てる。判定する変異体がなければ 100 とする。
 - 重要領域は、`-critical`（設定の `critical`）の glob に当たるファイルと、関数の宣言の Doc に `//gamut:critical` を持つ関数である。glob はモジュール相対の `/` 区切りのパスに `path.Match` で当て、要素 `**` は 0 個以上のディレクトリに当たる。報告の変異体には `critical` を付ける。関数の Doc の外の `//gamut:critical` は警告して無視する。
 - 重要領域に、受理していない生き残り（`LIVED`、`NOT COVERED`）があれば、条件を満たさない。受理した変異体と `EQUIVALENT` は許す。要約では、重要領域の生き残りを先頭の組に並べ、重要領域の変異体の数と生き残りの数を点数の行に添える。
 - 点数は `-threshold-high`（既定 80）以上を `high`、`-threshold-low`（既定 60）以上を `low`、それ未満を `danger` として要約に付ける。`-threshold-break`（既定 0、無効）が正なら、点数がそれ未満のとき条件を満たさない。
@@ -764,7 +764,7 @@ gamut の機能を足したら、表の gamut の列も更新する。
 
 ### 段階
 
-- **段階 1（済み）**：schemata、`go/types` による構築不能の判定、式単位の被覆と感染、生き残りの 3 分類、位置に依存しない識別子、gomutants 互換の JSON。
+- **段階 1（済み）**：schemata、`go/types` による構築不能の判定、式単位の被覆と感染、生き残りの 3 分類、位置に依存しない識別子、JSON の報告。
 - **段階 2（済み）**：再実行を速くする。結果の再利用、差分の実行、変異体の再実行、自己検査、複数パッケージ、統合モード。
 - **段階 3**：仕分けと CI。受理、無効化コメント、等価の自動検出、重要領域、報告の形式、注釈、エージェント向けの報告、変異演算子と arid の拡張。
 - **段階 4**：テストの質を測る。`select-tests`、kill matrix、`simplify`、呼び出しの深さ、シャード、`--watch`。

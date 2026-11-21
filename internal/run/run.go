@@ -19,7 +19,7 @@ import (
 	"github.com/ambi/gamut/internal/schemata"
 )
 
-// Status は判定の状態である。名前は gomutants の報告に合わせる。
+// Status は判定の状態である。内部と要約の名前で、報告では mutation-testing-elements の状態に写す（report.MTE）。
 type Status string
 
 // 判定の状態。
@@ -31,7 +31,7 @@ const (
 	TimedOut   Status = "TIMED OUT"
 	// Pending は、選択（差分や識別子の指定）の外にあり、判定しなかったことを表す。
 	Pending Status = "PENDING"
-	// Equivalent は、生き残った変異体のコンパイル結果が元と同じで、どのテストでも検出できないことを表す。gomutants と同じ名前である。
+	// Equivalent は、生き残った変異体のコンパイル結果が元と同じで、どのテストでも検出できないことを表す。
 	Equivalent Status = "EQUIVALENT"
 )
 

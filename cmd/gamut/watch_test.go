@@ -38,7 +38,7 @@ func TestWatch_JudgesTheChangedFunction(t *testing.T) {
 	// 1 回目は、変更がないので何も判定しない。
 	wait(1)
 	for _, m := range readReport(t, reportPath) {
-		if m.Status != "PENDING" {
+		if m.Status != "Pending" {
 			t.Errorf("run 1: %s is %s, want PENDING", m.ID, m.Status)
 		}
 	}
@@ -48,7 +48,7 @@ func TestWatch_JudgesTheChangedFunction(t *testing.T) {
 	judged := 0
 	for _, m := range readReport(t, reportPath) {
 		inMul := strings.Contains(m.ID, "::Mul::")
-		if inMul != (m.Status != "PENDING") {
+		if inMul != (m.Status != "Pending") {
 			t.Errorf("run 2: %s is %s", m.ID, m.Status)
 		}
 		if inMul {

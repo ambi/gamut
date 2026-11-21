@@ -1,9 +1,7 @@
 package main
 
 import (
-	"encoding/json"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -58,24 +56,14 @@ func TestQuality_CriticalSurvivorsFailUntilAccepted(t *testing.T) {
 	if code, _ := exit(t, "-no-cache", "-only", "ARITHMETIC_BASE", "-o", reportPath, dir); code != exitQuality {
 		t.Fatalf("exit %d, want %d", code, exitQuality)
 	}
-	data, err := os.ReadFile(reportPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var rep acceptReport
-	if err := json.Unmarshal(data, &rep); err != nil {
-		t.Fatal(err)
-	}
 	var id string
-	for _, f := range rep.Files {
-		for _, m := range f.Mutations {
-			if m.Status == "LIVED" {
-				id = m.ID
-			}
+	for _, m := range readReport(t, reportPath) {
+		if m.Status == "Survived" {
+			id = m.ID
 		}
 	}
 	if id == "" {
-		t.Fatal("no LIVED mutant")
+		t.Fatal("no survivor")
 	}
 	if code := realMain([]string{"accept", "-reason", "callers read only the sign", "-dir", dir, id}, io.Discard, io.Discard); code != 0 {
 		t.Fatalf("accept exited %d", code)

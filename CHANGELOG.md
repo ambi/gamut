@@ -22,7 +22,7 @@ gamut の版ごとの変更を記録する。
 - 変異演算子は 25 種類で、既定の集合は `ARITHMETIC_BASE`、`CONDITIONALS_BOUNDARY`、`CONDITIONALS_NEGATION`、`INCREMENT_DECREMENT`、`INVERT_NEGATIVES`、`RETURN_ZERO`、`STATEMENT_REMOVE` の 7 種類。
 - 判定と被覆の記録の再利用、差分だけの判定（`-since`）、変異体の再実行（`-mutant`）、逆依存パッケージのテストでの検出（`-integration`）、保存のたびの判定（`-watch`）。
 - 無効化コメント、等価な変異体の受理（`gamut accept`）と自動検出（`-detect-equivalent`）、重要領域、閾値と終了コード。
-- 報告：gomutants 互換の JSON、mutation-testing-elements の JSON と HTML、エージェント向けの JSON、GitHub の注釈と Action。
+- 報告：mutation-testing-elements の形式の JSON（gamut 固有の情報は `gamut` のオブジェクト）と、それを埋め込んだ HTML、エージェント向けの JSON、GitHub の注釈と Action。
 - `gamut select-tests`、`-kill-matrix`、`-reporter simplify`、`-max-depth`、`-shard` と `gamut merge`、`-time-budget`。
 - macOS と Linux で動作を確かめた。Windows は確かめていない。
 

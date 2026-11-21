@@ -83,3 +83,4 @@ created_at: 2026-11-20
 | [037](037-list-and-disable-mutators.md) | 3 | 変異演算子の一覧を出し、演算子を個別に無効にできるようにする | |
 | [038](038-detect-unrepeatable-tests.md) | 3 | 繰り返し実行できないテストを見つけ、テストプロセスを使い回さずに判定する | 030 |
 | [039](039-literal-and-branch-mutators.md) | 3 | 数値のリテラル、分岐の本体、エラーの包みを変える変異演算子を足す | 018 |
+| [040](040-mte-only-report.md) | 公開 | 機械向けの報告を mutation-testing-elements の形式 1 つにし、報告を入力に使わない | 015、026 |

@@ -95,6 +95,8 @@ type fileFormat struct {
 	Equivalence map[string]*Equivalence `json:"equivalence,omitempty"`
 	Quick       map[string]*Quick       `json:"quick,omitempty"`
 	LoadHints   map[string][]string     `json:"load_hints,omitempty"`
+	// Last は、このキャッシュで最後に実行した判定の報告（report.Report の JSON）である。gamut merge がシャードの判定をまとめるのに読む。
+	Last json.RawMessage `json:"last,omitempty"`
 }
 
 // Store は、キャッシュファイルの内容を持つ。並行に使える。
@@ -116,6 +118,8 @@ type Store struct {
 	quick map[string]*Quick
 	// loadHints は、読み込みのパターンと設定の鍵から、前回の読み込みでエクスポートデータを求めたパッケージを引く。
 	loadHints map[string][]string
+	// last は、最後に実行した判定の報告である。
+	last json.RawMessage
 }
 
 func pairKey(target, binary string) string { return target + " " + binary }
@@ -157,6 +161,7 @@ func Open(path, env string) (*Store, error) {
 			}
 		}
 		maps.Copy(s.loadHints, f.LoadHints)
+		s.last = f.Last
 		for k, v := range f.Viability {
 			if v != nil {
 				s.viability[k] = v
@@ -296,6 +301,32 @@ func (s *Store) Save() (err error) {
 	return s.save()
 }
 
+// PutLast は、最後に実行した判定の報告を記録する。
+func (s *Store) PutLast(report json.RawMessage) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.last = report
+}
+
+// ReadLast は、path のキャッシュの、最後に実行した判定の報告を返す。
+func ReadLast(path string) (json.RawMessage, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var f fileFormat
+	if err := json.Unmarshal(data, &f); err != nil {
+		return nil, fmt.Errorf("read the cache %s: %w", path, err)
+	}
+	if f.Version != formatVersion {
+		return nil, fmt.Errorf("the cache %s has format %d, want %d", path, f.Version, formatVersion)
+	}
+	if len(f.Last) == 0 {
+		return nil, fmt.Errorf("the cache %s has no report of a run; run gamut with -cache %s first", path, path)
+	}
+	return f.Last, nil
+}
+
 // Merge は、inputs のキャッシュファイル（シャードごとのもの）の記録を合わせて out に書く。
 // どの入力も同じ形式の版と環境でなければならない。同じ変異体の判定が複数あれば、kill matrix の判定を、なければ後の入力のものを採る。
 // 変更のない再実行の記録（quick）はシャードの指定を鍵に含むので、合わせた後には当たらないため書かない。
@@ -334,7 +365,7 @@ func Merge(inputs []string, out string) error {
 func (s *Store) save() (err error) {
 	s.mu.Lock()
 	data, err := json.Marshal(fileFormat{Version: formatVersion, Env: s.env, Mutants: s.entries, Coverage: s.coverage, Viability: s.viability,
-		Equivalence: s.equivalence, Quick: s.quick, LoadHints: s.loadHints})
+		Equivalence: s.equivalence, Quick: s.quick, LoadHints: s.loadHints, Last: s.last})
 	s.mu.Unlock()
 	if err != nil {
 		return err

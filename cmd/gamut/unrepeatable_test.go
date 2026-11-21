@@ -40,32 +40,18 @@ func TestUnrepeatable_TestsAreJudgedInFreshProcesses(t *testing.T) {
 		if code := realMain(args, &stdout, &stderr); code != 0 {
 			t.Fatalf("%s: exit %d:\n%s", run.name, code, stderr.String())
 		}
-		data, err := os.ReadFile(reportPath)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var rep struct {
-			Unrepeatable []string `json:"unrepeatable_tests"`
-			Files        []struct {
-				Mutations []mutation `json:"mutations"`
-			} `json:"files"`
-		}
-		if err := json.Unmarshal(data, &rep); err != nil {
-			t.Fatal(err)
-		}
+		rep := readMTE(t, reportPath)
 		got := map[string]string{}
-		for _, f := range rep.Files {
-			for _, m := range f.Mutations {
-				got[m.ID] = m.Status
-			}
+		for _, m := range rep.mutants() {
+			got[m.ID] = m.Status
 		}
 		for id, w := range want {
 			if got[id] != w {
 				t.Errorf("%s: %s is %s, -isolate says %s", run.name, id, got[id], w)
 			}
 		}
-		if len(rep.Unrepeatable) != 1 || rep.Unrepeatable[0] != "TestSwitch" {
-			t.Errorf("%s: unrepeatable_tests %v, want [TestSwitch]", run.name, rep.Unrepeatable)
+		if u := rep.Gamut.UnrepeatableTests; len(u) != 1 || u[0] != "TestSwitch" {
+			t.Errorf("%s: unrepeatable tests %v, want [TestSwitch]", run.name, u)
 		}
 		if !strings.Contains(stdout.String(), "TestSwitch") {
 			t.Errorf("%s: the summary does not warn about TestSwitch:\n%s", run.name, stdout.String())

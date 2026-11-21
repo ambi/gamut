@@ -18,12 +18,12 @@ func TestKillMatrix(t *testing.T) {
 	cachePath := filepath.Join(t.TempDir(), "cache.json")
 	type matrix struct {
 		Excluded   int        `json:"excluded"`
-		NoKill     []string   `json:"tests_detecting_nothing"`
-		Duplicates [][]string `json:"duplicate_tests"`
+		NoKill     []string   `json:"testsDetectingNothing"`
+		Duplicates [][]string `json:"duplicateTests"`
 		Subsumed   []struct {
 			Test string   `json:"test"`
 			By   []string `json:"by"`
-		} `json:"subsumed_tests"`
+		} `json:"subsumedTests"`
 	}
 	gamutRun := func(args ...string) (map[string][]string, *matrix, string) {
 		t.Helper()
@@ -43,24 +43,19 @@ func TestKillMatrix(t *testing.T) {
 			t.Fatal(err)
 		}
 		var rep struct {
-			Matrix *matrix `json:"kill_matrix"`
-			Files  []struct {
-				Mutations []struct {
-					Original string   `json:"original"`
-					Killers  []string `json:"killers"`
-				} `json:"mutations"`
-			} `json:"files"`
+			Gamut struct {
+				Matrix *matrix `json:"killMatrix"`
+			} `json:"gamut"`
 		}
 		if err := json.Unmarshal(data, &rep); err != nil {
 			t.Fatal(err)
 		}
+		// kill matrix のときの killedBy は、検出したテストのすべてである。
 		killers := map[string][]string{}
-		for _, f := range rep.Files {
-			for _, m := range f.Mutations {
-				killers[m.Original] = m.Killers
-			}
+		for _, m := range readReport(t, reportPath) {
+			killers[m.Original] = m.Killers
 		}
-		return killers, rep.Matrix, stdout.String()
+		return killers, rep.Gamut.Matrix, stdout.String()
 	}
 	want := map[string][]string{"+": {"TestAdd", "TestAddAgain", "TestBoth", "TestPanicky"}, "-": {"TestBoth"}}
 

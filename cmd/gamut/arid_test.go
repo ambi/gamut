@@ -1,13 +1,11 @@
 package main
 
 import (
-	"encoding/json"
-	"os"
 	"path/filepath"
 	"testing"
 )
 
-// TestArid_FlagsAndCount は、arid の既定の規則、-arid-call、-arid-package、-no-arid と、報告の mutants_arid を確かめる。
+// TestArid_FlagsAndCount は、arid の既定の規則、-arid-call、-arid-package、-no-arid と、報告の arid の数を確かめる。
 func TestArid_FlagsAndCount(t *testing.T) {
 	dir := t.TempDir()
 	write(t, dir, "go.mod", "module ar\n\ngo 1.27.4\n")
@@ -33,26 +31,12 @@ func F(n int) int {
 		if code, stderr := exit(t, append(append([]string{"-no-cache", "-o", reportPath}, args...), dir)...); code != 0 {
 			t.Fatalf("exit %d:\n%s", code, stderr)
 		}
-		data, err := os.ReadFile(reportPath)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var rep struct {
-			Arid  int `json:"mutants_arid"`
-			Files []struct {
-				Mutations []mutation `json:"mutations"`
-			} `json:"files"`
-		}
-		if err := json.Unmarshal(data, &rep); err != nil {
-			t.Fatal(err)
-		}
+		rep := readMTE(t, reportPath)
 		got := map[string]int{}
-		for _, f := range rep.Files {
-			for _, m := range f.Mutations {
-				got[m.Type]++
-			}
+		for _, m := range rep.mutants() {
+			got[m.Type]++
 		}
-		return got, rep.Arid
+		return got, rep.Gamut.Counts.Arid
 	}
 	// 既定：log.Println の引数（+）と文の削除を除く。audit.Record の引数（-）と文の削除、本体の * と RETURN_ZERO は残る。
 	got, arid := types()

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -9,68 +8,38 @@ import (
 	"testing"
 )
 
-// TestReporter_WritesMutationTestingElements は、-reporter json と html が、gomutants の形式と同じ変異体を
-// mutation-testing-elements の形式で -report-dir に書くことを確かめる。
+// TestReporter_WritesMutationTestingElements は、-o と -reporter json が mutation-testing-elements の形式を書き、
+// -reporter html がそれを埋め込んだ HTML を -report-dir に書くことを確かめる。
 func TestReporter_WritesMutationTestingElements(t *testing.T) {
 	dir := t.TempDir()
-	gomutants := filepath.Join(t.TempDir(), "gomutants.json")
+	output := filepath.Join(t.TempDir(), "report.json")
 	var stdout, stderr strings.Builder
-	args := []string{"-q", "-no-cache", "-workers", "2", "-reporter", "json", "-reporter", "html", "-report-dir", dir, "-o", gomutants, "../../testdata/fixture"}
+	args := []string{"-q", "-no-cache", "-workers", "2", "-reporter", "json", "-reporter", "html", "-report-dir", dir, "-o", output, "../../testdata/fixture"}
 	if code := realMain(args, &stdout, &stderr); code != 0 {
 		t.Fatalf("exit %d:\n%s", code, stderr.String())
 	}
 	if stdout.Len() != 0 {
 		t.Errorf("text was not requested, but the summary was written:\n%s", stdout.String())
 	}
-	var mte struct {
-		SchemaVersion string `json:"schemaVersion"`
-		Files         map[string]struct {
-			Source  string `json:"source"`
-			Mutants []struct {
-				ID     string `json:"id"`
-				Status string `json:"status"`
-			} `json:"mutants"`
-		} `json:"files"`
+	// -o があれば json はそこへ書き、-report-dir には書かない。
+	if _, err := os.Stat(filepath.Join(dir, "mutation.json")); err == nil {
+		t.Errorf("-reporter json with -o also wrote %s", filepath.Join(dir, "mutation.json"))
 	}
-	data, err := os.ReadFile(filepath.Join(dir, "mutation.json"))
-	if err != nil {
-		t.Fatal(err)
+	rep := readMTE(t, output)
+	if rep.SchemaVersion != "2" || rep.Framework.Name != "gamut" || rep.Framework.Version == "" {
+		t.Errorf("schemaVersion %q, framework %+v", rep.SchemaVersion, rep.Framework)
 	}
-	if err := json.Unmarshal(data, &mte); err != nil {
-		t.Fatal(err)
-	}
-	var gm struct {
-		Files []struct {
-			Path      string     `json:"path"`
-			Mutations []mutation `json:"mutations"`
-		} `json:"files"`
-	}
-	data, err = os.ReadFile(gomutants)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Unmarshal(data, &gm); err != nil {
-		t.Fatal(err)
-	}
-	statusOf := map[string]string{"KILLED": "Killed", "LIVED": "Survived", "NOT COVERED": "NoCoverage", "NOT VIABLE": "CompileError", "TIMED OUT": "Timeout"}
-	n := 0
-	for _, f := range gm.Files {
-		got := map[string]string{}
-		for _, m := range mte.Files[f.Path].Mutants {
-			got[m.ID] = m.Status
+	statuses := map[string]int{}
+	for path, f := range rep.Files {
+		if f.Source == "" {
+			t.Errorf("%s: no source", path)
 		}
-		if mte.Files[f.Path].Source == "" {
-			t.Errorf("%s: no source", f.Path)
-		}
-		for _, m := range f.Mutations {
-			n++
-			if got[m.ID] != statusOf[m.Status] {
-				t.Errorf("%s: %s in gomutants, %q in mutation-testing-elements", m.ID, m.Status, got[m.ID])
-			}
+		for _, m := range f.Mutants {
+			statuses[m.Status]++
 		}
 	}
-	if mte.SchemaVersion != "2" || n == 0 {
-		t.Errorf("schemaVersion %q with %d mutants", mte.SchemaVersion, n)
+	if statuses["Killed"] != rep.Gamut.Counts.Killed || statuses["Survived"] != rep.Gamut.Counts.Survived || statuses["Killed"] == 0 {
+		t.Errorf("statuses %v, counts %+v", statuses, rep.Gamut.Counts)
 	}
 	html, err := os.ReadFile(filepath.Join(dir, "mutation.html"))
 	if err != nil {
@@ -80,7 +49,17 @@ func TestReporter_WritesMutationTestingElements(t *testing.T) {
 		t.Errorf("the HTML does not embed the report:\n%.400s", html)
 	}
 
-	if code := realMain([]string{"-reporter", "xml", "../../testdata/fixture"}, io.Discard, io.Discard); code != exitError {
-		t.Errorf("-reporter xml: exit %d, want %d", code, exitError)
+	// -o がなければ、json は -report-dir に書く。
+	if code := realMain([]string{"-q", "-no-cache", "-workers", "2", "-reporter", "json", "-report-dir", dir, "../../testdata/fixture"}, io.Discard, io.Discard); code != 0 {
+		t.Fatalf("-reporter json without -o: exit %d", code)
+	}
+	if readMTE(t, filepath.Join(dir, "mutation.json")).SchemaVersion != "2" {
+		t.Error("-reporter json without -o did not write mutation.json")
+	}
+
+	for _, kind := range []string{"xml", "gomutants"} {
+		if code := realMain([]string{"-reporter", kind, "../../testdata/fixture"}, io.Discard, io.Discard); code != exitError {
+			t.Errorf("-reporter %s: exit %d, want %d", kind, code, exitError)
+		}
 	}
 }

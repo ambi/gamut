@@ -28,13 +28,27 @@ func TestMTE_ValidatesAgainstTheSchema(t *testing.T) {
 	}
 	killed := m("p.go::ARITHMETIC_BASE::F::01", "KILLED", "")
 	killed.KilledBy, killed.Tests = "TestF", []string{"TestF", "TestG"}
+	killed.Mode, killed.Cached, killed.Critical = "schemata", true, true
 	accepted := m("p.go::ARITHMETIC_BASE::F::06", "LIVED", "not detected")
 	accepted.Accepted = "callers read only the sign"
+	lived := m("p.go::ARITHMETIC_BASE::F::02", "LIVED", "not detected")
+	lived.PreviouslyKilledBy = "TestGone"
+	matrix := m("p.go::ARITHMETIC_BASE::F::11", "KILLED", "")
+	matrix.KilledBy, matrix.Killers = "TestF", []string{"TestF", "TestG"}
+	// 本体を空にする変異体の置き換える字句は、3 行目の { の直後から 5 行目の } の前まで。
+	branch := report.Mutation{ID: "p.go::BRANCH_IF::F::10", Type: "BRANCH_IF", Status: "KILLED", Line: 3, Column: 23,
+		Original: "\n\treturn a + b\n", Replacement: "if false {\n\treturn a + b\n}"}
 	rep := &report.Report{
-		Thresholds: &report.Thresholds{High: 80.4, Low: 59.6},
+		GoModule: "m", Package: "m/p", Packages: []string{"m/p"}, Version: "v0.1.0", ElapsedTime: 1.5,
+		Thresholds:        &report.Thresholds{High: 80.4, Low: 59.6, Break: 50},
+		StaleAccepted:     []report.StaleAcceptance{{ID: "p.go::ARITHMETIC_BASE::F::99", Reason: "old", Why: report.StaleMissing}},
+		UnrepeatableTests: []string{"TestG"},
+		MutantsArid:       2,
 		Files: []report.File{{FileName: "p.go", Path: "p.go", Mutations: []report.Mutation{
 			killed,
-			m("p.go::ARITHMETIC_BASE::F::02", "LIVED", "not detected"),
+			lived,
+			matrix,
+			branch,
 			m("p.go::ARITHMETIC_BASE::F::03", "NOT COVERED", ""),
 			m("p.go::ARITHMETIC_BASE::F::04", "NOT VIABLE", ""),
 			m("p.go::ARITHMETIC_BASE::F::05", "TIMED OUT", ""),
@@ -73,24 +87,64 @@ func TestMTE_ValidatesAgainstTheSchema(t *testing.T) {
 		t.Fatalf("file entry %+v, want the source and language go", file)
 	}
 	got := map[string]string{}
+	byKey := map[string]report.MTEMutant{}
 	for _, mu := range file.Mutants {
-		got[mu.ID[len(mu.ID)-2:]] = mu.Status + " " + mu.StatusReason
-		if mu.Location.Start.Line != 4 || mu.Location.Start.Column != 11 || mu.Location.End.Column != 12 {
+		key := mu.ID[len(mu.ID)-2:]
+		got[key] = mu.Status + " " + mu.StatusReason
+		byKey[key] = mu
+		if key == "10" {
+			continue
+		}
+		if mu.Location.Start.Line != 4 || mu.Location.Start.Column != 11 || mu.Location.End.Line != 4 || mu.Location.End.Column != 12 {
 			t.Errorf("%s: location %+v, want 4:11-4:12", mu.ID, mu.Location)
 		}
 	}
 	want := map[string]string{
 		"01": "Killed ", "02": "Survived not detected", "03": "NoCoverage ", "04": "CompileError ", "05": "Timeout ",
 		"06": "Ignored accepted: callers read only the sign", "07": "Ignored equivalent: same machine code", "08": "Pending ",
-		"09": "Ignored ignored by comment: a cache key",
+		"09": "Ignored ignored by comment: a cache key", "10": "Killed ", "11": "Killed ",
 	}
 	for k, w := range want {
 		if got[k] != w {
 			t.Errorf("mutant %s: %q, want %q", k, got[k], w)
 		}
 	}
+	// 複数行の字句の終わりは、最後の改行の後ろの列で表す。
+	if loc := byKey["10"].Location; loc.Start != (report.MTEPosition{Line: 3, Column: 23}) || loc.End != (report.MTEPosition{Line: 5, Column: 1}) {
+		t.Errorf("multi-line location %+v, want 3:23-5:1", loc)
+	}
+	if g := byKey["01"].Gamut; g == nil || !g.Cached || !g.Critical || g.Mode != "schemata" || g.Original != "+" {
+		t.Errorf("mutant 01 gamut fields %+v, want cached, critical, schemata, and the original token", g)
+	}
+	if !slices.Equal(byKey["01"].KilledBy, []string{"TestF"}) || !slices.Equal(byKey["01"].CoveredBy, []string{"TestF", "TestG"}) {
+		t.Errorf("mutant 01 killedBy %v coveredBy %v", byKey["01"].KilledBy, byKey["01"].CoveredBy)
+	}
+	if !slices.Equal(byKey["11"].KilledBy, []string{"TestF", "TestG"}) {
+		t.Errorf("mutant 11 killedBy %v, want every killer of the kill matrix", byKey["11"].KilledBy)
+	}
+	if g := byKey["02"].Gamut; g == nil || g.PreviouslyKilledBy != "TestGone" {
+		t.Errorf("mutant 02 gamut fields %+v, want previouslyKilledBy", g)
+	}
+	if g := byKey["06"].Gamut; g == nil || g.AcceptedStatus != "Survived" {
+		t.Errorf("mutant 06 gamut fields %+v, want acceptedStatus Survived", g)
+	}
 	if out.Thresholds.High != 80 || out.Thresholds.Low != 60 {
 		t.Errorf("thresholds %+v, want rounded 80 and 60", out.Thresholds)
+	}
+	if out.Framework == nil || out.Framework.Name != "gamut" || out.Framework.Version != "v0.1.0" {
+		t.Errorf("framework %+v, want gamut v0.1.0", out.Framework)
+	}
+	g := out.Gamut
+	if g == nil {
+		t.Fatal("no top-level gamut object")
+	}
+	if g.GoModule != "m" || g.Package != "m/p" || g.ThresholdBreak != 50 || g.ElapsedTime != 1.5 || len(g.StaleAccepted) != 1 || g.StaleAccepted[0].Why != "missing" ||
+		!slices.Equal(g.UnrepeatableTests, []string{"TestG"}) || g.Counts.Arid != 2 {
+		t.Errorf("top-level gamut %+v", g)
+	}
+	// 数は報告の数をそのまま写す。
+	if g.MutationScore != rep.MutationScore || g.Counts.Killed != rep.MutantsKilled || g.Counts.Survived != rep.MutantsLived {
+		t.Errorf("counts %+v and score %v, want the report's", g.Counts, g.MutationScore)
 	}
 }
 

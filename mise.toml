@@ -50,10 +50,10 @@ go build -o bin/gamut ./cmd/gamut
 mkdir -p .gamut
 report=.gamut/canary.json
 ./bin/gamut -q -only ARITHMETIC_BASE,CONDITIONALS_BOUNDARY -o "$report" ./testdata/canary >/dev/null
-jq -e '[.files[].mutations[]] | any(.type == "CONDITIONALS_BOUNDARY" and .status == "LIVED")' "$report" >/dev/null \
-  || { echo "canary: expected a CONDITIONALS_BOUNDARY mutant with status LIVED" >&2; exit 1; }
-jq -e '[.files[].mutations[]] | any(.type == "ARITHMETIC_BASE" and .status == "NOT VIABLE")' "$report" >/dev/null \
-  || { echo "canary: expected an ARITHMETIC_BASE mutant with status NOT VIABLE" >&2; exit 1; }
+jq -e '[.files[].mutants[]] | any(.mutatorName == "CONDITIONALS_BOUNDARY" and .status == "Survived")' "$report" >/dev/null \
+  || { echo "canary: expected a CONDITIONALS_BOUNDARY mutant with status Survived" >&2; exit 1; }
+jq -e '[.files[].mutants[]] | any(.mutatorName == "ARITHMETIC_BASE" and .status == "CompileError")' "$report" >/dev/null \
+  || { echo "canary: expected an ARITHMETIC_BASE mutant with status CompileError" >&2; exit 1; }
 echo "ok  canary verdicts"
 '''
 

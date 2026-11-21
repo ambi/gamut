@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -10,18 +9,26 @@ import (
 	"testing"
 )
 
+// mutation は、報告の 1 体の変異体を、テストが比べやすい形にしたものである（readReport が作る）。
 type mutation struct {
-	ID     string `json:"id"`
-	Type   string `json:"type"`
-	Status string `json:"status"`
-	Reason string `json:"reason"`
-	Mode   string `json:"mode"`
-	Cached bool   `json:"cached"`
-	// KilledBy と PreviouslyKilledBy は、検出したテストと、消えた前回の検出テストである。
-	KilledBy           string `json:"killed_by"`
-	PreviouslyKilledBy string `json:"previously_killed_by"`
+	ID     string
+	Type   string
+	Status string
+	// Reason は statusReason、Original は置き換える前の字句である。
+	Reason   string
+	Original string
+	Mode     string
+	Cached   bool
+	// KilledBy は最初の検出テスト、Killers は検出したテストのすべて、PreviouslyKilledBy は消えた前回の検出テストである。
+	KilledBy           string
+	Killers            []string
+	PreviouslyKilledBy string
 	// Tests は、変異箇所に到達したテストである。
-	Tests []string `json:"tests"`
+	Tests    []string
+	Critical bool
+	// Accepted は受理の理由、AcceptedStatus は受理した変異体の判定した状態である。
+	Accepted       string
+	AcceptedStatus string
 }
 
 // scope は識別子から囲む宣言の名前を取り出す。
@@ -32,7 +39,7 @@ func (m mutation) scope() string {
 
 // executed は、判定のために変異体を実行したかを返す。到達しない変異体と感染しない変異体はもともと実行しない。
 func (m mutation) executed() bool {
-	needsRun := m.Status == "KILLED" || m.Status == "TIMED OUT" || m.Status == "LIVED" && m.Reason == "not detected"
+	needsRun := m.Status == "Killed" || m.Status == "Timeout" || m.Status == "Survived" && m.Reason == "not detected"
 	return needsRun && !m.Cached
 }
 
@@ -88,7 +95,7 @@ func TestCache_ReusesOnlyVerdictsWhoseKeysAreUnchanged(t *testing.T) {
 			check: func(t *testing.T, executed map[string]int, all []mutation) {
 				wantExecuted("Clamp", "Score")(t, executed, all)
 				for _, m := range all {
-					if m.scope() == "Score" && m.Status == "LIVED" && m.Cached {
+					if m.scope() == "Score" && m.Status == "Survived" && m.Cached {
 						t.Errorf("%s: the survivor of a caller of the changed helper was reused", m.ID)
 					}
 				}
@@ -174,23 +181,7 @@ func runGamut(t *testing.T, dir string, flags ...string) []mutation {
 	if code := realMain(args, io.Discard, &stderr); code != 0 {
 		t.Fatalf("gamut %v exited %d:\n%s", args, code, stderr.String())
 	}
-	data, err := os.ReadFile(reportPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var rep struct {
-		Files []struct {
-			Mutations []mutation `json:"mutations"`
-		} `json:"files"`
-	}
-	if err := json.Unmarshal(data, &rep); err != nil {
-		t.Fatal(err)
-	}
-	var out []mutation
-	for _, f := range rep.Files {
-		out = append(out, f.Mutations...)
-	}
-	return out
+	return readReport(t, reportPath)
 }
 
 func copyModule(t *testing.T, src string) string {

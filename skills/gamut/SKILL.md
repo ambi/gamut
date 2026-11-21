@@ -25,7 +25,8 @@ gamut -reporter agent ./path/to/pkg # エージェント向けの JSON を標準
 gamut -reporter html ./...        # .gamut/report/mutation.html
 ```
 
-判定の状態は、`KILLED`（検出した）、`LIVED`（生き残り。`reason` が `not detected` か `not infected`）、`NOT COVERED`（どのテストも到達しない）、`NOT VIABLE`（型検査を通らない）、`TIMED OUT`、`PENDING`（`-since` の外）、`EQUIVALENT`（機械語が元と同じ）である。
+要約の判定の状態は、`KILLED`（検出した）、`LIVED`（生き残り。`not detected` か `not infected`）、`NOT COVERED`（どのテストも到達しない）、`NOT VIABLE`（型検査を通らない）、`TIMED OUT`、`PENDING`（`-since` の外）、`EQUIVALENT`（機械語が元と同じ）である。
+`-o report.json` の JSON は mutation-testing-elements の形式で、状態は `Killed`、`Survived`（分類は `statusReason`）、`NoCoverage`、`CompileError`、`Timeout`、`Pending`、`Ignored`（受理、等価、無効化コメント）になる。gamut 固有の情報は `gamut` のオブジェクトにある。
 生き残りを直すときは mutation-test-loop の skill に従う。
 
 ## 設定

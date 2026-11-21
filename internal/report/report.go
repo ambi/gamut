@@ -1,4 +1,4 @@
-// Package report は、判定を gomutants 互換の JSON と標準出力の要約にする。
+// Package report は、判定を報告（mutation-testing-elements の JSON と HTML、エージェント向けの JSON、GitHub の注釈）と標準出力の要約にする。
 package report
 
 import (
@@ -14,7 +14,7 @@ import (
 	"github.com/ambi/gamut/internal/run"
 )
 
-// Mutation は JSON の 1 体の変異体である。gomutants のフィールドに gamut のフィールドを足す。
+// Mutation は 1 体の変異体の判定である。
 type Mutation struct {
 	ID          string   `json:"id"`
 	Type        string   `json:"type"`
@@ -27,17 +27,15 @@ type Mutation struct {
 	Mode        string   `json:"mode,omitempty"`
 	Tests       []string `json:"tests,omitempty"`
 	KilledBy    string   `json:"killed_by,omitempty"`
-	// Cached は、判定を実行せずに前の実行から再利用したかである。gomutants にはないフィールドである。
+	// Cached は、判定を実行せずに前の実行から再利用したかである。
 	Cached bool `json:"cached,omitempty"`
 	// PreviouslyKilledBy は、前回の検出テストが消えたので再検査し、今回は検出されなかったときの、前回の検出テストである。
-	// gomutants にはないフィールドである。
 	PreviouslyKilledBy string `json:"previously_killed_by,omitempty"`
 	// Accepted は、等価な変異体として受理したときの理由である。受理した変異体は判定を保つが、数と効率に含めない。
-	// gomutants にはないフィールドである。
 	Accepted string `json:"accepted,omitempty"`
-	// Critical は、重要領域の変異体かである。重要領域の生き残りは品質の条件を満たさない。gomutants にはないフィールドである。
+	// Critical は、重要領域の変異体かである。重要領域の生き残りは品質の条件を満たさない。
 	Critical bool `json:"critical,omitempty"`
-	// Killers は、-kill-matrix で、検出したトップレベルのテストのすべてである。gomutants にはないフィールドである。
+	// Killers は、-kill-matrix で、検出したトップレベルのテストのすべてである。
 	Killers []string `json:"killers,omitempty"`
 }
 
@@ -92,20 +90,24 @@ type File struct {
 	Mutations []Mutation `json:"mutations"`
 }
 
-// Report は JSON の報告の全体である。
+// Report は、1 回の実行の判定の全体である。要約、報告の各形式、品質の条件はこれから作る。
+// JSON にするのは、内部の状態（変更のない再実行の再生とシャードのまとめのためのキャッシュ）としてだけで、外向きの形ではない。
 type Report struct {
 	GoModule string `json:"go_module"`
+	// Version は、判定した gamut の版である。
+	Version string `json:"version,omitempty"`
+	// ModuleDir は、判定したモジュールのディレクトリである。gamut merge が、報告に埋め込む元のソースを読むのに使う。
+	ModuleDir string `json:"module_dir,omitempty"`
 	// Package は、1 パッケージならその import パス、複数なら実行時に指定したパターンである。
 	Package string `json:"package"`
-	// Packages は判定したパッケージの import パスである。gomutants にはないフィールドである。
+	// Packages は判定したパッケージの import パスである。
 	Packages          []string `json:"packages,omitempty"`
 	TestEfficacy      float64  `json:"test_efficacy"`
 	MutationsCoverage float64  `json:"mutations_coverage"`
 	// MutationScore は、検出した変異体（KILLED、TIMED OUT）の、検出したものと生き残り（LIVED、NOT COVERED）の和に対する割合である。
 	// TestEfficacy と違い、どのテストも到達しない変異体も検出できなかったものとして数える。閾値はこの点数に当てる。
-	// gomutants にはないフィールドである。
 	MutationScore float64 `json:"mutation_score"`
-	// Thresholds は、要約のラベルに使った閾値である。gomutants にはないフィールドである。
+	// Thresholds は、要約のラベルに使った閾値である。
 	Thresholds        *Thresholds `json:"thresholds,omitempty"`
 	MutantsTotal      int         `json:"mutants_total"`
 	MutantsKilled     int         `json:"mutants_killed"`
@@ -113,36 +115,31 @@ type Report struct {
 	MutantsNotViable  int         `json:"mutants_not_viable"`
 	MutantsNotCovered int         `json:"mutants_not_covered"`
 	MutantsTimedOut   int         `json:"mutants_timed_out"`
-	// MutantsPending は、選択の外で判定しなかった変異体の数である。MutantsTotal と効率の計算には含めない。gomutants にはないフィールドである。
+	// MutantsPending は、選択の外で判定しなかった変異体の数である。MutantsTotal と効率の計算には含めない。
 	MutantsPending int `json:"mutants_pending,omitempty"`
 	// MutantsArid は、テストが観測しないことの多いコード（ログ出力など、arid）の中なので作らなかった変異体の数である。
-	// gomutants にはないフィールドである。
 	MutantsArid int `json:"mutants_arid,omitempty"`
 	// UnrepeatableTests は、同じプロセスで 2 回目に失敗したテストの名前である。それが到達する変異体は、プロセスを使い回さずに判定した。
-	// gomutants にはないフィールドである。
 	UnrepeatableTests []string `json:"unrepeatable_tests,omitempty"`
 	// MaxDepthExcludedTests は、-max-depth を超えてだけ変異箇所に到達したので、その箇所の到達から除いたテストの数である。
-	// MaxDepthExcludedReaches は、除いた到達（テストと変異箇所の組）の数である。gomutants にはないフィールドである。
+	// MaxDepthExcludedReaches は、除いた到達（テストと変異箇所の組）の数である。
 	MaxDepthExcludedTests   int `json:"max_depth_excluded_tests,omitempty"`
 	MaxDepthExcludedReaches int `json:"max_depth_excluded_reaches,omitempty"`
 	// SkippedPackages は、パターンに当たったが判定できずに飛ばしたパッケージ（cgo の前処理ができないものなど）である。
-	// gomutants にはないフィールドである。
 	SkippedPackages []SkippedPackage `json:"skipped_packages,omitempty"`
-	// KillMatrix は、-kill-matrix のときの、テストの見直しの候補である。gomutants にはないフィールドである。
+	// KillMatrix は、-kill-matrix のときの、テストの見直しの候補である。
 	KillMatrix *KillMatrix `json:"kill_matrix,omitempty"`
-	// MutantsIgnored は、無効化コメントで止めた変異体の数である。MutantsTotal と効率の計算には含めない。gomutants にはないフィールドである。
+	// MutantsIgnored は、無効化コメントで止めた変異体の数である。MutantsTotal と効率の計算には含めない。
 	MutantsIgnored int     `json:"mutants_ignored,omitempty"`
 	ElapsedTime    float64 `json:"elapsed_time"`
 	Files          []File  `json:"files"`
-	// Ignored は、無効化コメントで止めた変異体である。gomutants の状態の名前を保つため、files[].mutations には入れない。
-	// gomutants にはないフィールドである。
+	// Ignored は、無効化コメントで止めた変異体である。判定しないので Files とは分けて持つ。
 	Ignored []IgnoredMutation `json:"ignored,omitempty"`
 	// MutantsEquivalent は、コンパイル結果が元と同じで EQUIVALENT とした変異体の数である。MutantsTotal と効率の計算には含めない。
-	// gomutants にはないフィールドである。
 	MutantsEquivalent int `json:"mutants_equivalent,omitempty"`
-	// MutantsAccepted は、受理した変異体のうち判定したものの数である。MutantsTotal と効率の計算には含めない。gomutants にはないフィールドである。
+	// MutantsAccepted は、受理した変異体のうち判定したものの数である。MutantsTotal と効率の計算には含めない。
 	MutantsAccepted int `json:"mutants_accepted,omitempty"`
-	// StaleAccepted は、判定したパッケージの受理のうち、もう要らないものである。gomutants にはないフィールドである。
+	// StaleAccepted は、判定したパッケージの受理のうち、もう要らないものである。
 	StaleAccepted []StaleAcceptance `json:"stale_accepted,omitempty"`
 }
 

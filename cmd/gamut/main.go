@@ -76,35 +76,40 @@ const (
 	modeSelectTests
 )
 
-// mergeMain は、gamut merge を実行する。-shard で分けて実行した報告（gomutants の形式）とキャッシュを、それぞれ 1 つにまとめる。
+// mergeMain は、gamut merge を実行する。-shard で分けて実行したシャードのキャッシュから、判定の報告とキャッシュをそれぞれ 1 つにまとめる。
+// 報告は、各キャッシュに残したそのシャードの実行の報告からまとめ、報告のファイルは読まない。
 // まとめた報告の要約を標準出力に書き、品質の条件を満たさなければ終了コード 2 を返す。
 func mergeMain(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("gamut merge", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	output := fs.String("o", "", "write the merged report (gomutants JSON) to this file")
-	var caches multiFlag
-	fs.Var(&caches, "cache", "a shard's cache file to merge (repeatable)")
-	cacheOut := fs.String("cache-out", "", "write the merged cache to this file; needs -cache")
+	output := fs.String("o", "", "write the merged report (mutation-testing-elements JSON) to this file; it embeds the sources, read from the shards' module directory or else the module of the working directory")
+	cacheOut := fs.String("cache-out", "", "also write the merged cache to this file")
 	failOnSurvived := fs.Bool("fail-on-survived", false, "exit 2 when any unaccepted mutant survives")
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, "usage: gamut merge [-o <report>] [-cache <shard cache>... -cache-out <cache>] <shard report>...")
+		fmt.Fprintln(stderr, "usage: gamut merge [-o <report>] [-cache-out <cache>] <shard cache>...")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
 		return exitError
 	}
-	if fs.NArg() == 0 || (len(caches) > 0) != (*cacheOut != "") {
+	if fs.NArg() == 0 {
 		fs.Usage()
 		return exitError
 	}
+	// 各シャードのキャッシュに残した、そのシャードの実行の報告をまとめる。
 	var reps []*report.Report
 	for _, path := range fs.Args() {
-		r, err := report.Read(path)
+		data, err := cache.ReadLast(path)
 		if err != nil {
 			fmt.Fprintln(stderr, "gamut:", err)
 			return exitError
 		}
-		reps = append(reps, r)
+		var r report.Report
+		if err := json.Unmarshal(data, &r); err != nil {
+			fmt.Fprintf(stderr, "gamut: read the report in the cache %s: %v\n", path, err)
+			return exitError
+		}
+		reps = append(reps, &r)
 	}
 	rep, err := report.Merge(reps)
 	if err != nil {
@@ -112,13 +117,25 @@ func mergeMain(args []string, stdout, stderr io.Writer) int {
 		return exitError
 	}
 	if *output != "" {
-		if err := writeReport(*output, rep); err != nil {
+		// 報告は元のソースを埋め込む。シャードが判定したモジュールのディレクトリがここにもあればそれを、なければ作業ディレクトリのモジュールを読む。
+		dir := rep.ModuleDir
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); dir == "" || err != nil {
+			if dir, err = moduleRoot(); err != nil {
+				fmt.Fprintln(stderr, "gamut:", err)
+				return exitError
+			}
+		}
+		mte, err := rep.MTE(dir)
+		if err == nil {
+			err = writeMTE(*output, mte)
+		}
+		if err != nil {
 			fmt.Fprintln(stderr, "gamut:", err)
 			return exitError
 		}
 	}
 	if *cacheOut != "" {
-		if err := cache.Merge(caches, *cacheOut); err != nil {
+		if err := cache.Merge(fs.Args(), *cacheOut); err != nil {
 			fmt.Fprintln(stderr, "gamut:", err)
 			return exitError
 		}
@@ -197,7 +214,7 @@ func judge(args []string, stdout, stderr io.Writer, m mode) int {
 	disable := fs.String("disable", "", "comma-separated mutator types to remove from the default set; cannot be combined with -only")
 	listMutators := fs.Bool("list-mutators", false, "print every mutator type with its description, example, and whether it is in the default set, then exit")
 	showVersion := fs.Bool("version", false, "print the gamut version and exit")
-	output := fs.String("o", "", "write the JSON report to this path")
+	output := fs.String("o", "", "write the JSON report (mutation-testing-elements) to this path")
 	dryRun := fs.Bool("dry-run", false, "list mutants and their viability without running tests")
 	timeoutFactor := fs.Float64("timeout-factor", 5, "multiply the selected tests' baseline time by this for the per-mutant timeout")
 	timeoutMin := fs.Duration("timeout-min", 2*time.Second, "add this to every per-mutant timeout")
@@ -223,8 +240,8 @@ func judge(args []string, stdout, stderr io.Writer, m mode) int {
 	thresholdBreak := fs.Float64("threshold-break", 0, "exit with code 2 when the mutation score is below this percentage (0 disables)")
 	failOnSurvived := fs.Bool("fail-on-survived", false, "exit with code 2 when any unaccepted mutant survives")
 	var reporterKinds multiFlag
-	fs.Var(&reporterKinds, "reporter", "report format: text (the summary on stdout), gomutants (JSON), json (mutation-testing-elements), html, agent (one JSON document on stdout for coding agents), or simplify (surviving removals by function, as candidates for unneeded code) (repeatable; default text, plus gomutants with -o)")
-	reportDir := fs.String("report-dir", filepath.Join(".gamut", "report"), "write the json, html, and gomutants (without -o) reports to this directory")
+	fs.Var(&reporterKinds, "reporter", "report format: text (the summary on stdout), json (mutation-testing-elements), html, agent (one JSON document on stdout for coding agents), or simplify (surviving removals by function, as candidates for unneeded code) (repeatable; default text, plus json with -o)")
+	reportDir := fs.String("report-dir", filepath.Join(".gamut", "report"), "write the html report, and the json report without -o, to this directory")
 	annotations := fs.String("annotations", "", "also print the survivors to fix as CI annotations on stdout (values: github)")
 	watch := fs.Bool("watch", false, "keep running: judge the diff from HEAD (with -include-test-changes) again each time .go files in the module are saved; failures do not stop the watch")
 	shardSpec := fs.String("shard", "", "judge only shard k/n of the mutants, split by a hash of their IDs; combine the shards' reports and caches with gamut merge")
@@ -644,6 +661,7 @@ func judge(args []string, stdout, stderr io.Writer, m mode) int {
 		label = strings.Join(fs.Args(), " ")
 	}
 	rep := report.Build(pkgs[0].ModulePath, label, paths, results, time.Since(start))
+	rep.Version, rep.ModuleDir = version(), pkgs[0].ModuleDir
 	rep.AddIgnored(ignored)
 	rep.MutantsArid = aridSkipped
 	rep.UnrepeatableTests = slices.Sorted(slices.Values(unrepeatable))
@@ -679,11 +697,15 @@ func judge(args []string, stdout, stderr io.Writer, m mode) int {
 		fmt.Fprintln(stderr, "gamut:", err)
 		return exitError
 	}
-	if quick != nil && opts.Cache != nil {
+	if opts.Cache != nil {
 		var buf strings.Builder
 		if err := rep.WriteJSON(&buf); err == nil {
-			quick.Report = json.RawMessage(buf.String())
-			opts.Cache.PutQuick(quickKey, quick)
+			// 最後の実行の報告は、gamut merge がシャードの判定をまとめるのに読む。
+			opts.Cache.PutLast(json.RawMessage(buf.String()))
+			if quick != nil {
+				quick.Report = json.RawMessage(buf.String())
+				opts.Cache.PutQuick(quickKey, quick)
+			}
 		}
 	}
 	return qualityCode(rep, *failOnSurvived, stderr)
@@ -766,25 +788,25 @@ func replay(store *cache.Store, key string, start time.Time) (*report.Report, bo
 
 // 報告の形式である。
 const (
-	reporterText      = "text"
-	reporterGomutants = "gomutants"
-	reporterJSON      = "json"
-	reporterHTML      = "html"
-	reporterAgent     = "agent"
-	reporterSimplify  = "simplify"
+	reporterText     = "text"
+	reporterJSON     = "json"
+	reporterHTML     = "html"
+	reporterAgent    = "agent"
+	reporterSimplify = "simplify"
 )
 
 // reporters は、報告の出し方である。
 type reporters struct {
 	kinds []string
-	// output は -o の書き出し先で、gomutants の形式で書く。dir は -report-dir で、ほかのファイルの形式の書き出し先である。
+	// output は -o の書き出し先で、json（mutation-testing-elements）の形式で書く。dir は -report-dir で、
+	// -o のない json と、html の書き出し先である。
 	output, dir string
 	// annotations は CI の注釈の形式（github）で、空なら書かない。
 	annotations string
 }
 
 // newReporters は、-reporter の指定から報告の出し方を作る。指定がなければ text にする。
-// -o を指定すれば、-reporter によらず gomutants の形式をそこへ書く。
+// -o を指定すれば、-reporter によらず json の形式をそこへ書く。
 func newReporters(kinds []string, output, dir, annotations string) (*reporters, error) {
 	if annotations != "" && annotations != "github" {
 		return nil, fmt.Errorf("unknown -annotations %q; use github", annotations)
@@ -793,16 +815,16 @@ func newReporters(kinds []string, output, dir, annotations string) (*reporters, 
 		kinds = []string{reporterText}
 	}
 	for _, k := range kinds {
-		if !slices.Contains([]string{reporterText, reporterGomutants, reporterJSON, reporterHTML, reporterAgent, reporterSimplify}, k) {
-			return nil, fmt.Errorf("unknown -reporter %q; use text, gomutants, json, html, agent, or simplify", k)
+		if !slices.Contains([]string{reporterText, reporterJSON, reporterHTML, reporterAgent, reporterSimplify}, k) {
+			return nil, fmt.Errorf("unknown -reporter %q; use text, json, html, agent, or simplify", k)
 		}
 	}
 	// agent は標準出力に JSON を 1 つだけ書くので、標準出力に書くほかの形式と混ぜない。
 	if slices.Contains(kinds, reporterAgent) && (slices.Contains(kinds, reporterText) || slices.Contains(kinds, reporterSimplify) || annotations != "") {
 		return nil, errors.New("-reporter agent writes one JSON document to stdout; it cannot be combined with -reporter text, -reporter simplify, or -annotations")
 	}
-	if output != "" && !slices.Contains(kinds, reporterGomutants) {
-		kinds = append(kinds, reporterGomutants)
+	if output != "" && !slices.Contains(kinds, reporterJSON) {
+		kinds = append(kinds, reporterJSON)
 	}
 	return &reporters{kinds: kinds, output: output, dir: dir, annotations: annotations}, nil
 }
@@ -847,12 +869,6 @@ func (o *reporters) deliver(rep *report.Report, moduleDir string, stdout io.Writ
 			enc := json.NewEncoder(stdout)
 			enc.SetIndent("", "  ")
 			err = enc.Encode(out)
-		case reporterGomutants:
-			path := o.output
-			if path == "" {
-				path = filepath.Join(o.dir, "gomutants.json")
-			}
-			err = writeReport(path, rep)
 		case reporterJSON, reporterHTML:
 			if mte == nil {
 				if mte, err = rep.MTE(moduleDir); err != nil {
@@ -860,11 +876,11 @@ func (o *reporters) deliver(rep *report.Report, moduleDir string, stdout io.Writ
 				}
 			}
 			if k == reporterJSON {
-				err = writeFile(filepath.Join(o.dir, "mutation.json"), func(w io.Writer) error {
-					enc := json.NewEncoder(w)
-					enc.SetIndent("", "  ")
-					return enc.Encode(mte)
-				})
+				path := o.output
+				if path == "" {
+					path = filepath.Join(o.dir, "mutation.json")
+				}
+				err = writeMTE(path, mte)
 			} else {
 				err = writeFile(filepath.Join(o.dir, "mutation.html"), func(w io.Writer) error { return report.WriteHTML(w, mte) })
 			}
@@ -1227,8 +1243,26 @@ func writeMutators(w io.Writer) {
 	_ = tw.Flush()
 }
 
-func writeReport(path string, rep *report.Report) error {
-	return writeFile(path, rep.WriteJSON)
+// moduleRoot は、作業ディレクトリを含むモジュールのルートを返す。
+func moduleRoot() (string, error) {
+	out, err := exec.Command("go", "env", "GOMOD").Output()
+	if err != nil {
+		return "", fmt.Errorf("go env GOMOD: %w", err)
+	}
+	mod := strings.TrimSpace(string(out))
+	if mod == "" || mod == os.DevNull {
+		return "", errors.New("gamut merge -o must run inside the module, whose sources the report embeds")
+	}
+	return filepath.Dir(mod), nil
+}
+
+// writeMTE は、mutation-testing-elements の形式の報告を path に書く。
+func writeMTE(path string, mte *report.MTEReport) error {
+	return writeFile(path, func(w io.Writer) error {
+		enc := json.NewEncoder(w)
+		enc.SetIndent("", "  ")
+		return enc.Encode(mte)
+	})
 }
 
 // writeFile は、path に write の書いた内容を書く。ディレクトリがなければ作る。

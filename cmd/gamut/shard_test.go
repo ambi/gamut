@@ -1,7 +1,7 @@
 package main
 
 import (
-	"encoding/json"
+	"io"
 	"maps"
 	"os"
 	"path/filepath"
@@ -15,7 +15,7 @@ func TestShard_MergeEqualsOneRun(t *testing.T) {
 	whole, _ := mustGamut(t, "-no-cache", dir)
 	want := statuses(whole)
 	tmp := t.TempDir()
-	var reports, caches []string
+	var caches []string
 	covered := map[string]bool{}
 	for _, shard := range []string{"1/2", "2/2"} {
 		n, _, _ := strings.Cut(shard, "/")
@@ -27,7 +27,7 @@ func TestShard_MergeEqualsOneRun(t *testing.T) {
 		ms := readReport(t, reportPath)
 		judged := 0
 		for _, m := range ms {
-			if m.Status == "PENDING" {
+			if m.Status == "Pending" {
 				continue
 			}
 			judged++
@@ -39,11 +39,12 @@ func TestShard_MergeEqualsOneRun(t *testing.T) {
 		if judged == 0 || judged == len(ms) {
 			t.Errorf("shard %s judged %d of %d mutants; want a part", shard, judged, len(ms))
 		}
-		reports, caches = append(reports, reportPath), append(caches, cachePath)
+		caches = append(caches, cachePath)
 	}
+	// まとめるのはシャードのキャッシュだけで、シャードの報告は読まない。
 	merged, mergedCache := filepath.Join(tmp, "merged.json"), filepath.Join(tmp, "merged-cache.json")
 	var stdout, stderr strings.Builder
-	args := []string{"merge", "-o", merged, "-cache", caches[0], "-cache", caches[1], "-cache-out", mergedCache, reports[0], reports[1]}
+	args := []string{"merge", "-o", merged, "-cache-out", mergedCache, caches[0], caches[1]}
 	if code := realMain(args, &stdout, &stderr); code != 0 {
 		t.Fatalf("merge: exit %d:\n%s", code, stderr.String())
 	}
@@ -58,33 +59,20 @@ func TestShard_MergeEqualsOneRun(t *testing.T) {
 	if !strings.Contains(log, " 0 to execute") {
 		t.Errorf("the merged cache is not reused:\n%s", log)
 	}
+	// 判定を実行していないキャッシュはまとめられない。
+	empty := filepath.Join(tmp, "empty.json")
+	if err := os.WriteFile(empty, []byte(`{"version":3}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stderr.Reset()
+	if code := realMain([]string{"merge", empty}, io.Discard, &stderr); code != exitError || !strings.Contains(stderr.String(), "no report of a run") {
+		t.Errorf("merging a cache without a run: exit %d:\n%s", code, stderr.String())
+	}
 	for _, bad := range [][]string{{"-shard", "3/2"}, {"-shard", "0/2"}, {"-shard", "x"}} {
 		if _, _, code := gamut(t, append(append([]string{"-no-cache"}, bad...), dir)...); code != exitError {
 			t.Errorf("%v: exit %d, want %d", bad, code, exitError)
 		}
 	}
-}
-
-// readReport は、gomutants の形式の報告の変異体を読む。
-func readReport(t *testing.T, path string) []mutation {
-	t.Helper()
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var rep struct {
-		Files []struct {
-			Mutations []mutation `json:"mutations"`
-		} `json:"files"`
-	}
-	if err := json.Unmarshal(data, &rep); err != nil {
-		t.Fatal(err)
-	}
-	var out []mutation
-	for _, f := range rep.Files {
-		out = append(out, f.Mutations...)
-	}
-	return out
 }
 
 // TestTimeBudget_LeavesTheRestPending は、予算を超えると新しい変異体を始めずに PENDING にし、キャッシュに書かず、次の実行で判定することを確かめる。
@@ -94,10 +82,10 @@ func TestTimeBudget_LeavesTheRestPending(t *testing.T) {
 	ms, log := mustGamut(t, "-cache", cachePath, "-time-budget", "1ns", dir)
 	pending := 0
 	for _, m := range ms {
-		if m.Status == "PENDING" {
+		if m.Status == "Pending" {
 			pending++
 		}
-		if m.Status == "KILLED" || m.Status == "LIVED" && m.Reason == "not detected" {
+		if m.Status == "Killed" || m.Status == "Survived" && m.Reason == "not detected" {
 			t.Errorf("%s was executed after the budget ran out: %s", m.ID, m.Status)
 		}
 	}
@@ -106,7 +94,7 @@ func TestTimeBudget_LeavesTheRestPending(t *testing.T) {
 	}
 	ms, log = mustGamut(t, "-cache", cachePath, dir)
 	for _, m := range ms {
-		if m.Status == "PENDING" {
+		if m.Status == "Pending" {
 			t.Errorf("%s is still pending", m.ID)
 		}
 	}

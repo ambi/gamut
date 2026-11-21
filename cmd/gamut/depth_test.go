@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"slices"
@@ -42,31 +41,21 @@ func TestMaxDepth(t *testing.T) {
 				if run == "restoring" && !strings.Contains(stderr.String(), "2 restored from the cache") {
 					t.Errorf("coverage was not restored:\n%s", stderr.String())
 				}
-				data, err := os.ReadFile(reportPath)
-				if err != nil {
-					t.Fatal(err)
-				}
-				var rep struct {
-					Excluded int `json:"max_depth_excluded_tests"`
-					Files    []struct {
-						Mutations []mutation `json:"mutations"`
-					} `json:"files"`
-				}
-				if err := json.Unmarshal(data, &rep); err != nil {
-					t.Fatal(err)
-				}
+				rep := readMTE(t, reportPath)
 				var tests []string
-				for _, f := range rep.Files {
-					for _, m := range f.Mutations {
-						tests = append(tests, m.Tests...)
-					}
+				for _, m := range rep.mutants() {
+					tests = append(tests, m.Tests...)
 				}
 				slices.Sort(tests)
 				if !slices.Equal(tests, tc.tests) {
 					t.Errorf("%s: reached by %v, want %v", run, tests, tc.tests)
 				}
-				if rep.Excluded != tc.excluded {
-					t.Errorf("%s: max_depth_excluded_tests %d, want %d", run, rep.Excluded, tc.excluded)
+				excluded := 0
+				if rep.Gamut.MaxDepthExcluded != nil {
+					excluded = rep.Gamut.MaxDepthExcluded.Tests
+				}
+				if excluded != tc.excluded {
+					t.Errorf("%s: maxDepthExcluded.tests %d, want %d", run, excluded, tc.excluded)
 				}
 				if tc.excluded > 0 && !strings.Contains(stdout.String(), "beyond -max-depth") {
 					t.Errorf("%s: the summary does not mention -max-depth:\n%s", run, stdout.String())
