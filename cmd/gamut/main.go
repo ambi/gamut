@@ -144,7 +144,7 @@ func judge(args []string, stdout, stderr io.Writer, prune bool) int {
 	thresholdBreak := fs.Float64("threshold-break", 0, "exit with code 2 when the mutation score is below this percentage (0 disables)")
 	failOnSurvived := fs.Bool("fail-on-survived", false, "exit with code 2 when any unaccepted mutant survives")
 	var reporterKinds multiFlag
-	fs.Var(&reporterKinds, "reporter", "report format: text (the summary on stdout), gomutants (JSON), json (mutation-testing-elements), or html (repeatable; default text, plus gomutants with -o)")
+	fs.Var(&reporterKinds, "reporter", "report format: text (the summary on stdout), gomutants (JSON), json (mutation-testing-elements), html, or agent (one JSON document on stdout for coding agents) (repeatable; default text, plus gomutants with -o)")
 	reportDir := fs.String("report-dir", filepath.Join(".gamut", "report"), "write the json, html, and gomutants (without -o) reports to this directory")
 	annotations := fs.String("annotations", "", "also print the survivors to fix as CI annotations on stdout (values: github)")
 	var excludes multiFlag
@@ -541,6 +541,7 @@ const (
 	reporterGomutants = "gomutants"
 	reporterJSON      = "json"
 	reporterHTML      = "html"
+	reporterAgent     = "agent"
 )
 
 // reporters は、報告の出し方である。
@@ -562,9 +563,13 @@ func newReporters(kinds []string, output, dir, annotations string) (*reporters, 
 		kinds = []string{reporterText}
 	}
 	for _, k := range kinds {
-		if !slices.Contains([]string{reporterText, reporterGomutants, reporterJSON, reporterHTML}, k) {
-			return nil, fmt.Errorf("unknown -reporter %q; use text, gomutants, json, or html", k)
+		if !slices.Contains([]string{reporterText, reporterGomutants, reporterJSON, reporterHTML, reporterAgent}, k) {
+			return nil, fmt.Errorf("unknown -reporter %q; use text, gomutants, json, html, or agent", k)
 		}
+	}
+	// agent は標準出力に JSON を 1 つだけ書くので、標準出力に書くほかの形式と混ぜない。
+	if slices.Contains(kinds, reporterAgent) && (slices.Contains(kinds, reporterText) || annotations != "") {
+		return nil, errors.New("-reporter agent writes one JSON document to stdout; it cannot be combined with -reporter text or -annotations")
 	}
 	if output != "" && !slices.Contains(kinds, reporterGomutants) {
 		kinds = append(kinds, reporterGomutants)
@@ -602,6 +607,14 @@ func (o *reporters) deliver(rep *report.Report, moduleDir string, stdout io.Writ
 		switch k {
 		case reporterText:
 			report.WriteSummary(stdout, rep)
+		case reporterAgent:
+			out, aerr := rep.Agent(moduleDir)
+			if aerr != nil {
+				return aerr
+			}
+			enc := json.NewEncoder(stdout)
+			enc.SetIndent("", "  ")
+			err = enc.Encode(out)
 		case reporterGomutants:
 			path := o.output
 			if path == "" {

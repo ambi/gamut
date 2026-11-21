@@ -31,7 +31,7 @@ go build -o bin/gamut ./cmd/gamut
 | `-exclude-files` | なし | モジュール相対のパスがこの正規表現に当たるファイルを変異しない。繰り返し指定できる |
 | `-config` | モジュールのルートの `gamut.json` | 設定ファイルのパス |
 | `-o` | なし | gomutants 互換の JSON の報告の書き出し先 |
-| `-reporter` | `text`（`-o` があれば `gomutants` も） | 報告の形式。`text`（標準出力の要約）、`gomutants`、`json`（mutation-testing-elements）、`html`。繰り返し指定できる |
+| `-reporter` | `text`（`-o` があれば `gomutants` も） | 報告の形式。`text`（標準出力の要約）、`gomutants`、`json`（mutation-testing-elements）、`html`、`agent`（エージェント向けの JSON を標準出力に）。繰り返し指定できる |
 | `-report-dir` | `.gamut/report` | `json`、`html`、`-o` のない `gomutants` の書き出し先 |
 | `-annotations` | なし | `github` なら、直すべき生き残りを GitHub Actions の注釈として標準出力に書く |
 | `-dry-run` | false | 変異体と構築可能性だけを一覧にする |
@@ -169,6 +169,13 @@ HTML は閲覧画面のスクリプトを、固定した版で CDN から読み�
 ```console
 ./bin/gamut -reporter text -reporter html ./path/to/module/...
 open .gamut/report/mutation.html
+```
+
+コーディングエージェントに生き残りを埋めさせるときは、`-reporter agent` で、生き残りごとの分類、変異の前後の行、囲む宣言のソース、到達したテスト、直し方の指針を JSON で渡す。
+手順は [skills/mutation-test-loop](skills/mutation-test-loop/SKILL.md) が、導入と CI は [skills/gamut](skills/gamut/SKILL.md) が定める。
+
+```console
+./bin/gamut -reporter agent -since main ./path/to/pkg
 ```
 
 GitHub Actions では、リポジトリのルートの `action.yml` を使える。

@@ -442,6 +442,20 @@ gomutants の報告を読む既存の検査は、そのまま gamut の報告を
 - HTML は、閲覧画面のスクリプト（`mutation-testing-elements`）を同梱せず、報告のスキーマと同じ版（3.9.0）を固定して CDN から読み込む。同梱すると、版の更新と使用許諾の管理が要る。報告の JSON は `encoding/json` が `<` と `>` をエスケープするので、埋め込んだソースの `</script>` で script 要素が閉じない。
 - スキーマへの適合は、`internal/report/testdata` に固定したスキーマ（mutation-testing-report-schema 3.9.0、Apache License 2.0、同じディレクトリに使用許諾）で検証する。検証は、このスキーマが使うキーワードだけを扱う、テストの中の小さな検証器で行う。外部モジュールを足さず、ネットワークにも依存しない。
 
+### エージェント向けの報告
+
+`-reporter agent` は、コーディングエージェントが生き残りを埋めるための JSON を 1 つ、標準出力に書く。
+進行状況は標準エラーに出るので、標準出力をそのまま JSON として読める。
+同じく標準出力に書く `text` と `-annotations` とは併用できない（終了コード 1）。
+
+- 直すべき生き残り（受理していない `LIVED` と `NOT COVERED`）ごとに、識別子、分類（`not detected`、`not infected`、`not covered`、`no longer detected`）、位置、変異の前後の行、囲む最上位の宣言のソース（Doc コメントを含む）、到達したテスト（名前に宣言の名前を含むものを先に最大 10 件と総数）、直し方の指針、重要領域かを持つ。
+- 指針は分類と変異演算子に合わせる。たとえば境界の比較の `not infected` は「両辺が等しい場合を足す」、`not covered` は「宣言を呼ぶ場合を表駆動のテストか `t.Run` で足す」とする。
+- 警告として、`t.Skip` を呼びうるテストと、テストバイナリ自身（`os.Args[0]`、`os.Executable`）を `exec.Command` で起動するテストを挙げる。前者は飛ばしたときにだけ検出できない変異体を生き残りに見せ、後者は子プロセスの中の到達と失敗が判定に現れないことがある。どちらも構文木の近似で、型は見ない。
+- ソースとテストファイルは、報告とモジュールのディレクトリから読み直す。変更のない再実行で前回の報告を返すときも同じ形で出せる。
+
+利用者のエージェント向けの skill を、リポジトリのルートの `skills/` に置く。
+`gamut` は導入、実行、設定、終了コード、CI を、`mutation-test-loop` は生き残りを 1 体ずつ埋める手順（`-reporter agent -since` で得る、分類に合わせてテストを書く、`-mutant` で確かめ直す、等価なら `gamut accept` で受理する）を定める。
+
 ### GitHub の注釈と Action
 
 `-annotations github` は、直すべき生き残り（受理していない `LIVED` と `NOT COVERED`）を、GitHub Actions のワークフローコマンド（`::warning file=,line=,col=,title=::`）で標準出力に書く。
@@ -513,7 +527,7 @@ Pull Request では、その行に注釈として表示される。
 | 閾値と終了コード | 済み |
 | mutation-testing-elements の JSON と HTML | 済み |
 | GitHub の注釈と Action | 一部（公開リポジトリの Pull Request での確認が残る） |
-| エージェント向けの報告と skills | 段階 3 |
+| エージェント向けの報告と skills | 済み |
 | 変異演算子の拡張（戻り値、呼び出し文の削除、論理演算子、条件の真偽） | 段階 3 |
 | 変更が壊しうるテストの選択（`select-tests`） | 段階 4 |
 | kill matrix（何も検出しないテスト、包含されるテスト） | 段階 4 |

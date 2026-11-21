@@ -1,5 +1,5 @@
 ---
-status: pending
+status: done
 stage: 3
 depends_on: [008]
 created_at: 2026-11-20
@@ -35,3 +35,12 @@ skill の手順は、`--since` で生き残りを得る、テストを書く、`
 ## 検証
 
 - 報告の形の単体テスト。
+
+## 要約
+
+- `-reporter agent` で、標準出力に JSON を 1 つ書く。生き残りごとに、識別子、分類（`no longer detected` を足した 4 つ）、位置、変異の前後の行、囲む宣言のソース（Doc を含む）、到達したテスト（宣言の名前を含むものを先に最大 10 件と総数）、直し方の指針、重要領域かを持つ。報告とモジュールのディレクトリから組み立てるので、変更のない再実行でも出せる。`text` と `-annotations` とは、標準出力を共有するので併用できない。
+- 指針は、分類と変異演算子に合わせ、Go のテストの書き方（表駆動、`t.Run`）で書いた。
+- 警告は、`t.Skip` を呼びうるテストと、テストバイナリ自身を `exec.Command` で起動するテストを、構文木で近似して挙げる。
+- skill は、利用者のエージェント向けとして `skills/gamut` と `skills/mutation-test-loop` に置いた。gamut の開発の skill（`.agents/skills/`）と分けた。
+- 単体テスト（`TestAgent_DescribesEachSurvivor`）と端から端までのテスト（`TestReporter_AgentWritesOneJSONDocument`）で、報告の項目、テストの並べ方、指針、警告を表明した。
+- `testdata/fixture` の写しで `mutation-test-loop` の手順を踏み、`Unused` の `not covered` の生き残りに表駆動のテストを足して `-mutant` で `KILLED` にした。`Limit` の境界の生き残りは、等しい入力を足しても `LIVED` のままで、`n == max` ではどちらも同じ値を返すので、手順 5 に従って理由とともに受理した。

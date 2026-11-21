@@ -59,6 +59,7 @@ CLI のヘルプ、エラーメッセージ、ログ、コミットメッセー�
 | `internal/cache` | 判定と被覆の記録の再利用の鍵の計算と、キャッシュファイルの読み書き。再利用の規則は `internal/run` が持つ |
 | `internal/report` | JSON の報告と標準出力の要約 |
 | `testdata/` | 端から端までのテストが使う、独立した Go モジュールの固定データ |
+| `skills/` | gamut の利用者のエージェント向けの skill（導入と CI の `gamut`、生き残りを埋める `mutation-test-loop`）。gamut の開発の skill は `.agents/skills/` に置く |
 
 ## 守る不変条件
 
