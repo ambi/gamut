@@ -21,6 +21,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ambi/gamut/internal/accept"
 	"github.com/ambi/gamut/internal/cache"
 	"github.com/ambi/gamut/internal/config"
 	"github.com/ambi/gamut/internal/diff"
@@ -35,6 +36,70 @@ func main() {
 }
 
 func realMain(args []string, stdout, stderr io.Writer) int {
+	if len(args) > 0 && args[0] == "accept" {
+		return acceptMain(args[1:], stdout, stderr)
+	}
+	return judge(args, stdout, stderr, false)
+}
+
+// acceptMain は、gamut accept を実行する。
+// 識別子を渡せば、モジュールのルートの受理の記録に足す。-prune なら、残りの引数で判定し、要らなくなった受理を消す。
+func acceptMain(args []string, stdout, stderr io.Writer) int {
+	// -prune の後ろは判定のフラグとパターンなので、accept のフラグとして解釈しない。
+	if len(args) > 0 && (args[0] == "-prune" || args[0] == "--prune") {
+		return judge(args[1:], stdout, stderr, true)
+	}
+	fs := flag.NewFlagSet("gamut accept", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	reason := fs.String("reason", "", "why the mutants are equivalent (required unless -prune)")
+	dir := fs.String("dir", ".", "a directory inside the module whose "+accept.FileName+" to update")
+	// -prune は先頭でだけ受け付ける。ここでは使い方に載せるために定義する。
+	prune := fs.Bool("prune", false, "as the first argument: judge the packages given as the remaining arguments (with any gamut flags) and remove acceptances that a test now detects or whose mutant is gone")
+	fs.Usage = func() {
+		fmt.Fprintln(stderr, "usage: gamut accept -reason <text> [-dir <dir>] <mutant-id>...")
+		fmt.Fprintln(stderr, "       gamut accept -prune [gamut flags] <package-directory>[/...] ...")
+		fs.PrintDefaults()
+	}
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if *prune {
+		fmt.Fprintln(stderr, "gamut: -prune must be the first argument of gamut accept")
+		return 2
+	}
+	if fs.NArg() == 0 || *reason == "" {
+		fs.Usage()
+		return 2
+	}
+	abs, err := filepath.Abs(*dir)
+	if err != nil {
+		fmt.Fprintln(stderr, "gamut:", err)
+		return 1
+	}
+	root := load.ModuleRoot(abs)
+	if root == "" {
+		fmt.Fprintf(stderr, "gamut: %s is not inside a Go module\n", abs)
+		return 1
+	}
+	f, err := accept.Load(root)
+	if err != nil {
+		fmt.Fprintln(stderr, "gamut:", err)
+		return 1
+	}
+	if err := f.Add(fs.Args(), *reason); err != nil {
+		fmt.Fprintln(stderr, "gamut:", err)
+		return 2
+	}
+	if err := f.Save(); err != nil {
+		fmt.Fprintln(stderr, "gamut:", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "accepted %d mutants in %s\n", fs.NArg(), f.Path())
+	return 0
+}
+
+// judge は、パッケージの変異体を判定する。prune なら、判定の後に、要らなくなった受理を受理の記録から消す。
+func judge(args []string, stdout, stderr io.Writer, prune bool) int {
 	fs := flag.NewFlagSet("gamut", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	workers := fs.Int("workers", max(1, runtime.NumCPU()/2), "number of parallel test processes")
@@ -140,7 +205,7 @@ func realMain(args []string, stdout, stderr io.Writer) int {
 		fmt.Sprintf("timeout=%g,%s", *timeoutFactor, *timeoutMin),
 	}
 	// 選択のない実行は、入力が前回と同じなら、読み込みもビルドもせずに前回の報告を返す。
-	quickable := !*noCache && !*dryRun && len(ids) == 0 && *since == ""
+	quickable := !*noCache && !*dryRun && len(ids) == 0 && *since == "" && !prune
 	var early *cache.Store
 	if !*noCache && earlyDir != "" {
 		if early, err = openStore(*cachePath, earlyDir, settings); err != nil {
@@ -177,6 +242,11 @@ func realMain(args []string, stdout, stderr io.Writer) int {
 	targets := make([]run.Target, len(pkgs))
 	paths := make([]string, len(pkgs))
 	total := 0
+	accepted, err := accept.Load(pkgs[0].ModuleDir)
+	if err != nil {
+		fmt.Fprintln(stderr, "gamut:", err)
+		return 1
+	}
 	var ignored []mutant.Ignored
 	for i, pkg := range pkgs {
 		mutants := mutant.Without(mutant.Enumerate(pkg, types), func(m *mutant.Mutant) bool { return excluded(excludeFiles, m.File.Rel) })
@@ -255,7 +325,7 @@ func realMain(args []string, stdout, stderr io.Writer) int {
 	var quick *cache.Quick
 	if quickable {
 		// 入力の状態は、テストを実行する前に取る。実行中にファイルが変わっても、変わる前の状態を記録しない。
-		if quick, err = quickInputs(fs.Args(), targets, sources); err != nil {
+		if quick, err = quickInputs(fs.Args(), targets, sources, accepted.Path()); err != nil {
 			fmt.Fprintln(stderr, "gamut:", err)
 			return 1
 		}
@@ -307,6 +377,25 @@ func realMain(args []string, stdout, stderr io.Writer) int {
 	}
 	rep := report.Build(pkgs[0].ModulePath, label, paths, results, time.Since(start))
 	rep.AddIgnored(ignored)
+	// 識別子で指定したときは、ほかの変異体を報告しないので、受理の「なくなった」は判定できない。
+	var acceptedHere []string
+	if opts.Select == nil || opts.Select.Mutants == nil {
+		acceptedHere = acceptedInPackages(accepted, pkgs)
+	}
+	rep.ApplyAccepted(acceptedHere, accepted.Reason)
+	if prune {
+		var stale []string
+		for _, s := range rep.StaleAccepted {
+			stale = append(stale, s.ID)
+		}
+		accepted.Remove(stale)
+		if err := accepted.Save(); err != nil {
+			fmt.Fprintln(stderr, "gamut:", err)
+			return 1
+		}
+		fmt.Fprintf(logw, "accept: removed %d stale acceptances from %s\n", len(stale), accepted.Path())
+		rep.StaleAccepted = nil
+	}
 	if *output != "" {
 		if err := writeReport(*output, rep); err != nil {
 			fmt.Fprintln(stderr, "gamut:", err)
@@ -363,8 +452,12 @@ func replay(store *cache.Store, key, output string, stdout, stderr, logw io.Writ
 // quickInputs は、前回の報告をそのまま返してよいかを次の実行で確かめるための、入力のファイルとディレクトリを集め、今の状態の指紋を取る。
 // 対象パッケージと依存ファイルのディレクトリの直下のファイル、依存ファイル、<ディレクトリ>/... のパターンの根の下の木である。
 // go.mod、go.sum、go.work、gamut、Go の版は、キャッシュの環境の鍵が捉える。
-func quickInputs(patterns []string, targets []run.Target, sources map[string][]string) (*cache.Quick, error) {
+// extra は、そのほかに状態を比べるファイル（受理の記録など）である。
+func quickInputs(patterns []string, targets []run.Target, sources map[string][]string, extra ...string) (*cache.Quick, error) {
 	files := map[string]bool{}
+	for _, f := range extra {
+		files[f] = true
+	}
 	dirs := map[string]bool{}
 	for _, t := range targets {
 		dirs[t.Pkg.Dir] = true
@@ -538,6 +631,25 @@ func resolveMutants(ids []string, targets []run.Target, ignored []mutant.Ignored
 }
 
 // checkSelectionFlags は、選択のフラグの組み合わせを確かめ、誤りがあればその説明を返す。
+// acceptedInPackages は、受理のうち、判定するパッケージのファイルを指すものの識別子を返す。
+func acceptedInPackages(f *accept.File, pkgs []*load.Package) []string {
+	var dirs []string
+	for _, p := range pkgs {
+		rel, err := filepath.Rel(p.ModuleDir, p.Dir)
+		if err != nil {
+			continue
+		}
+		dirs = append(dirs, filepath.ToSlash(rel))
+	}
+	var out []string
+	for _, id := range f.IDs() {
+		if accept.InPackages(id, dirs) {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
 // readConfig は、path が空でなければそのファイルを、空なら moduleDir の設定ファイルを読む。どちらもなければ nil を返す。
 func readConfig(path, moduleDir string) (*config.Config, error) {
 	switch {

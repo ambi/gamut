@@ -32,7 +32,24 @@ type Mutation struct {
 	// PreviouslyKilledBy は、前回の検出テストが消えたので再検査し、今回は検出されなかったときの、前回の検出テストである。
 	// gomutants にはないフィールドである。
 	PreviouslyKilledBy string `json:"previously_killed_by,omitempty"`
+	// Accepted は、等価な変異体として受理したときの理由である。受理した変異体は判定を保つが、数と効率に含めない。
+	// gomutants にはないフィールドである。
+	Accepted string `json:"accepted,omitempty"`
 }
+
+// StaleAcceptance は、もう要らない受理である。gamut accept -prune で消せる。
+type StaleAcceptance struct {
+	ID     string `json:"id"`
+	Reason string `json:"reason"`
+	// Why は、detected（テストが検出するようになった）か missing（変異体がなくなった）である。
+	Why string `json:"why"`
+}
+
+// 受理が要らなくなった理由である。
+const (
+	StaleDetected = "detected"
+	StaleMissing  = "missing"
+)
 
 // File は JSON の 1 ファイルである。
 type File struct {
@@ -65,6 +82,10 @@ type Report struct {
 	// Ignored は、無効化コメントで止めた変異体である。gomutants の状態の名前を保つため、files[].mutations には入れない。
 	// gomutants にはないフィールドである。
 	Ignored []IgnoredMutation `json:"ignored,omitempty"`
+	// MutantsAccepted は、受理した変異体のうち判定したものの数である。MutantsTotal と効率の計算には含めない。gomutants にはないフィールドである。
+	MutantsAccepted int `json:"mutants_accepted,omitempty"`
+	// StaleAccepted は、判定したパッケージの受理のうち、もう要らないものである。gomutants にはないフィールドである。
+	StaleAccepted []StaleAcceptance `json:"stale_accepted,omitempty"`
 }
 
 // IgnoredMutation は、無効化コメントで止めた 1 体の変異体である。
@@ -118,34 +139,85 @@ func Build(module, label string, packages []string, results []*run.Result, elaps
 			Reason: res.Reason, Mode: res.Mode, Tests: res.Tests, KilledBy: res.KilledBy, Cached: res.Cached,
 			PreviouslyKilledBy: res.PreviouslyKilledBy,
 		})
-		if res.Status != run.Pending {
-			r.MutantsTotal++
-		}
-		switch res.Status {
-		case run.Killed:
-			r.MutantsKilled++
-		case run.Lived:
-			r.MutantsLived++
-		case run.NotViable:
-			r.MutantsNotViable++
-		case run.NotCovered:
-			r.MutantsNotCovered++
-		case run.TimedOut:
-			r.MutantsTimedOut++
-		case run.Pending:
-			r.MutantsPending++
-		}
 	}
 	slices.Sort(order)
 	for _, rel := range order {
 		r.Files = append(r.Files, *byFile[rel])
+	}
+	r.count()
+	return r
+}
+
+// count は、変異体の状態の数と効率を数え直す。PENDING と受理した変異体は数えない。
+func (r *Report) count() {
+	r.MutantsTotal, r.MutantsKilled, r.MutantsLived, r.MutantsNotViable = 0, 0, 0, 0
+	r.MutantsNotCovered, r.MutantsTimedOut, r.MutantsPending, r.MutantsAccepted = 0, 0, 0, 0
+	r.TestEfficacy, r.MutationsCoverage = 0, 0
+	for _, f := range r.Files {
+		for _, m := range f.Mutations {
+			switch {
+			case m.Status == string(run.Pending):
+				r.MutantsPending++
+				continue
+			case m.Accepted != "":
+				r.MutantsAccepted++
+				continue
+			}
+			r.MutantsTotal++
+			switch run.Status(m.Status) {
+			case run.Killed:
+				r.MutantsKilled++
+			case run.Lived:
+				r.MutantsLived++
+			case run.NotViable:
+				r.MutantsNotViable++
+			case run.NotCovered:
+				r.MutantsNotCovered++
+			case run.TimedOut:
+				r.MutantsTimedOut++
+			}
+		}
 	}
 	detected := r.MutantsKilled + r.MutantsTimedOut
 	if covered := detected + r.MutantsLived; covered > 0 {
 		r.TestEfficacy = 100 * float64(detected) / float64(covered)
 		r.MutationsCoverage = 100 * float64(covered) / float64(covered+r.MutantsNotCovered)
 	}
-	return r
+}
+
+// ApplyAccepted は、受理を報告に当てる。ids は、判定したパッケージのファイルを指す受理の識別子で、reason はその理由を引く。
+// 受理した変異体は判定を保ったまま accepted に理由を入れ、数と効率から外す。
+// 受理のうち、テストが検出するようになったもの（KILLED、TIMED OUT）と、変異体がなくなったものを StaleAccepted に並べる。
+// PENDING の変異体は、今回判定していないので、どちらにもしない。
+func (r *Report) ApplyAccepted(ids []string, reason func(id string) string) {
+	found := map[string]bool{}
+	for i := range r.Files {
+		for k := range r.Files[i].Mutations {
+			m := &r.Files[i].Mutations[k]
+			why := reason(m.ID)
+			if why == "" {
+				continue
+			}
+			found[m.ID] = true
+			if m.Status == string(run.Pending) {
+				continue
+			}
+			m.Accepted = why
+			if m.Status == string(run.Killed) || m.Status == string(run.TimedOut) {
+				r.StaleAccepted = append(r.StaleAccepted, StaleAcceptance{ID: m.ID, Reason: why, Why: StaleDetected})
+			}
+		}
+	}
+	for _, ig := range r.Ignored {
+		found[ig.ID] = true
+	}
+	for _, id := range ids {
+		if !found[id] {
+			r.StaleAccepted = append(r.StaleAccepted, StaleAcceptance{ID: id, Reason: reason(id), Why: StaleMissing})
+		}
+	}
+	slices.SortFunc(r.StaleAccepted, func(a, b StaleAcceptance) int { return strings.Compare(a.ID, b.ID) })
+	r.count()
 }
 
 // WriteJSON は報告を JSON で書く。
@@ -187,7 +259,8 @@ func WriteSummary(w io.Writer, r *Report) {
 		var lines []string
 		for _, f := range r.Files {
 			for _, m := range f.Mutations {
-				if !g.match(m) {
+				// 受理した生き残りは、直すものとして並べない。
+				if m.Accepted != "" || !g.match(m) {
 					continue
 				}
 				line := fmt.Sprintf("%s:%d:%d %s %s -> %s  [%s]", f.Path, m.Line, m.Column, m.Type, strings.TrimSpace(m.Original), m.Replacement, m.ID)
@@ -205,9 +278,30 @@ func WriteSummary(w io.Writer, r *Report) {
 			fmt.Fprintf(w, "  %s\n", line)
 		}
 	}
+	for _, why := range []struct{ kind, title string }{
+		{StaleDetected, "accepted but now detected (%d): a test kills these mutants now; remove them with gamut accept -prune"},
+		{StaleMissing, "accepted but gone (%d): these mutants no longer exist (deleted, or their declaration was rewritten); remove them with gamut accept -prune, or accept the new IDs"},
+	} {
+		var stale []StaleAcceptance
+		for _, s := range r.StaleAccepted {
+			if s.Why == why.kind {
+				stale = append(stale, s)
+			}
+		}
+		if len(stale) == 0 {
+			continue
+		}
+		fmt.Fprintf(w, "\n"+why.title+"\n", len(stale))
+		for _, s := range stale {
+			fmt.Fprintf(w, "  %s  (%s)\n", s.ID, s.Reason)
+		}
+	}
 	reused := ""
 	if cached > 0 {
 		reused = fmt.Sprintf(", %d reused from the cache", cached)
+	}
+	if r.MutantsAccepted > 0 {
+		reused += fmt.Sprintf(", %d accepted", r.MutantsAccepted)
 	}
 	if r.MutantsPending > 0 {
 		reused += fmt.Sprintf(", %d pending outside the selection", r.MutantsPending)

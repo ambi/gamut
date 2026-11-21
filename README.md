@@ -113,9 +113,23 @@ func Fast(a, b int) bool {
 理由のないコメントは警告する。
 規則は [設計](docs/design.md#無効化コメント) が定める。
 
+どの入力でも観測できない変異体（等価な変異体）は、ソースを変えずに、モジュールのルートの `gamut.accepted.json` に受理として記録できる。
+
+```console
+# 報告の id を渡して受理する。
+./bin/gamut accept -reason 'equivalent: callers read only the sign' 'pkg/file.go::ARITHMETIC_BASE::Double::1a2b3c4d5e'
+# テストが検出するようになった受理と、変異体がなくなった受理を、判定してから消す。
+./bin/gamut accept -prune ./path/to/module/...
+```
+
+受理した変異体は引き続き判定し、報告に `accepted`（理由）を付けるが、数と効率には含めず、要約の直す一覧にも並べない。
+要らなくなった受理は、要約と報告の `stale_accepted` に並ぶ。
+規則は [設計](docs/design.md#等価な変異体の受理) が定める。
+
 JSON の報告は gomutants と同じ `files[].mutations[]` の形に、`reason`、`mode`、`tests`、`killed_by`、`cached`、`previously_killed_by` を足したものである。
 `-since` の外の変異体は `PENDING` で、最上位の `mutants_pending` に数え、`mutants_total` と効率には含めない。
 コメントで止めた変異体は `files[].mutations[]` に入れず、最上位の `ignored` に理由とともに並べ、`mutants_ignored` に数える。
+受理した変異体は `files[].mutations[]` に本当の状態のまま `accepted` を付け、`mutants_accepted` に数える。
 `files[].path` はモジュール相対のパスである。
 最上位の `package` は、1 パッケージならその import パス、複数なら引数に指定したパターンで、`packages` に判定したパッケージの import パスを並べる。
 
