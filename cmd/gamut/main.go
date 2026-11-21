@@ -326,7 +326,7 @@ func judge(args []string, stdout, stderr io.Writer, prune bool) int {
 		checkViability(targets, nil)
 		for _, t := range targets {
 			for _, m := range t.Mutants {
-				fmt.Fprintf(stdout, "%s:%d:%d\t%s\t%s->%s\tviable=%t\t%s\n", m.File.Rel, m.Line, m.Column, m.Type, m.Original, m.Replacement, m.Viable, m.ID)
+				fmt.Fprintf(stdout, "%s:%d:%d\t%s\t%s->%s\tviable=%t\t%s\n", m.File.Rel, m.Line, m.Column, m.Type, m.OriginalText, m.ReplacementText, m.Viable, m.ID)
 			}
 		}
 		return 0

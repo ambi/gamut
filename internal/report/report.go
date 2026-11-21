@@ -142,7 +142,7 @@ func (r *Report) AddIgnored(ignored []mutant.Ignored) {
 		m := ig.Mutant
 		r.Ignored = append(r.Ignored, IgnoredMutation{
 			ID: m.ID, Type: string(m.Type), Path: m.File.Rel, Line: m.Line, Column: m.Column,
-			Original: m.Original.String(), Replacement: m.Replacement.String(), Reason: ig.Reason,
+			Original: m.OriginalText, Replacement: m.ReplacementText, Reason: ig.Reason,
 		})
 	}
 	slices.SortFunc(r.Ignored, func(a, b IgnoredMutation) int {
@@ -170,7 +170,7 @@ func Build(module, label string, packages []string, results []*run.Result, elaps
 		f.Mutations = append(f.Mutations, Mutation{
 			ID: m.ID, Type: string(m.Type), Status: string(res.Status),
 			Line: m.Line, Column: m.Column,
-			Original: m.Original.String(), Replacement: m.Replacement.String(),
+			Original: m.OriginalText, Replacement: m.ReplacementText,
 			Reason: res.Reason, Mode: res.Mode, Tests: res.Tests, KilledBy: res.KilledBy, Cached: res.Cached,
 			PreviouslyKilledBy: res.PreviouslyKilledBy,
 		})

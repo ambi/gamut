@@ -14,6 +14,13 @@ func TestLogical(t *testing.T) {
 	}
 }
 
+func TestNot(t *testing.T) {
+	if !Closed(false) {
+		t.Fatal("wrong")
+	}
+	_ = Muted(true)
+}
+
 func TestLoopControl(t *testing.T) {
 	if FirstNegative([]int{1, -2, -3}) != -2 || CountPositive([]int{1, 2, 0}) != 2 {
 		t.Fatal("wrong")

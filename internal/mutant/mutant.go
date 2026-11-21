@@ -36,6 +36,8 @@ const (
 	InvertLoopCtrl Type = "INVERT_LOOP_CTRL"
 	// InvertLogical は、&& と || を入れ替える。
 	InvertLogical Type = "INVERT_LOGICAL"
+	// RemoveLogicalNot は、論理否定の ! を取り除く。
+	RemoveLogicalNot Type = "REMOVE_LOGICAL_NOT"
 )
 
 // AllTypes は既定で有効な変異演算子である。
@@ -43,12 +45,14 @@ var AllTypes = []Type{ArithmeticBase, ConditionalsBoundary, ConditionalsNegation
 
 // OptIn は、既定では無効で、-only や設定で選んだときだけ有効になる変異演算子である。
 // 実在のパッケージで生き残りの数と仕分けの内訳を測ってから、既定の集合に入れるかを決める。
-var OptIn = []Type{InvertBitwise, InvertAssignments, InvertBitwiseAssignments, InvertLoopCtrl, InvertLogical}
+var OptIn = []Type{InvertBitwise, InvertAssignments, InvertBitwiseAssignments, InvertLoopCtrl, InvertLogical, RemoveLogicalNot}
 
 // Known は、gamut が知っているすべての変異演算子である。-only、設定、無効化コメント、受理の名前はこれで確かめる。
 var Known = slices.Concat(AllTypes, OptIn)
 
-// Mutant は、演算子の字句 1 つを置き換える変異体である。
+// Mutant は、ソースの 1 つの区間（Offset から OriginalText の長さ）を ReplacementText に置き換える変異体である。
+// 演算子の変異では、区間は演算子の字句 1 つで、Original と Replacement はその字句である。
+// 字句で表せない変異（! の削除など）では、Original と Replacement は token.ILLEGAL で、文字列だけを持つ。
 type Mutant struct {
 	// Index は schemata の中で変異体を選ぶ番号で、1 から始まる。
 	Index int
@@ -56,12 +60,15 @@ type Mutant struct {
 	ID   string
 	Type Type
 	File *load.File
-	// Offset はファイルの中での演算子の字句のバイト位置である。
+	// Offset はファイルの中での置き換える区間の先頭のバイト位置である。
 	Offset      int
 	Original    token.Token
 	Replacement token.Token
-	Line        int
-	Column      int
+	// OriginalText と ReplacementText は、置き換える前と後の文字列である。演算子の変異では字句の文字列と同じである。
+	OriginalText    string
+	ReplacementText string
+	Line            int
+	Column          int
 	// Site は変異箇所の構文木のノード（*ast.BinaryExpr、*ast.UnaryExpr、*ast.IncDecStmt、複合代入の *ast.AssignStmt）である。
 	Site ast.Node
 	// Scope は変異箇所を囲む宣言の名前である。
@@ -84,13 +91,22 @@ func (m *Mutant) Key() string {
 // IDAt は、変異体のファイルがモジュール相対のパス rel にあったときの識別子を返す。
 // ファイルの名前の変更の前の識別子を求め、前の判定を引き継ぐために使う。
 func (m *Mutant) IDAt(rel string) string {
-	return identity(rel, m.Scope, m.path, m.Type, m.Replacement)
+	return identity(rel, m.Scope, m.path, m.Type, m.ReplacementText)
 }
 
+// rule は、字句 from を to に置き換える規則である。to が token.ILLEGAL なら、from を取り除く。
 type rule struct {
 	typ  Type
 	from token.Token
 	to   token.Token
+}
+
+// replacement は、規則の置き換え後の文字列を返す。
+func (r rule) replacement() string {
+	if r.to == token.ILLEGAL {
+		return ""
+	}
+	return r.to.String()
 }
 
 var binaryRules = []rule{
@@ -119,7 +135,10 @@ var binaryRules = []rule{
 	{InvertLogical, token.LOR, token.LAND},
 }
 
-var unaryRules = []rule{{InvertNegatives, token.SUB, token.ADD}}
+var unaryRules = []rule{
+	{InvertNegatives, token.SUB, token.ADD},
+	{RemoveLogicalNot, token.NOT, token.ILLEGAL},
+}
 
 // branchRules は break と continue の文の規則である。goto と fallthrough は変異しない。
 var branchRules = []rule{
@@ -237,19 +256,21 @@ func enumerateFile(pkg *load.Package, file *load.File, enabled []Type) []*Mutant
 			}
 			pos := pkg.Fset.Position(opPos)
 			m := &Mutant{
-				Type:        r.typ,
-				File:        file,
-				Offset:      pos.Offset,
-				Original:    r.from,
-				Replacement: r.to,
-				Line:        pos.Line,
-				Column:      pos.Column,
-				Site:        n,
-				Scope:       scope,
-				SiteKey:     siteKey(file.Rel, scope, rel),
-				path:        slices.Clone(rel),
+				Type:            r.typ,
+				File:            file,
+				Offset:          pos.Offset,
+				Original:        r.from,
+				Replacement:     r.to,
+				OriginalText:    r.from.String(),
+				ReplacementText: r.replacement(),
+				Line:            pos.Line,
+				Column:          pos.Column,
+				Site:            n,
+				Scope:           scope,
+				SiteKey:         siteKey(file.Rel, scope, rel),
+				path:            slices.Clone(rel),
 			}
-			m.ID = identity(file.Rel, scope, rel, r.typ, r.to)
+			m.ID = identity(file.Rel, scope, rel, r.typ, m.ReplacementText)
 			out = append(out, m)
 		}
 		return true
@@ -257,8 +278,9 @@ func enumerateFile(pkg *load.Package, file *load.File, enabled []Type) []*Mutant
 	return out
 }
 
-func identity(rel, scope string, path []int, typ Type, to token.Token) string {
-	sum := sha256.Sum256([]byte(strings.Join([]string{rel, scope, joinPath(path), string(typ), to.String()}, "\x00")))
+// identity は識別子を作る。to は置き換え後の文字列で、演算子の変異では字句の文字列なので、表現を広げる前と同じ識別子になる。
+func identity(rel, scope string, path []int, typ Type, to string) string {
+	sum := sha256.Sum256([]byte(strings.Join([]string{rel, scope, joinPath(path), string(typ), to}, "\x00")))
 	return fmt.Sprintf("%s::%s::%s::%s", rel, typ, scope, hex.EncodeToString(sum[:5]))
 }
 
@@ -329,13 +351,12 @@ func isArid(info *types.Info, n ast.Node) bool {
 	return obj != nil && obj.Pkg() != nil && aridPackages[obj.Pkg().Path()]
 }
 
-// Apply は、変異体の字句を置き換えたファイルの内容を返す。
+// Apply は、変異体の区間を置き換えたファイルの内容を返す。
 func (m *Mutant) Apply(src []byte) []byte {
-	orig := m.Original.String()
-	out := make([]byte, 0, len(src)+2)
+	out := make([]byte, 0, len(src)+len(m.ReplacementText))
 	out = append(out, src[:m.Offset]...)
-	out = append(out, m.Replacement.String()...)
-	out = append(out, src[m.Offset+len(orig):]...)
+	out = append(out, m.ReplacementText...)
+	out = append(out, src[m.Offset+len(m.OriginalText):]...)
 	return out
 }
 

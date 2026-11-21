@@ -437,11 +437,12 @@ func (r *renderer) renderSite(buf *bytes.Buffer, f *load.File, sites []*Site, s 
 		var body strings.Builder
 		fmt.Fprintf(&body, "if gamutCovering { gamutHit(%d); ", s.Index)
 		for _, m := range s.Mutants {
-			fmt.Fprintf(&body, "if (%s%s) != (%s%s) { gamutInfect(%d) }; ", m.Replacement, x.ref, n.Op, x.ref, m.Index)
+			fmt.Fprintf(&body, "if (%s%s) != (%s%s) { gamutInfect(%d) }; ", m.ReplacementText, x.ref, n.Op, x.ref, m.Index)
 		}
 		body.WriteString("}; switch gamutActive { ")
 		for _, m := range s.Mutants {
-			fmt.Fprintf(&body, "case %d: return %s%s; ", m.Index, m.Replacement, x.ref)
+			// REMOVE_LOGICAL_NOT の置き換え後の文字列は空なので、被演算子だけを返す。
+			fmt.Fprintf(&body, "case %d: return %s%s; ", m.Index, m.ReplacementText, x.ref)
 		}
 		fmt.Fprintf(&body, "}; return %s%s ", n.Op, x.ref)
 		if x.inline {

@@ -37,6 +37,12 @@ func Both(a, b bool) bool { return a && b }
 // Either の a || b を a && b にしても、テストの入力 (true, true) では値が変わらないので生き残る。
 func Either(a, b bool) bool { return a || b }
 
+// Closed の !open を open にすると、テストの入力 false で値が変わり、検出される。
+func Closed(open bool) bool { return !open }
+
+// Muted の !loud を loud にしても、テストが戻り値を確かめないので生き残る。
+func Muted(loud bool) bool { return !loud }
+
 // FirstNegative の break を continue にすると最後の負の数を返すようになり、テストの入力 (1, -2, -3) で検出される。
 func FirstNegative(xs []int) int {
 	found := 0

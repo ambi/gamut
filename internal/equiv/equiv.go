@@ -57,13 +57,13 @@ func New(ctx context.Context, pkg *load.Package, work string) (*Detector, error)
 // Equivalent は、変異体 m を当てたパッケージのコンパイル結果が、元と同じかを返す。
 // 変異体がコンパイルできなければ、等価ではないとする。
 func (d *Detector) Equivalent(ctx context.Context, m *mutant.Mutant) (bool, error) {
-	original := m.Original.String()
+	original := m.OriginalText
 	src := m.File.Src
 	if m.Offset+len(original) > len(src) || string(src[m.Offset:m.Offset+len(original)]) != original {
 		return false, fmt.Errorf("%s: the source at the mutant's offset is not %q", m.ID, original)
 	}
 	mutated := make([]byte, 0, len(src)+2)
-	mutated = append(append(append(mutated, src[:m.Offset]...), m.Replacement.String()...), src[m.Offset+len(original):]...)
+	mutated = append(append(append(mutated, src[:m.Offset]...), m.ReplacementText...), src[m.Offset+len(original):]...)
 	out, err := d.compile(ctx, m.File, mutated)
 	if err != nil {
 		if _, ok := errors.AsType[*exec.ExitError](err); ok {

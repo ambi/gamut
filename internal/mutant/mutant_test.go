@@ -120,6 +120,8 @@ func TestEnumerate_Operators(t *testing.T) {
 			[]string{"INVERT_LOOP_CTRL break->continue false"}},
 		{"logical operators", "package m\n\nfunc F(a, b, c bool) bool { return a && b || c }\n",
 			[]string{"INVERT_LOGICAL ||->&& true", "INVERT_LOGICAL &&->|| true"}},
+		{"logical not is removed", "package m\n\nfunc F(ok bool) bool { return !ok }\n",
+			[]string{"REMOVE_LOGICAL_NOT !-> true"}},
 		{"plain assignments are not mutated", "package m\n\nfunc F(a int) int { b := a; b = 2; return b }\n",
 			nil},
 	}
@@ -127,7 +129,7 @@ func TestEnumerate_Operators(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var got []string
 			for _, m := range enumerate(t, tt.src) {
-				got = append(got, string(m.Type)+" "+m.Original.String()+"->"+m.Replacement.String()+" "+map[bool]string{true: "true", false: "false"}[m.Viable])
+				got = append(got, string(m.Type)+" "+m.OriginalText+"->"+m.ReplacementText+" "+map[bool]string{true: "true", false: "false"}[m.Viable])
 			}
 			if len(got) != len(tt.want) {
 				t.Fatalf("got %v, want %v", got, tt.want)
