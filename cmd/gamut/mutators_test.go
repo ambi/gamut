@@ -12,8 +12,8 @@ func TestListMutators(t *testing.T) {
 		t.Fatalf("exit %d", code)
 	}
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
-	if len(lines) != 15 {
-		t.Errorf("%d lines, want one per operator (15):\n%s", len(lines), out.String())
+	if len(lines) != 25 {
+		t.Errorf("%d lines, want one per operator (25):\n%s", len(lines), out.String())
 	}
 	for _, want := range []string{"RETURN_ZERO", "default", "INVERT_LOGICAL", "opt-in", "a && b -> a || b"} {
 		if !strings.Contains(out.String(), want) {

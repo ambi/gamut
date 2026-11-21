@@ -1,6 +1,35 @@
 package operators
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
+
+func TestSelfAssignments(t *testing.T) {
+	if Accumulate(0, 3) != 3 {
+		t.Fatal("wrong")
+	}
+}
+
+func TestNumericLiterals(t *testing.T) {
+	if Limit() != 3 || Rate() != 0.5 {
+		t.Fatal("wrong")
+	}
+	_, _ = Retries(), Ratio()
+}
+
+func TestBranches(t *testing.T) {
+	if Abs(-2) != 2 || Note(1) != 1 || Sign(1) != 1 || Level(1) != "low" || Name(1) != "one" || Kind(2) != "even" {
+		t.Fatal("wrong")
+	}
+}
+
+func TestErrors(t *testing.T) {
+	if !errors.Is(Wrap(), ErrBase) || Annotate().Error() != "annotate: base" || Check(-1) == nil {
+		t.Fatal("wrong")
+	}
+	_ = Validate(200)
+}
 
 func TestBitwise(t *testing.T) {
 	if Flags(1, 2) != 3 || Mask(3, 3) != 3 || Double(2) != 4 {

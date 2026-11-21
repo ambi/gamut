@@ -72,14 +72,14 @@ func TestBuild_CompoundAssignmentsAreEmbedded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ms := mutant.Enumerate(pkg, []mutant.Type{mutant.InvertAssignments, mutant.InvertBitwiseAssignments})
+	ms := mutant.Enumerate(pkg, []mutant.Type{mutant.InvertAssignments, mutant.InvertBitwiseAssignments, mutant.RemoveSelfAssignments})
 	mutant.CheckViability(pkg, ms)
 	res, err := schemata.Build(pkg, ms)
 	if err != nil {
 		t.Fatal(err)
 	}
 	got := levels(res)
-	for _, key := range []string{"INVERT_ASSIGNMENTS +=", "INVERT_BITWISE_ASSIGNMENTS <<="} {
+	for _, key := range []string{"INVERT_ASSIGNMENTS +=", "INVERT_BITWISE_ASSIGNMENTS <<=", "REMOVE_SELF_ASSIGNMENTS +=", "REMOVE_SELF_ASSIGNMENTS <<="} {
 		if got[key] != schemata.Wrapped {
 			t.Errorf("%s: level %d, want Wrapped (levels %v)", key, got[key], got)
 		}
@@ -89,7 +89,7 @@ func TestBuild_CompoundAssignmentsAreEmbedded(t *testing.T) {
 		out = string(b)
 	}
 	// 右辺の呼び出しは引数として 1 回だけ書き、本文では引数の名前で参照する。
-	if strings.Count(out, "}(next())") != 1 || strings.Contains(out, "= next()") || !strings.Contains(out, "a -= gamutV") {
+	if strings.Count(out, "}(next())") != 1 || strings.Contains(out, "= next()") || !strings.Contains(out, "a -= gamutV") || !strings.Contains(out, "a = gamutV") {
 		t.Errorf("the right-hand side must be evaluated once and passed in:\n%s", out)
 	}
 	// 書き換えても行は変わらない。
@@ -197,6 +197,126 @@ func TestBuild_BooleanLiteralsTakeTheirContextType(t *testing.T) {
 	}
 	if len(res.Sites) != 3 {
 		t.Errorf("%d sites, want 3", len(res.Sites))
+	}
+}
+
+func TestBuild_NumericLiteralsTakeTheirContextType(t *testing.T) {
+	dir := t.TempDir()
+	// const の宣言と配列の長さのリテラルは、定数でなければならないので個別ビルドに回る。
+	// M の 10 を呼び出しにすると、定数でないという誤りはリテラルの外（64 の位置）に出るので、書き換える前に個別ビルドに回す。
+	src := "package m\n\nconst N = 3\n\nconst M = 64 << 10\n\nvar A [2]int\n\nfunc F(x float64) float64 { return x * 2 }\n\nfunc G(xs []int) int { return xs[1] }\n"
+	for name, s := range map[string]string{"go.mod": "module m\n\ngo 1.27.4\n", "m.go": src} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(s), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pkg, err := loadOne(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ms := mutant.Enumerate(pkg, []mutant.Type{mutant.IntegerIncrement, mutant.IntegerDecrement})
+	mutant.CheckViability(pkg, ms)
+	res, err := schemata.Build(pkg, ms)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]schemata.Level{"N": schemata.Untouched, "M": schemata.Untouched, "A": schemata.Untouched, "F": schemata.Wrapped, "G": schemata.Wrapped}
+	for _, s := range res.Sites {
+		if w := want[s.Mutants[0].Scope]; s.Level != w {
+			t.Errorf("%s: level %d, want %d", s.Mutants[0].Scope, s.Level, w)
+		}
+		if len(s.Mutants) != 2 {
+			t.Errorf("%s: %d mutants in a site, want the increment and the decrement", s.Mutants[0].Scope, len(s.Mutants))
+		}
+	}
+	// M の 64 と 10 で 2 か所。
+	if len(res.Sites) != 6 {
+		t.Errorf("%d sites, want 6", len(res.Sites))
+	}
+	var out string
+	for _, b := range res.Files {
+		out = string(b)
+	}
+	// 2 は float64 の文脈にあるので、float64 を返す呼び出しになる。
+	if !strings.Contains(out, "func() float64 {") || !strings.Contains(out, "return 3; ") {
+		t.Errorf("the literal does not take its context type:\n%s", out)
+	}
+}
+
+func TestBuild_EmptiedBranchesWrapTheirInnerSites(t *testing.T) {
+	dir := t.TempDir()
+	src := "package m\n\nfunc g(n int) {}\n\nfunc F(a, b int) int {\n\tn := 0\n\tif a > 0 {\n\t\tn = a + b\n\t} else {\n\t\tg(a)\n\t}\n\tswitch b {\n\tcase 1:\n\t\tn = b * 2\n\t}\n\treturn n\n}\n"
+	for name, s := range map[string]string{"go.mod": "module m\n\ngo 1.27.4\n", "m.go": src} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(s), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pkg, err := loadOne(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ms := mutant.Enumerate(pkg, []mutant.Type{mutant.BranchIf, mutant.BranchElse, mutant.BranchCase, mutant.ArithmeticBase})
+	mutant.CheckViability(pkg, ms)
+	res, err := schemata.Build(pkg, ms)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[mutant.Type]int{}
+	for _, s := range res.Sites {
+		got[s.Mutants[0].Type]++
+		if s.Level != schemata.Wrapped {
+			t.Errorf("%s site: level %d, want Wrapped", s.Mutants[0].Type, s.Level)
+		}
+	}
+	if got[mutant.BranchIf] != 1 || got[mutant.BranchElse] != 1 || got[mutant.BranchCase] != 1 || got[mutant.ArithmeticBase] != 2 {
+		t.Errorf("sites by type %v, want one of each branch and two arithmetic", got)
+	}
+	var out string
+	for _, b := range res.Files {
+		out = string(b)
+	}
+	// 本体は有効な変異体でなければ実行し、本体の中の変異箇所はその中で書き換える。
+	if !strings.Contains(out, "if gamutActive != 1 {\n\t\tn = func(") {
+		t.Errorf("the emptied body does not wrap its inner site:\n%s", out)
+	}
+	if strings.Count(out, "\n") != strings.Count(src, "\n") {
+		t.Errorf("the rewrite shifted lines:\n%s", out)
+	}
+}
+
+func TestBuild_ReturnedErrorsWrapTheirInnerSites(t *testing.T) {
+	dir := t.TempDir()
+	src := "package m\n\nimport (\n\t\"errors\"\n\t\"fmt\"\n)\n\nvar errNeg = errors.New(\"neg\")\n\nfunc F(x int) (int, error) {\n\tif x < 0 {\n\t\treturn 0, fmt.Errorf(\"neg %d: %w\", x, errNeg)\n\t}\n\treturn x, nil\n}\n"
+	for name, s := range map[string]string{"go.mod": "module m\n\ngo 1.27.4\n", "m.go": src} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(s), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pkg, err := loadOne(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ms := mutant.Enumerate(pkg, []mutant.Type{mutant.ReturnErrorNil, mutant.ErrorfWrap})
+	mutant.CheckViability(pkg, ms)
+	res, err := schemata.Build(pkg, ms)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Sites) != 2 {
+		t.Fatalf("%d sites, want 2", len(res.Sites))
+	}
+	for _, s := range res.Sites {
+		if s.Level != schemata.Wrapped {
+			t.Errorf("%s site: level %d, want Wrapped", s.Mutants[0].Type, s.Level)
+		}
+	}
+	var out string
+	for _, b := range res.Files {
+		out = string(b)
+	}
+	// 有効な変異体なら式を評価せずに nil を返し、そうでなければ error として受けた値を返す。書式の箇所はその中で書き換える。
+	if !strings.Contains(out, "func() error { switch gamutActive { case 1: return nil }; var gamutC error = fmt.Errorf(func() string {") {
+		t.Errorf("the returned error does not wrap its inner site:\n%s", out)
 	}
 }
 

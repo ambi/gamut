@@ -58,8 +58,11 @@ type Site struct {
 
 func (s *Site) next() Level {
 	switch s.Node.(type) {
-	case *ast.IncDecStmt, *ast.AssignStmt, *ast.BranchStmt, *ast.ExprStmt, *mutant.BodySite:
+	case *ast.IncDecStmt, *ast.AssignStmt, *ast.BranchStmt, *ast.ExprStmt, *mutant.BodySite, *mutant.BranchSite:
 		// 文は値を返さないので gamutMark で包めない。
+		return Untouched
+	case *ast.BasicLit:
+		// 型のない定数を gamutMark に渡すと既定の型（int など）になり、外側の式の型が合わなくなる。
 		return Untouched
 	}
 	return s.Level + 1
@@ -126,6 +129,15 @@ func Build(pkg *load.Package, mutants []*mutant.Mutant) (*Result, error) {
 		s.Mutants = append(s.Mutants, m)
 	}
 
+	// 定数が要る文脈の箇所は、呼び出しにすると定数でなくなる。その誤りは箇所の外（定数の式の先頭）に出て箇所を特定できないので、
+	// 書き換える前に個別ビルドへ回す。
+	constant := constantContexts(pkg)
+	for _, s := range sites {
+		if slices.ContainsFunc(constant, func(n ast.Node) bool { return n.Pos() <= s.Node.Pos() && s.Node.End() <= n.End() }) {
+			s.Level = Untouched
+		}
+	}
+
 	funcs, entries := entryPoints(pkg)
 
 	// 各反復で 1 つ以上の箇所の Level が上がるので、反復は箇所の数の 2 倍で終わる。
@@ -181,6 +193,28 @@ func Build(pkg *load.Package, mutants []*mutant.Mutant) (*Result, error) {
 		return &Result{Files: files, HelperPath: helperPath, Helper: helper, Sites: sites, SiteOf: siteOf, Funcs: funcs}, nil
 	}
 	return nil, fmt.Errorf("schemata rewrite of %s did not converge", pkg.ImportPath)
+}
+
+// constantContexts は、定数の式が要る構文（const の宣言と配列の型の長さ）を返す。
+func constantContexts(pkg *load.Package) []ast.Node {
+	var out []ast.Node
+	for _, f := range pkg.Files {
+		ast.Inspect(f.AST, func(n ast.Node) bool {
+			switch x := n.(type) {
+			case *ast.GenDecl:
+				if x.Tok == token.CONST {
+					out = append(out, x)
+					return false
+				}
+			case *ast.ArrayType:
+				if x.Len != nil {
+					out = append(out, x.Len)
+				}
+			}
+			return true
+		})
+	}
+	return out
 }
 
 // entry は、関数の本文の { の直後に差し込む、入ったことの記録である。
@@ -255,9 +289,8 @@ func (r *renderer) renderFile(f *load.File, sites []*Site) []byte {
 		if a.end != b.end {
 			return b.end - a.end
 		}
-		// 条件を包む箇所は、包まれる式の箇所と範囲が同じなので先にする。包まれる式はその中で書き換える。
-		_, ca := a.Node.(*mutant.ConditionSite)
-		_, cb := b.Node.(*mutant.ConditionSite)
+		// 条件と分岐の本体を包む箇所は、包まれる式や文の箇所と範囲が同じでありうるので先にする。包まれる側はその中で書き換える。
+		ca, cb := wraps(a.Node), wraps(b.Node)
 		switch {
 		case ca && !cb:
 			return -1
@@ -274,6 +307,15 @@ func (r *renderer) renderFile(f *load.File, sites []*Site) []byte {
 	r.renderRange(&buf, f, sites, 0, len(f.Src))
 	r.top = false
 	return buf.Bytes()
+}
+
+// wraps は、箇所 n が範囲の中の箇所を自分の書き換えの中で書き換えるかを返す。
+func wraps(n ast.Node) bool {
+	switch n.(type) {
+	case *mutant.ConditionSite, *mutant.BranchSite, *mutant.ErrorSite:
+		return true
+	}
+	return false
 }
 
 // copySrc は、元のソースの [lo, hi) を buf へ写す。ファイルの最上位の字句なら、関数の入口の記録を差し込む。
@@ -494,6 +536,23 @@ func (r *renderer) renderSite(buf *bytes.Buffer, f *load.File, sites []*Site, s 
 		r.renderRange(buf, f, without(sites, s), s.start, s.end)
 		buf.WriteString(" }")
 
+	case *mutant.BranchSite:
+		// BRANCH_*：有効な変異体なら分岐の本体を実行しない。本体に入ったら到達し、本体を実行しないことで振る舞いが変わりうるので感染したとする。
+		// 本体の中の変異箇所は、実行する側の中で書き換える。本体を包むことで関数の終端性が変わる変異体は、構築不能の判定で除かれている。
+		m := s.Mutants[0]
+		fmt.Fprintf(buf, " if gamutCovering { gamutHit(%d); gamutInfect(%d) }; if gamutActive != %d {", s.Index, m.Index, m.Index)
+		r.renderRange(buf, f, without(sites, s), s.start, s.end)
+		buf.WriteString("}")
+
+	case *mutant.ErrorSite:
+		// RETURN_ERROR_NIL：有効な変異体なら式を評価せずに nil を返し、そうでなければ式を error として受けて返す。
+		// error として受けるので、型付きの nil のポインタも元の return と同じく nil でない error になる。元が nil でなければ感染したとする。
+		// 式の中の変異箇所は、評価する側の中でそのまま書き換える。
+		m := s.Mutants[0]
+		fmt.Fprintf(buf, "func() error { switch gamutActive { case %d: return nil }; var gamutC error = ", m.Index)
+		r.renderRange(buf, f, without(sites, s), s.start, s.end)
+		fmt.Fprintf(buf, "; if gamutCovering { gamutHit(%d); if gamutC != nil { gamutInfect(%d) } }; return gamutC }()", s.Index, m.Index)
+
 	case *mutant.ConditionSite:
 		// CONDITIONS_CONSTANT：有効な変異体なら条件を評価せずに定数を返し、そうでなければ条件を評価する。
 		// 条件の中の変異箇所は、評価する側の中でそのまま書き換える。
@@ -525,6 +584,24 @@ func (r *renderer) renderSite(buf *bytes.Buffer, f *load.File, sites []*Site, s 
 		m := s.Mutants[0]
 		fmt.Fprintf(buf, "func() %s { if gamutCovering { gamutHit(%d); gamutInfect(%d) }; if gamutActive == %d { return %s }; return %s }()",
 			resultType, s.Index, m.Index, m.Index, m.ReplacementText, n.Name)
+
+	case *ast.BasicLit:
+		// INTEGER_*、FLOAT_*、ERRORF_WRAP：リテラルを、その場の型を返す関数呼び出しにする。値は必ず変わるので、到達したら感染したとする。
+		// const の宣言や配列の長さのように定数が要る文脈は、書き換え後の型検査で個別ビルドへ回る。
+		resultType, ok := r.resultType(f, n)
+		if !ok {
+			fallback()
+			return
+		}
+		fmt.Fprintf(buf, "func() %s { if gamutCovering { gamutHit(%d); ", resultType, s.Index)
+		for _, m := range s.Mutants {
+			fmt.Fprintf(buf, "gamutInfect(%d); ", m.Index)
+		}
+		buf.WriteString("}; switch gamutActive { ")
+		for _, m := range s.Mutants {
+			fmt.Fprintf(buf, "case %d: return %s; ", m.Index, m.ReplacementText)
+		}
+		fmt.Fprintf(buf, "}; return %s }()", n.Value)
 
 	case *ast.BranchStmt:
 		// break と continue は同じ関数の中のループに作用するので、関数リテラルで包めない。文を 2 つの分岐にする。

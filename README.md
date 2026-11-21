@@ -101,6 +101,12 @@ go build -o bin/gamut ./cmd/gamut
 | `REMOVE_LOGICAL_NOT` | `!x`→`x` |
 | `BOOLEAN_LITERAL` | `true`↔`false` |
 | `CONDITIONS_CONSTANT` | `if` の条件を `true`／`false`、`for` の条件を `false`、`&&` の被演算子を `true`、`\|\|` の被演算子を `false` に |
+| `REMOVE_SELF_ASSIGNMENTS` | `x += y`→`x = y`（複合代入すべて） |
+| `INTEGER_INCREMENT`、`INTEGER_DECREMENT` | 整数のリテラルを 1 増やす、1 減らす（`make` の容量を除く） |
+| `FLOAT_INCREMENT`、`FLOAT_DECREMENT` | 浮動小数点数のリテラルを 1 増やす、1 減らす |
+| `BRANCH_IF`、`BRANCH_ELSE`、`BRANCH_CASE` | `if`、`else`、`switch` の `case` の本体を実行しない |
+| `ERRORF_WRAP` | `fmt.Errorf` の `%w` を `%v` にする |
+| `RETURN_ERROR_NIL` | `return` の `error` 型の結果を `nil` にする |
 
 テストプロセスは、gamut の 1 回の実行の間、変異体の間で使い回す。
 変異体がプロセスの状態を汚したと分かれば、そのプロセスを捨て、新しいプロセスで判定し直す。
@@ -261,9 +267,9 @@ gamut の「一部」「ない」には、作業項目へのリンクを付け�
 | 差分の実行 | [ある（`-since`）][g-since] | [ある（`--changed-since`）][gm-pr] | [ある（`--diff`）][gr-unleash] | [不明][gms-readme] | [ある（`--since`）][mu-readme] | [ない][st-incremental] | [ない（有償の Arcmutate にある）][pit-maven] | [ある（`--in-diff`）][cm-diff] | [ない][mm-docs] |
 | 変異体の再実行 | [ある（`-mutant`）][g-mutant] | [ある（`--run-mutant-id`）][gm-rerun] | [ない][gr-unleash] | [不明][gms-readme] | [ある（`--only`）][mu-readme] | [一部（行の範囲で選ぶ）][st-incremental] | [ない][pit-maven] | [一部（名前の正規表現で選ぶ）][cm-filter] | [一部（名前のワイルドカードで選ぶ）][mm-docs] |
 | ほかのパッケージのテストで検出 | [ある（逆依存、被覆で選ぶ）][g-integration] | [ある（逆依存、被覆で選ぶ）][gm-cross] | [一部（`--integration` で全テストを実行）][gr-unleash] | [不明][gms-readme] | [不明][mu-readme] | [不明][st-config] | [一部（`crossModule`、限定的）][pit-maven] | [ある（`--test-workspace`）][cm-workspaces] | [不明][mm-docs] |
-| 変異演算子の数 | [15（既定 7）][g-mutators] | [28][gm-features] | [11（既定 5）][gr-config] | [15 群][gms-readme] | [18][mu-readme] | [16 群][st-mutators] | [29（既定 11）][pit-mutators] | [6 種類][cm-mutants] | [不明][mm-docs] |
+| 変異演算子の数 | [25（既定 7）][g-mutators] | [28][gm-features] | [11（既定 5）][gr-config] | [15 群][gms-readme] | [18][mu-readme] | [16 群][st-mutators] | [29（既定 11）][pit-mutators] | [6 種類][cm-mutants] | [不明][mm-docs] |
 | 戻り値の置き換えと文の削除 | [ある][g-mutators] | [ある][gm-mutators] | [ない][gr-config] | [ある][gms-readme] | [ある][mu-readme] | [ある][st-mutators] | [ある][pit-mutators] | [ある][cm-mutants] | [不明][mm-docs] |
-| 数値と文字列のリテラルの変異 | [ない][g-mutators]（[039](work-items/039-literal-and-branch-mutators.md)） | [一部（数値）][gm-mutators] | [ない][gr-config] | [一部（数値）][gms-readme] | [一部（数値、プラグイン）][mu-readme] | [ある][st-mutators] | [ある][pit-mutators] | [不明][cm-mutants] | [ある][mm-docs] |
+| 数値と文字列のリテラルの変異 | [一部（数値）][g-mutators]（文字列は [018](work-items/018-more-mutators.md#対象外) の理由で採らない） | [一部（数値）][gm-mutators] | [ない][gr-config] | [一部（数値）][gms-readme] | [一部（数値、プラグイン）][mu-readme] | [ある][st-mutators] | [ある][pit-mutators] | [不明][cm-mutants] | [ある][mm-docs] |
 | 無効化コメント | [ある][g-ignore] | [ある][gm-ignore] | [不明][gr-config] | [ある][gms-readme] | [ある][mu-readme] | [ある][st-disable] | [ない（有償の Arcmutate にある）][pit-maven] | [ある（属性）][cm-attrs] | [ある][mm-docs] |
 | ソースの外での受理 | [ある（変異体ごと）][g-accept] | [ない][gm-help] | [ない][gr-config] | [ある（チェックサム）][gms-readme] | [ある（変異体ごと）][mu-readme] | [ない][st-disable] | [一部（メソッドとクラスの glob）][pit-maven] | [一部（名前の正規表現）][cm-filter-config] | [ない][mm-docs] |
 | 等価な変異体の自動検出 | [ある（コンパイル結果の比較、任意）][g-equiv] | [ある（コンパイル結果の比較、任意）][gm-features] | [不明][gr-unleash] | [不明][gms-releases] | [一部（型で証明できる `?.`）][mu-coverage] | [ない][st-equivalent] | [一部（特定の変異を除く）][pit-mutators] | [不明][cm-mutants] | [ない][mm-history] |

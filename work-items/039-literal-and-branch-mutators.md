@@ -1,5 +1,5 @@
 ---
-status: pending
+status: done
 stage: 3
 depends_on: [018]
 created_at: 2026-11-21
@@ -47,3 +47,14 @@ gamut の変異演算子は、数値のリテラル、`if` と `case` の本体�
 ## 検証
 
 - `mise run verify`
+
+## 要約
+
+- 10 演算子を既定で無効な演算子として足した。名前は着手前の表のとおりで、gomutants 0.7.3 の `-list-mutators` の名前と一致する。
+- `REMOVE_SELF_ASSIGNMENTS` は複合代入の規則に `=` への置き換えを足しただけで、埋め込みは `INVERT_ASSIGNMENTS` と同じである。
+- 数値のリテラルは、10 進で書き、負なら括弧で囲む（`a-0` を `a--1` にしない）。浮動小数点数は小数点か指数を必ず含め、整数の定数にしない。`make` の容量と `map` の大きさの見込みは、変えても振る舞いが変わらないので変異しない。
+- 実在のパッケージで、`const maxBytes = 64 << 10` の `10` を呼び出しにすると、定数でないという誤りが箇所の外に出て、schemata の書き換え全体が止まった。`const` の宣言と配列の長さの中の箇所は、書き換える前に個別ビルドへ回すようにした（`schemata.constantContexts`）。リテラルの箇所は、`gamutMark` で包むと既定の型になるので `Marked` を飛ばす。
+- `BRANCH_*` は本体を `if false { ... }` で包み、`fallthrough` で終わる節と、中身がすべて arid の本体は対象にしない。`RETURN_ERROR_NIL` は、式でだけ使う import が使われなくならないよう、置き換えに元の式を評価しない分岐で残す。結果の型が `error` の位置だけを変異し、schemata では `error` として受けて型付きの nil も元と同じに扱う。
+- `fmt.Errorf` の呼び出しは arid（メッセージ）だが、`ERRORF_WRAP` と `RETURN_ERROR_NIL` はエラーの値を変えるので、その呼び出し自身の arid では止めない。
+- idmagic の `usecases` と、`%w` の多い 5 パッケージで測り、10 演算子とも既定に入れないと決めた（理由は[設計の既定の集合](../docs/design.md#既定の集合)）。既定の集合の判定は、変更前と 2 パッケージ 1,223 体で一致した。
+- 文字列のリテラルは [018](018-more-mutators.md) の対象外の理由のまま採らない。

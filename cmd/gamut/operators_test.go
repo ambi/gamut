@@ -25,6 +25,16 @@ func TestOperators_OptInVerdicts(t *testing.T) {
 		{"CONDITIONS_CONSTANT", map[string]string{"Positive": "KILLED", "SumAll": "LIVED"}},
 		{"STATEMENT_REMOVE", map[string]string{"Record": "KILLED", "Notify": "LIVED"}},
 		{"RETURN_ZERO", map[string]string{"Area": "KILLED", "Describe": "LIVED"}},
+		{"REMOVE_SELF_ASSIGNMENTS", map[string]string{"Total": "KILLED", "Accumulate": "LIVED"}},
+		{"INTEGER_INCREMENT", map[string]string{"Limit": "KILLED", "Retries": "LIVED"}},
+		{"INTEGER_DECREMENT", map[string]string{"Limit": "KILLED", "Retries": "LIVED"}},
+		{"FLOAT_INCREMENT", map[string]string{"Rate": "KILLED", "Ratio": "LIVED"}},
+		{"FLOAT_DECREMENT", map[string]string{"Rate": "KILLED", "Ratio": "LIVED"}},
+		{"BRANCH_IF", map[string]string{"Abs": "KILLED", "Note": "LIVED"}},
+		{"BRANCH_ELSE", map[string]string{"Sign": "KILLED", "Level": "LIVED"}},
+		{"BRANCH_CASE", map[string]string{"Name": "KILLED", "Kind": "LIVED"}},
+		{"ERRORF_WRAP", map[string]string{"Wrap": "KILLED", "Annotate": "LIVED"}},
+		{"RETURN_ERROR_NIL", map[string]string{"Check": "KILLED", "Validate": "LIVED"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.only, func(t *testing.T) {

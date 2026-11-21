@@ -34,8 +34,10 @@ func enumerate(t *testing.T, src string) []*mutant.Mutant {
 	return ms
 }
 
-// everywhere は、ほとんどの条件と関数に現れる変異演算子である。それを確かめる例でだけ数える。
-var everywhere = []mutant.Type{mutant.ConditionsConstant, mutant.ReturnZero}
+// everywhere は、ほとんどの条件、関数、リテラル、分岐、複合代入に現れる変異演算子である。それを確かめる例でだけ数える。
+var everywhere = []mutant.Type{mutant.ConditionsConstant, mutant.ReturnZero, mutant.RemoveSelfAssignments,
+	mutant.IntegerIncrement, mutant.IntegerDecrement, mutant.FloatIncrement, mutant.FloatDecrement,
+	mutant.BranchIf, mutant.BranchElse, mutant.BranchCase}
 
 // TestKnown_NewOperatorsAreOffByDefault は、測ってから既定の集合を決める演算子が、既定では列挙されないことを確かめる。
 func TestKnown_NewOperatorsAreOffByDefault(t *testing.T) {
@@ -59,7 +61,7 @@ func TestKnown_NewOperatorsAreOffByDefault(t *testing.T) {
 
 func TestEnumerate_IDsDoNotDependOnLinesAndColumns(t *testing.T) {
 	before := enumerate(t, "package m\n\nfunc F(a, b int) bool { return a < b }\n")
-	after := enumerate(t, "package m\n\n// 説明を足しても識別子は変わらない。\nvar X = 1\n\nfunc F(a, b int) bool {\n\treturn a < b\n}\n")
+	after := enumerate(t, "package m\n\n// 説明を足しても識別子は変わらない。\nvar X = \"x\"\n\nfunc F(a, b int) bool {\n\treturn a < b\n}\n")
 	// 比較の 2 体と、関数の本体の RETURN_ZERO の 1 体。RETURN_ZERO の識別子も、行と列によらない。
 	if len(before) != 3 || len(after) != 3 {
 		t.Fatalf("got %d and %d mutants, want 3 each", len(before), len(after))
@@ -147,6 +149,44 @@ func TestEnumerate_Operators(t *testing.T) {
 			nil},
 		{"functions with results return zero values", "package m\n\ntype T struct{}\n\nfunc (T) Name() string { return \"t\" }\n\nfunc F(a int) (n, m int, err error) { return a, a, nil }\n\nfunc G[E any](e E) E { return e }\n\nfunc init() {}\n\nfunc H() {}\n",
 			[]string{"RETURN_ZERO {->{ return *new(string); true", "RETURN_ZERO {->{ return *new(int), *new(int), *new(error); true", "RETURN_ZERO {->{ return *new(E); true"}},
+		{"compound assignments drop the operator", "package m\n\nfunc F(a, b int, s string) int { a += b; a <<= 1; s += \"x\"; return a + len(s) }\n",
+			[]string{"INVERT_ASSIGNMENTS +=->-= true", "REMOVE_SELF_ASSIGNMENTS +=->= true", "INVERT_BITWISE_ASSIGNMENTS <<=->>>= true", "REMOVE_SELF_ASSIGNMENTS <<=->= true",
+				"INVERT_ASSIGNMENTS +=->-= false", "REMOVE_SELF_ASSIGNMENTS +=->= true", "ARITHMETIC_BASE +->- true"}},
+		{"a shift by another type is not viable as a plain assignment", "package m\n\nfunc F(u uint, n int) uint { u <<= n; return u }\n",
+			[]string{"INVERT_BITWISE_ASSIGNMENTS <<=->>>= true", "REMOVE_SELF_ASSIGNMENTS <<=->= false"}},
+		{"integer literals move by one", "package m\n\nfunc F(a int) int { return a + 41 }\n",
+			[]string{"ARITHMETIC_BASE +->- true", "INTEGER_INCREMENT 41->42 true", "INTEGER_DECREMENT 41->40 true"}},
+		{"non-decimal integer literals become decimal", "package m\n\nfunc F(a int) int { return a & 0xFF }\n",
+			[]string{"INVERT_BITWISE &->| true", "INTEGER_INCREMENT 0xFF->256 true", "INTEGER_DECREMENT 0xFF->254 true"}},
+		{"negative results are parenthesized and may overflow", "package m\n\nfunc F() uint {\n\tvar u uint = 0\n\treturn u\n}\n",
+			[]string{"INTEGER_INCREMENT 0->1 true", "INTEGER_DECREMENT 0->(-1) false"}},
+		{"float literals move by one and stay floats", "package m\n\nfunc F(x float64) float64 { return x*1.5 + 1.0 + 1e2 }\n",
+			[]string{"ARITHMETIC_BASE +->- true", "ARITHMETIC_BASE +->- true", "ARITHMETIC_BASE *->/ true",
+				"FLOAT_INCREMENT 1.5->2.5 true", "FLOAT_DECREMENT 1.5->0.5 true", "FLOAT_INCREMENT 1.0->2.0 true", "FLOAT_DECREMENT 1.0->0.0 true",
+				"FLOAT_INCREMENT 1e2->101.0 true", "FLOAT_DECREMENT 1e2->99.0 true"}},
+		{"capacities and size hints of make are not mutated", "package m\n\nfunc F(n int) ([]int, map[int]int, []int) {\n\treturn make([]int, n, 8), make(map[int]int, 4), make([]int, 3)\n}\n",
+			[]string{"INTEGER_INCREMENT 3->4 true", "INTEGER_DECREMENT 3->2 true"}},
+		{"if and else bodies are emptied, keeping their references", "package m\n\nfunc F(a int) int {\n\tn := 0\n\tif a > 0 {\n\t\tn = a\n\t} else if a < -9 {\n\t\tn = -a\n\t} else {\n\t\tn = 1\n\t}\n\treturn n\n}\n",
+			[]string{"CONDITIONALS_BOUNDARY >->>= true", "CONDITIONALS_NEGATION >-><= true", "BRANCH_IF \n\t\tn = a\n\t->if false {\n\t\tn = a\n\t} true",
+				"CONDITIONALS_BOUNDARY <-><= true", "CONDITIONALS_NEGATION <->>= true", "INVERT_NEGATIVES -->+ true",
+				"BRANCH_IF \n\t\tn = -a\n\t->if false {\n\t\tn = -a\n\t} true", "INVERT_NEGATIVES -->+ true", "BRANCH_ELSE \n\t\tn = 1\n\t->if false {\n\t\tn = 1\n\t} true"}},
+		{"a body the function needs to end is not viable when emptied", "package m\n\nfunc F(a int) int {\n\tif a > 0 {\n\t\treturn 1\n\t} else {\n\t\treturn 2\n\t}\n}\n",
+			[]string{"CONDITIONALS_BOUNDARY >->>= true", "CONDITIONALS_NEGATION >-><= true", "BRANCH_IF \n\t\treturn 1\n\t->if false {\n\t\treturn 1\n\t} false", "BRANCH_ELSE \n\t\treturn 2\n\t->if false {\n\t\treturn 2\n\t} false"}},
+		{"case bodies are emptied, but not empty ones, logging ones, or ones that fall through", "package m\n\nimport \"log\"\n\nfunc F(a int) int {\n\tn := 0\n\tswitch a {\n\tcase 1:\n\t\tn = 1\n\tcase 2:\n\tcase 3:\n\t\tlog.Println(a)\n\tcase 4:\n\t\tn = 4\n\t\tfallthrough\n\tdefault:\n\t\tn++\n\t}\n\treturn n\n}\n",
+			[]string{"BRANCH_CASE \n\t\tn = 1->if false {\n\t\tn = 1} true", "BRANCH_CASE \n\t\tn++->if false {\n\t\tn++} true", "INCREMENT_DECREMENT ++->-- true"}},
+		{"type switch cases are emptied", "package m\n\nfunc F(v any) int {\n\tswitch x := v.(type) {\n\tcase int:\n\t\treturn x\n\t}\n\treturn 0\n}\n",
+			[]string{"BRANCH_CASE \n\t\treturn x->if false {\n\t\treturn x} true"}},
+		{"wrapping verbs of fmt.Errorf become %v", "package m\n\nimport \"fmt\"\n\nfunc F(a, b error) error {\n\t_ = fmt.Errorf(\"%w; 100%%w %s: %w\", a, \"x\", b)\n\t_ = fmt.Errorf(`raw %+w`, a)\n\t_ = fmt.Errorf(\"no wrap: %v\", a)\n\treturn nil\n}\n",
+			[]string{"ERRORF_WRAP \"%w; 100%%w %s: %w\"->\"%v; 100%%w %s: %v\" true", "ERRORF_WRAP `raw %+w`->`raw %+v` true"}},
+		{"fmt.Errorf inside logging is arid", "package m\n\nimport (\n\t\"fmt\"\n\t\"log\"\n)\n\nfunc F(err error) { log.Println(fmt.Errorf(\"x: %w\", err)) }\n",
+			nil},
+		{"returned errors become nil", "package m\n\nimport (\n\t\"errors\"\n\t\"fmt\"\n\t\"io\"\n)\n\nvar errNeg = errors.New(\"neg\")\n\nfunc F(x int) (int, error) {\n\tif x < 0 {\n\t\treturn 0, errNeg\n\t}\n\treturn x, nil\n}\n\nfunc G(err error) error { return fmt.Errorf(\"g: %w\", err) }\n\nfunc H() func() error { return func() error { return io.EOF } }\n",
+			// fmt と io はその式でだけ使うので、式を参照として残さないと import が使われなくなる。
+			[]string{"CONDITIONALS_BOUNDARY <-><= true", "CONDITIONALS_NEGATION <->>= true", "RETURN_ERROR_NIL errNeg->func() error { if false { return errNeg }; return nil }() true",
+				"RETURN_ERROR_NIL fmt.Errorf(\"g: %w\", err)->func() error { if false { return fmt.Errorf(\"g: %w\", err) }; return nil }() true", "ERRORF_WRAP \"g: %w\"->\"g: %v\" true",
+				"RETURN_ERROR_NIL io.EOF->func() error { if false { return io.EOF }; return nil }() true"}},
+		{"results that are not of type error are not returned as nil", "package m\n\ntype E struct{}\n\nfunc (*E) Error() string { return \"e\" }\n\nfunc pair() (int, error) { return 1, nil }\n\nfunc F() *E { return &E{} }\n\nfunc G() (int, error) { return pair() }\n",
+			nil},
 		{"plain assignments are not mutated", "package m\n\nfunc F(a int) int { b := a; b = 2; return b }\n",
 			nil},
 	}
@@ -189,8 +229,8 @@ func TestEnumerate_SiteKeysGroupMutantsOfOneSite(t *testing.T) {
 	after := enumerate(t, "package m\n\n// 行をずらす。\n\nfunc F(a, b int) bool {\n\treturn a < b && b > 0\n}\n")
 	sites := map[string][]string{}
 	for i, m := range before {
-		// 条件と関数の本体を包む箇所は、演算子の箇所と別に確かめる。
-		if m.Type == mutant.ConditionsConstant || m.Type == mutant.ReturnZero {
+		// 条件と関数の本体を包む箇所と、リテラルの箇所は、演算子の箇所と別に確かめる。
+		if slices.Contains(everywhere, m.Type) {
 			continue
 		}
 		sites[m.SiteKey] = append(sites[m.SiteKey], m.Original.String())

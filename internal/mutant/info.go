@@ -27,6 +27,16 @@ var infos = map[Type]Info{
 	RemoveLogicalNot:         {Description: "Drop a logical not", Example: "!ok -> ok"},
 	BooleanLiteral:           {Description: "Swap true and false", Example: "return true -> return false"},
 	ConditionsConstant:       {Description: "Force a condition to a constant", Example: "if c -> if true / if false, for c -> for false, a && b -> true && b"},
+	RemoveSelfAssignments:    {Description: "Drop the operator of a compound assignment", Example: "x += y -> x = y"},
+	IntegerIncrement:         {Description: "Increment an integer literal", Example: "42 -> 43, 0xFF -> 256"},
+	IntegerDecrement:         {Description: "Decrement an integer literal", Example: "42 -> 41, 0 -> (-1)"},
+	FloatIncrement:           {Description: "Increment a float literal", Example: "1.5 -> 2.5, 1.0 -> 2.0"},
+	FloatDecrement:           {Description: "Decrement a float literal", Example: "1.5 -> 0.5, 1e2 -> 99.0"},
+	BranchIf:                 {Description: "Empty the body of an if", Example: "if c { f() } -> if c { if false { f() } }"},
+	BranchElse:               {Description: "Empty the body of an else", Example: "else { f() } -> else { if false { f() } }"},
+	BranchCase:               {Description: "Empty the body of a switch case", Example: "case 1: f() -> case 1: if false { f() }"},
+	ErrorfWrap:               {Description: "Break the error chain of fmt.Errorf", Example: `fmt.Errorf("load: %w", err) -> fmt.Errorf("load: %v", err)`},
+	ReturnErrorNil:           {Description: "Return nil in place of an error", Example: "return nil, err -> return nil, nil"},
 }
 
 // Infos は、すべての変異演算子の説明を、Known の順に返す。

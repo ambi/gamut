@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"go/ast"
+	"go/constant"
 	"go/parser"
 	"go/token"
 	"go/types"
@@ -46,7 +47,51 @@ const (
 	StatementRemove Type = "STATEMENT_REMOVE"
 	// ReturnZero は、戻り値を持つ関数の本体の先頭で、戻り値の型のゼロ値を返すようにする。
 	ReturnZero Type = "RETURN_ZERO"
+	// RemoveSelfAssignments は、複合代入を単純な代入にする（x += y を x = y に）。
+	RemoveSelfAssignments Type = "REMOVE_SELF_ASSIGNMENTS"
+	// IntegerIncrement と IntegerDecrement は、整数のリテラルを 1 増やす、1 減らす。
+	IntegerIncrement Type = "INTEGER_INCREMENT"
+	IntegerDecrement Type = "INTEGER_DECREMENT"
+	// FloatIncrement と FloatDecrement は、浮動小数点数のリテラルを 1 増やす、1 減らす。
+	FloatIncrement Type = "FLOAT_INCREMENT"
+	FloatDecrement Type = "FLOAT_DECREMENT"
+	// BranchIf、BranchElse、BranchCase は、if、else、switch の case の本体を空にする。
+	BranchIf   Type = "BRANCH_IF"
+	BranchElse Type = "BRANCH_ELSE"
+	BranchCase Type = "BRANCH_CASE"
+	// ErrorfWrap は、fmt.Errorf の書式の %w を %v にし、エラーの連鎖を切る。
+	ErrorfWrap Type = "ERRORF_WRAP"
+	// ReturnErrorNil は、return の error 型の結果を nil にする。
+	ReturnErrorNil Type = "RETURN_ERROR_NIL"
 )
+
+// ErrorSite は、RETURN_ERROR_NIL の変異箇所である。return の結果の式 X を包み、X そのものの変異箇所とは別の箇所にする。
+type ErrorSite struct {
+	X ast.Expr
+}
+
+// Pos は結果の式の先頭である。
+func (e *ErrorSite) Pos() token.Pos { return e.X.Pos() }
+
+// End は結果の式の終わりである。
+func (e *ErrorSite) End() token.Pos { return e.X.End() }
+
+// emptiedID は、BRANCH_* の識別子の置き換え後の部分である。置き換え後の文字列は本体を含むので、固定の文字列を使う。
+const emptiedID = "<emptied>"
+
+// BranchSite は、BRANCH_* の変異箇所である。分岐の本体の文の並び（if と else のブロックの { と } の内側、case の : の後）を範囲にする。
+// 変異は本体を if false { ... } で包み、本体でだけ使う変数が使われなくならないよう参照を残す。
+type BranchSite struct {
+	// Branch は *ast.BlockStmt か *ast.CaseClause である。
+	Branch   ast.Node
+	From, To token.Pos
+}
+
+// Pos は本体の先頭である。
+func (b *BranchSite) Pos() token.Pos { return b.From }
+
+// End は本体の終わりである。
+func (b *BranchSite) End() token.Pos { return b.To }
 
 // zeroID は、RETURN_ZERO の識別子の置き換え後の部分である。置き換え後の文字列は戻り値の型を含むので、固定の文字列を使う。
 const zeroID = "<zero>"
@@ -84,7 +129,9 @@ var AllTypes = []Type{ArithmeticBase, ConditionalsBoundary, ConditionalsNegation
 
 // OptIn は、既定では無効で、-only や設定で選んだときだけ有効になる変異演算子である。
 // 実在のパッケージで生き残りの数と仕分けの内訳を測ってから、既定の集合に入れるかを決める。
-var OptIn = []Type{InvertBitwise, InvertAssignments, InvertBitwiseAssignments, InvertLoopCtrl, InvertLogical, RemoveLogicalNot, BooleanLiteral, ConditionsConstant}
+var OptIn = []Type{InvertBitwise, InvertAssignments, InvertBitwiseAssignments, InvertLoopCtrl, InvertLogical, RemoveLogicalNot, BooleanLiteral, ConditionsConstant,
+	RemoveSelfAssignments, IntegerIncrement, IntegerDecrement, FloatIncrement, FloatDecrement, BranchIf, BranchElse, BranchCase,
+	ErrorfWrap, ReturnErrorNil}
 
 // Known は、gamut が知っているすべての変異演算子である。-only、設定、無効化コメント、受理の名前はこれで確かめる。
 var Known = slices.Concat(AllTypes, OptIn)
@@ -206,6 +253,17 @@ var assignRules = []rule{
 	{InvertBitwiseAssignments, token.AND_NOT_ASSIGN, token.AND_ASSIGN},
 	{InvertBitwiseAssignments, token.SHL_ASSIGN, token.SHR_ASSIGN},
 	{InvertBitwiseAssignments, token.SHR_ASSIGN, token.SHL_ASSIGN},
+	{RemoveSelfAssignments, token.ADD_ASSIGN, token.ASSIGN},
+	{RemoveSelfAssignments, token.SUB_ASSIGN, token.ASSIGN},
+	{RemoveSelfAssignments, token.MUL_ASSIGN, token.ASSIGN},
+	{RemoveSelfAssignments, token.QUO_ASSIGN, token.ASSIGN},
+	{RemoveSelfAssignments, token.REM_ASSIGN, token.ASSIGN},
+	{RemoveSelfAssignments, token.AND_ASSIGN, token.ASSIGN},
+	{RemoveSelfAssignments, token.OR_ASSIGN, token.ASSIGN},
+	{RemoveSelfAssignments, token.XOR_ASSIGN, token.ASSIGN},
+	{RemoveSelfAssignments, token.AND_NOT_ASSIGN, token.ASSIGN},
+	{RemoveSelfAssignments, token.SHL_ASSIGN, token.ASSIGN},
+	{RemoveSelfAssignments, token.SHR_ASSIGN, token.ASSIGN},
 }
 
 var incDecRules = []rule{
@@ -263,8 +321,35 @@ func enumerateFile(pkg *load.Package, file *load.File, enabled []Type, arid *ari
 	var path []int
 	scope := ""
 	aridDepth := 0
+	// parentOf は、いま訪れているノードの親を返す。ファイルなら nil を返す。
+	parentOf := func() ast.Node {
+		if len(stack) < 2 {
+			return nil
+		}
+		return stack[len(stack)-2].node
+	}
+	// enclosingSignature は、いま訪れているノードを囲む最も内側の関数（宣言か関数リテラル）のシグネチャを返す。
+	// いま訪れているノードそのものは含めない（return func() error {...} の関数リテラルは、囲む関数の結果である）。
+	enclosingSignature := func() *types.Signature {
+		for i := len(stack) - 2; i >= 0; i-- {
+			switch fn := stack[i].node.(type) {
+			case *ast.FuncLit:
+				sig, _ := pkg.Info.Types[fn].Type.(*types.Signature)
+				return sig
+			case *ast.FuncDecl:
+				if obj, ok := pkg.Info.Defs[fn.Name].(*types.Func); ok {
+					return obj.Signature()
+				}
+				return nil
+			}
+		}
+		return nil
+	}
+	// allow は、emit が無視する arid の深さである。エラーメッセージの呼び出し（fmt.Errorf）は arid だが、
+	// その呼び出しそのものを変える変異体（ERRORF_WRAP、RETURN_ERROR_NIL）は、その呼び出しの arid では止めない。
+	allow := 0
 	emit := func(m *Mutant) {
-		if aridDepth > 0 {
+		if aridDepth > allow {
 			skipped++
 			return
 		}
@@ -336,6 +421,41 @@ func enumerateFile(pkg *load.Package, file *load.File, enabled []Type, arid *ari
 				}
 			}
 		}
+		// return の error 型の結果なら、その中の変異体より先に、nil にする変異体を並べる。
+		if expr, ok := n.(ast.Expr); ok && slices.Contains(enabled, ReturnErrorNil) && returnedError(pkg.Info, parentOf(), expr, enclosingSignature()) {
+			rel := path[2:]
+			pos := pkg.Fset.Position(expr.Pos())
+			text := string(file.Src[pos.Offset:pkg.Fset.Position(expr.End()).Offset])
+			m := &Mutant{
+				Type: ReturnErrorNil, File: file, Offset: pos.Offset,
+				// 式でだけ使う変数や import が使われなくならないよう、式は評価しない分岐に残す。
+				Original: token.ILLEGAL, Replacement: token.ILLEGAL, OriginalText: text, ReplacementText: "func() error { if false { return " + text + " }; return nil }()",
+				Line: pos.Line, Column: pos.Column, Site: &ErrorSite{X: expr}, Scope: scope,
+				// 包む箇所は式そのものの箇所と範囲が同じなので、経路に印を足して別の鍵にする。
+				SiteKey: siteKey(file.Rel, scope, append(slices.Clone(rel), -4)), path: slices.Clone(rel),
+			}
+			m.setID(file.Rel, "nil")
+			if isArid {
+				allow = 1
+			}
+			emit(m)
+			allow = 0
+		}
+		// 分岐の本体なら、その中の変異体より先に、本体を空にする変異体を並べる。
+		if typ, from, to, ok := branchBody(parentOf(), n); ok && slices.Contains(enabled, typ) && !arid.allArid(branchStmts(n)) {
+			start, end := pkg.Fset.Position(from).Offset, pkg.Fset.Position(to).Offset
+			text := string(file.Src[start:end])
+			pos := pkg.Fset.Position(from)
+			rel := path[2:]
+			m := &Mutant{
+				Type: typ, File: file, Offset: start,
+				Original: token.ILLEGAL, Replacement: token.ILLEGAL, OriginalText: text, ReplacementText: "if false {" + text + "}",
+				Line: pos.Line, Column: pos.Column, Site: &BranchSite{Branch: n, From: from, To: to}, Scope: scope,
+				SiteKey: siteKey(file.Rel, scope, rel), path: slices.Clone(rel),
+			}
+			m.setID(file.Rel, emptiedID)
+			emit(m)
+		}
 		switch x := n.(type) {
 		case *ast.BinaryExpr:
 			rules, opPos, op = binaryRules, x.OpPos, x.Op
@@ -368,6 +488,20 @@ func enumerateFile(pkg *load.Package, file *load.File, enabled []Type, arid *ari
 			if call, ok := x.X.(*ast.CallExpr); ok && slices.Contains(enabled, StatementRemove) && returnsNothing(pkg.Info, call) {
 				text := string(file.Src[pkg.Fset.Position(x.Pos()).Offset:pkg.Fset.Position(x.End()).Offset])
 				add(StatementRemove, x.Pos(), token.ILLEGAL, token.ILLEGAL, text, "if false { "+text+" }", removedID)
+			}
+			return true
+		case *ast.BasicLit:
+			for _, lm := range literalMutants(pkg.Info, x, parentOf(), enabled) {
+				add(lm.typ, x.Pos(), token.ILLEGAL, token.ILLEGAL, x.Value, lm.text, "")
+			}
+			if slices.Contains(enabled, ErrorfWrap) && errorfFormat(pkg.Info, parentOf(), x) {
+				if to, ok := unwrapVerbs(x.Value); ok {
+					if stack[len(stack)-2].arid {
+						allow = 1
+					}
+					add(ErrorfWrap, x.Pos(), token.ILLEGAL, token.ILLEGAL, x.Value, to, "")
+					allow = 0
+				}
 			}
 			return true
 		case *ast.Ident:
@@ -430,6 +564,163 @@ func zeroValues(file *load.File, fset *token.FileSet, fd *ast.FuncDecl) string {
 		}
 	}
 	return strings.Join(zeros, ", ")
+}
+
+// branchBody は、n が if か else のブロック、switch の case の節なら、その演算子と、本体の文の並びの範囲を返す。
+// 本体が空の節と、fallthrough で終わる節（空にすると fallthrough を書けない）は返さない。select の節は対象にしない。
+func branchBody(parent, n ast.Node) (Type, token.Pos, token.Pos, bool) {
+	switch x := n.(type) {
+	case *ast.BlockStmt:
+		ifs, ok := parent.(*ast.IfStmt)
+		if !ok || len(x.List) == 0 {
+			return "", 0, 0, false
+		}
+		switch {
+		case ifs.Body == x:
+			return BranchIf, x.Lbrace + 1, x.Rbrace, true
+		case ifs.Else == x:
+			return BranchElse, x.Lbrace + 1, x.Rbrace, true
+		}
+	case *ast.CaseClause:
+		if len(x.Body) == 0 {
+			return "", 0, 0, false
+		}
+		if br, ok := x.Body[len(x.Body)-1].(*ast.BranchStmt); ok && br.Tok == token.FALLTHROUGH {
+			return "", 0, 0, false
+		}
+		return BranchCase, x.Colon + 1, x.End(), true
+	}
+	return "", 0, 0, false
+}
+
+// branchStmts は、分岐の本体の文の並びを返す。
+func branchStmts(n ast.Node) []ast.Stmt {
+	switch x := n.(type) {
+	case *ast.BlockStmt:
+		return x.List
+	case *ast.CaseClause:
+		return x.Body
+	}
+	return nil
+}
+
+// returnedError は、expr が return の結果で、囲む関数 sig のその位置の結果の型が error で、expr が nil でないかを返す。
+// 結果の型が error を満たす具体的な型（*MyErr など）なら nil にしない。nil にした値は error の nil と比べられないことがある。
+func returnedError(info *types.Info, parent ast.Node, expr ast.Expr, sig *types.Signature) bool {
+	ret, ok := parent.(*ast.ReturnStmt)
+	if !ok || sig == nil || sig.Results().Len() != len(ret.Results) || info.Types[expr].IsNil() {
+		return false
+	}
+	i := slices.Index(ret.Results, expr)
+	return i >= 0 && types.Identical(sig.Results().At(i).Type(), types.Universe.Lookup("error").Type())
+}
+
+// errorfFormat は、lit が fmt.Errorf の書式の引数かを返す。
+func errorfFormat(info *types.Info, parent ast.Node, lit *ast.BasicLit) bool {
+	call, ok := parent.(*ast.CallExpr)
+	if !ok || lit.Kind != token.STRING || len(call.Args) == 0 || call.Args[0] != lit {
+		return false
+	}
+	fn, ok := callee(info, call).(*types.Func)
+	return ok && fn.Pkg() != nil && fn.Pkg().Path() == "fmt" && fn.Name() == "Errorf"
+}
+
+// unwrapVerbs は、書式の字句 s の %w をすべて %v にした字句を返す。%w がなければ false を返す。
+// %% は動詞ではないので飛ばし、フラグ、幅、精度、引数の番号（%[1]w）は残す。
+func unwrapVerbs(s string) (string, bool) {
+	b := []byte(s)
+	changed := false
+	for i := 0; i < len(b); i++ {
+		if b[i] != '%' {
+			continue
+		}
+		j := i + 1
+		for j < len(b) && strings.IndexByte("+-# 0123456789.*[]", b[j]) >= 0 {
+			j++
+		}
+		if j < len(b) && b[j] == 'w' {
+			b[j] = 'v'
+			changed = true
+		}
+		i = j
+	}
+	return string(b), changed
+}
+
+// literalMutant は、リテラルの変異体の演算子と置き換え後の字句である。
+type literalMutant struct {
+	typ  Type
+	text string
+}
+
+// literalMutants は、数値のリテラル lit を 1 増やす変異体と 1 減らす変異体を返す。parent は lit の親のノードである。
+// 置き換え後の字句は 10 進で書き、負なら括弧で囲む（a-0 を a--1 にしない）。浮動小数点数は小数点か指数を必ず含め、整数の定数にしない。
+// make の容量と map の大きさの見込みは、変えても振る舞いが変わらないので変異しない。
+func literalMutants(info *types.Info, lit *ast.BasicLit, parent ast.Node, enabled []Type) []literalMutant {
+	if sizeHint(info, lit, parent) {
+		return nil
+	}
+	var out []literalMutant
+	switch lit.Kind {
+	case token.INT:
+		v := constant.MakeFromLiteral(lit.Value, token.INT, 0)
+		if v.Kind() != constant.Int {
+			return nil
+		}
+		for _, d := range []struct {
+			typ Type
+			op  token.Token
+		}{{IntegerIncrement, token.ADD}, {IntegerDecrement, token.SUB}} {
+			if slices.Contains(enabled, d.typ) {
+				out = append(out, literalMutant{d.typ, signed(constant.BinaryOp(v, d.op, constant.MakeInt64(1)).String())})
+			}
+		}
+	case token.FLOAT:
+		f, _ := constant.Float64Val(constant.MakeFromLiteral(lit.Value, token.FLOAT, 0))
+		for _, d := range []struct {
+			typ Type
+			to  float64
+		}{{FloatIncrement, f + 1}, {FloatDecrement, f - 1}} {
+			if d.to == f || !slices.Contains(enabled, d.typ) {
+				// 大きすぎて 1 の差を表せない値は変異しない。
+				continue
+			}
+			s := strconv.FormatFloat(d.to, 'g', -1, 64)
+			if !strings.ContainsAny(s, ".eE") {
+				s += ".0"
+			}
+			out = append(out, literalMutant{d.typ, signed(s)})
+		}
+	}
+	return out
+}
+
+// signed は、負の数の字句を括弧で囲む。
+func signed(s string) string {
+	if strings.HasPrefix(s, "-") {
+		return "(" + s + ")"
+	}
+	return s
+}
+
+// sizeHint は、lit が make の容量（3 つ目の引数）か、map の make の大きさの見込み（2 つ目の引数）かを返す。
+func sizeHint(info *types.Info, lit *ast.BasicLit, parent ast.Node) bool {
+	call, ok := parent.(*ast.CallExpr)
+	if !ok || len(call.Args) < 2 {
+		return false
+	}
+	id, ok := ast.Unparen(call.Fun).(*ast.Ident)
+	if !ok {
+		return false
+	}
+	if b, ok := info.Uses[id].(*types.Builtin); !ok || b.Name() != "make" {
+		return false
+	}
+	if len(call.Args) == 3 && call.Args[2] == lit {
+		return true
+	}
+	_, isMap := info.Types[call.Args[0]].Type.Underlying().(*types.Map)
+	return isMap && call.Args[1] == lit
 }
 
 // returnsNothing は、call が値を返さない関数の呼び出しかを返す。型の変換や組み込み関数の呼び出しは含めない（panic は含める）。

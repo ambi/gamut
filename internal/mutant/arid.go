@@ -131,6 +131,11 @@ func (c *aridChecker) stmt(s ast.Stmt) bool {
 	return false
 }
 
+// allArid は、文の並びが arid の文だけからなるかを返す（ログを出すだけの分岐の本体など）。そのような本体は空にしない。
+func (c *aridChecker) allArid(list []ast.Stmt) bool {
+	return !c.rule.Off && len(list) > 0 && !slices.ContainsFunc(list, func(s ast.Stmt) bool { return !c.stmt(s) })
+}
+
 // timeArithmetic は、算術の被演算子が time.Now() か time.Since() の呼び出しかを返す。経過時間の計算はテストが観測しにくい。
 func (c *aridChecker) timeArithmetic(b *ast.BinaryExpr) bool {
 	switch b.Op {

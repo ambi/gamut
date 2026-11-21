@@ -312,6 +312,12 @@ Go ではパッケージごとにテストバイナリが分かれるので、�
 | `RETURN_ZERO` | 戻り値を持つ関数の本体（`init` を除く） | 先頭で戻り値の型のゼロ値（`error` は `nil`）を返す |
 | `STATEMENT_REMOVE` | 値を返さない呼び出しの文（ログ出力を除く） | 実行しない（`f(x)`→`if false { f(x) }`） |
 | `CONDITIONS_CONSTANT`（既定で無効） | `if` と `for` の条件、`&&` と `\|\|` の被演算子（定数の式を除く） | `if`：`true` と `false`。`for`：`false`。`&&` の被演算子：`true`。`\|\|` の被演算子：`false` |
+| `REMOVE_SELF_ASSIGNMENTS`（既定で無効） | 複合代入の `op=` すべて | `=` にする（`x += y`→`x = y`） |
+| `INTEGER_INCREMENT`、`INTEGER_DECREMENT`（既定で無効） | 整数のリテラル（`make` の容量と `map` の大きさの見込みを除く） | 1 増やす、1 減らす。10 進で書き、負なら括弧で囲む（`0`→`(-1)`） |
+| `FLOAT_INCREMENT`、`FLOAT_DECREMENT`（既定で無効） | 浮動小数点数のリテラル | 1 増やす、1 減らす。小数点か指数を必ず含める（`1e2`→`101.0`） |
+| `BRANCH_IF`、`BRANCH_ELSE`、`BRANCH_CASE`（既定で無効） | `if`、`else`（`else if` を除く）、`switch` の `case` の空でない本体（`fallthrough` で終わるものと、中身がすべて arid のものを除く） | 本体を実行しない（`{ f() }`→`{ if false { f() } }`） |
+| `ERRORF_WRAP`（既定で無効） | `fmt.Errorf` の書式のリテラルの `%w` | すべて `%v` にする（`%%` は動詞でないので変えない） |
+| `RETURN_ERROR_NIL`（既定で無効） | `return` の結果のうち、囲む関数の結果の型が `error` で、`nil` でない式 | `nil` を返す |
 
 名前と置き換えは Gremlins と gomutants に合わせる。
 各演算子の説明と例は `internal/mutant` の 1 か所（`mutant.Infos`）で定め、`-list-mutators` はそこから出す。README の一覧が全演算子の名前を挙げることは、テストで確かめる。
@@ -340,6 +346,28 @@ Go ではパッケージごとにテストバイナリが分かれるので、�
 - `CONDITIONS_CONSTANT` は既定に入れない。変異体が既定の集合の 2 倍を超え、`not infected` の 3 分の 1 は `err != nil -> false`（エラーの経路を通るテストがない）で、ほかの演算子の `not covered` と重なる。条件でだけ使う変数が使われなくなる構築不能も多い。
 - `INVERT_LOGICAL` は、生き残りが 27% と多く、1 体ずつの見極めが要るので、既定に入れない。
 - ほかは、箇所が少ないか生き残りがほとんどなく、既定の時間を延ばすほどの情報を足さないので、既定に入れない。
+
+2026-11-21、同じパッケージで [039](../work-items/039-literal-and-branch-mutators.md) の 10 演算子を選んで測った（`-no-cache`、12.6 秒）。
+
+| 演算子 | 変異体 | 検出 | not detected | not infected | not covered | 構築不能 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `BRANCH_IF` | 498 | 240 | 27 | 0 | 231 | 0 |
+| `RETURN_ERROR_NIL` | 239 | 78 | 1 | 10 | 150 | 0 |
+| `INTEGER_INCREMENT` | 62 | 30 | 23 | 0 | 9 | 0 |
+| `INTEGER_DECREMENT` | 62 | 22 | 24 | 0 | 7 | 9 |
+| `BRANCH_CASE` | 31 | 15 | 3 | 0 | 10 | 3 |
+| `BRANCH_ELSE` | 4 | 3 | 0 | 0 | 1 | 0 |
+| `ERRORF_WRAP` | 1 | 0 | 1 | 0 | 0 | 0 |
+
+`REMOVE_SELF_ASSIGNMENTS` と `FLOAT_*` は、このパッケージに箇所がなかった。
+`ERRORF_WRAP` は箇所が少ないので、`%w` の多い 5 パッケージ（`shared/http/support_http`、`accesscontrol/internal/domain`、`saml/domain`、`oauth2/internal/logout/usecases`、`shared/security/actiontoken`）でも測り、検出 21、生き残り 24、not covered 81 だった。
+
+- 10 演算子とも既定に入れない。
+- `INTEGER_*` の生き残りの多くは、設定の値の定数（上限、時間切れ）と、`len(x) > 0` の `0` を `1` にする変異体で、後者は `CONDITIONALS_BOUNDARY` と同じ穴を示す。
+- `BRANCH_IF` は既定の集合の変異体を 7 割増やし、not covered は既定の演算子の not covered と重なる。生き残りはエラーの経路を通らないテストの穴だが、`CONDITIONS_CONSTANT` と同じく、選んで使う。
+- `RETURN_ERROR_NIL` は 6 割が not covered（テストが通らないエラーの経路）で、生き残りは少ない。
+- `ERRORF_WRAP` は生き残りが届いた変異体の半分を超える。呼び出し元が `errors.Is` で連鎖を確かめないなら観測できないので、1 体ずつの見極めが要る。
+- 数値のリテラルの箇所は、`const` の宣言と配列の長さの中なら、書き換える前に個別ビルドへ回す。呼び出しにすると定数でなくなるという誤りは、箇所の外（定数の式の先頭）に出て、どの箇所の誤りか特定できないためである。
 `-only`、設定、無効化コメント、受理は、既定で無効な演算子の名前も受け付ける。
 ビット演算子は短絡評価しないので、算術の演算子と同じく、両辺を先に評価する関数リテラルで埋め込む。
 複合代入（`x op= v`）は、`v` を 1 回だけ評価して引数で渡し、有効な変異体に応じて元の演算子と変異後の演算子を切り替える関数呼び出しの文にする。対象の式 `x` は本文に写すので、その中の変異箇所は個別ビルドに回す。変異で値が変わるかは `x` にもよる（`x *= 1` と `x /= 1` など）ので、到達したら感染したとみなし、実行して確かめる側に倒す。
@@ -349,6 +377,10 @@ Go ではパッケージごとにテストバイナリが分かれるので、�
 `CONDITIONS_CONSTANT` の箇所は、条件の式を包む独自のノード（`mutant.ConditionSite`）で、式そのものの変異箇所とは別の箇所の鍵を持つ。範囲が式と同じなので、書き換えでは包む側を先にし、式の中の変異箇所は包む関数の中で書き換える。有効な変異体なら条件を評価せずに定数を返し、そうでなければ条件を評価して返す。`for` の条件を `true` にすると無限ループになり、時間切れを待つだけで遅いので、`false` だけにする。定数に置き換えると、条件でだけ使う変数が使われなくなり、構築不能になることがある。
 `STATEMENT_REMOVE` は、文を消すと引数でだけ使う変数や import が使われなくなりコンパイルできないので、文を `if false { ... }` に置き換えて参照を残す。識別子の置き換え後の部分には固定の文字列を使い、引数を書き換えても識別子が変わらないようにする。schemata では `if gamutActive != N { ... }` にし、引数の中の変異箇所はその中で書き換える。
 `RETURN_ZERO` は、本体の `{` の直後に `return *new(T1), *new(T2);` を差し込む。`T` はシグネチャの戻り値の型の字句を写すので、そのファイルの中で必ず書け、型パラメータにも使える。`error` も `nil` にする。`errors.New` などで `nil` でない値にするには import が要り、字句の置き換えだけで構築可能性を判定できなくなるためである。箇所は本体の `{` の 1 字を範囲にする独自のノード（`mutant.BodySite`）で、関数の入口の記録もそこで書く。`-since` では、本体の変更に交わるかで選ぶ。
+`REMOVE_SELF_ASSIGNMENTS` は複合代入の規則に `=` への置き換えを足したもので、埋め込み方は `INVERT_ASSIGNMENTS` と同じである。
+数値のリテラルと `ERRORF_WRAP` の書式は、その場の型を返す関数呼び出しにする（`BOOLEAN_LITERAL` と同じ）。型のない定数を `gamutMark` に渡すと既定の型になって外側の式の型が合わなくなるので、包めなければ個別ビルドに回す。
+`BRANCH_*` は、本体の文の並び（ブロックの `{` と `}` の内側、`case` の `:` の後）を範囲にする独自のノード（`mutant.BranchSite`）で、`STATEMENT_REMOVE` と同じく `if false { ... }` で参照を残す。schemata では `if gamutActive != N { ... }` にし、本体の中の変異箇所はその中で書き換える。本体に入ったら感染したとみなす。本体を空にすると関数が終端しなくなる（`missing return`）変異体は、構築不能になる。識別子の置き換え後の部分には固定の文字列を使う。
+`RETURN_ERROR_NIL` は、結果の式を包む独自のノード（`mutant.ErrorSite`）で、式の中の箇所とは別の箇所の鍵を持つ。置き換えは `func() error { if false { return <式> }; return nil }()` で、式でだけ使う import が使われなくならないよう参照を残す。schemata では、有効な変異体なら式を評価せずに `nil` を返し、そうでなければ式を `error` として受けて返す。`error` として受けるので、型付きの `nil` のポインタは元の `return` と同じく `nil` でない `error` になり、元の値が `nil` でなければ感染したとする。結果の型が `error` を満たす具体的な型の箇所は変異しない。
 変異体は「ファイル、区間の先頭のバイト位置、元の文字列、置き換え後の文字列」で表し、構築可能性の判定と個別ビルドはこの置き換えだけで行う。
 演算子の変異では、区間は演算子の字句 1 つで、文字列は字句と同じである。
 字句で表せない変異（`!` の削除など）は、置き換え後の文字列を空などにして同じ表現に載せる。
@@ -441,7 +473,8 @@ cgo を使うパッケージ（`CgoFiles` を持つもの）は、`import "C"` �
 | 規則 | 除くもの |
 | --- | --- |
 | 出力だけの呼び出し | `log`、`log/slog`、`expvar`、`go.opentelemetry.io/otel` とその下のパッケージの呼び出し。`Debug*`、`Info*`、`Warn*`、`Error*` のメソッドで、受け手の型の名前が `Log` を含むか、既知のロガーのパッケージ（zap、logrus、zerolog、logr、klog）のもの。書き込み先が `os.Stderr` の `fmt.Fprint*`。引数を変異せず、文の削除（`STATEMENT_REMOVE`）もしない |
-| メッセージ | `panic`、`errors.New`、`fmt.Errorf` の引数。`panic` の文の削除は残す |
+| メッセージ | `panic`、`errors.New`、`fmt.Errorf` の引数。`panic` の文の削除は残す。`fmt.Errorf` の書式の `%w`（`ERRORF_WRAP`）と、`fmt.Errorf` の呼び出しを返す結果（`RETURN_ERROR_NIL`）は、メッセージではなくエラーの値を変えるので変異する。外側が arid（ログの引数の中など）なら変異しない |
+| まとまりの本体 | 中身がすべて arid の文である分岐の本体は、空にしない（`BRANCH_*`） |
 | 表示のメソッド | 引数なしで `string` を返す `String`、`GoString`、`Error` のメソッドの本体 |
 | 時刻の算術 | `time.Now()` か `time.Since()` の呼び出しを被演算子に持つ算術 |
 | まとまり | 中身がすべて出力だけの呼び出しの文である `if`（初期化の文がないもの）とブロック。条件を含めて全体を除く（Google の規則 `arid(n) = simple(n) ? expert(n) : children.every(arid)` の、文についての形） |
@@ -708,7 +741,7 @@ Pull Request では、その行に注釈として表示される。
 | GitHub の注釈と Action | 一部（公開リポジトリの Pull Request での確認が残る） |
 | エージェント向けの報告と skills | 済み |
 | 変異演算子の拡張（戻り値、呼び出し文の削除、論理演算子、条件の真偽） | 済み |
-| 変異演算子の拡張（数値のリテラル、分岐の本体、エラーの包み） | 未着手（[039](../work-items/039-literal-and-branch-mutators.md)） |
+| 変異演算子の拡張（数値のリテラル、分岐の本体、エラーの包み） | 済み（[039](../work-items/039-literal-and-branch-mutators.md)） |
 | 変更が壊しうるテストの選択（`select-tests`） | 済み |
 | kill matrix（何も検出しないテスト、包含されるテスト） | 済み（`-kill-matrix`） |
 | 不要かもしれないコードの報告（`simplify`） | 済み |
