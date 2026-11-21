@@ -29,6 +29,9 @@ type Entry struct {
 	KilledBy string `json:"killed_by,omitempty"`
 	// Killer は、検出したトップレベルのテストの名前である。逆依存パッケージのテストは import パスを前に付ける。
 	Killer string `json:"killer,omitempty"`
+	// Matrix は、感染したテストをすべて実行した判定（kill matrix）かである。真なら Killers が検出したテストのすべてである。
+	Matrix  bool     `json:"matrix,omitempty"`
+	Killers []string `json:"killers,omitempty"`
 	// Decl、Deps、Imports は Keys の同名のメソッドの値である。
 	Decl    string `json:"decl"`
 	Deps    string `json:"deps"`

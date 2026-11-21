@@ -151,6 +151,7 @@ func judge(args []string, stdout, stderr io.Writer, prune bool) int {
 	fs.Var(&reporterKinds, "reporter", "report format: text (the summary on stdout), gomutants (JSON), json (mutation-testing-elements), html, agent (one JSON document on stdout for coding agents), or simplify (surviving removals by function, as candidates for unneeded code) (repeatable; default text, plus gomutants with -o)")
 	reportDir := fs.String("report-dir", filepath.Join(".gamut", "report"), "write the json, html, and gomutants (without -o) reports to this directory")
 	annotations := fs.String("annotations", "", "also print the survivors to fix as CI annotations on stdout (values: github)")
+	killMatrix := fs.Bool("kill-matrix", false, "run every infected test of each mutant in a fresh process instead of stopping at the first failure, record all tests that detect it, and report tests that detect nothing, subsumed tests, and duplicate tests")
 	maxDepth := fs.Int("max-depth", 0, "count a test as reaching a mutated site only within this many calls of module functions from the test function (0: no limit)")
 	var aridCalls, aridPackages multiFlag
 	fs.Var(&aridCalls, "arid-call", "do not mutate the arguments of, or remove, calls matching this glob on <package>.<Func> or <package>.<Type>.<Method> (repeatable)")
@@ -273,6 +274,7 @@ func judge(args []string, stdout, stderr io.Writer, prune bool) int {
 			fmt.Sprintf("integration=%t", *integration), fmt.Sprintf("detect-equivalent=%t", *detectEquivalent),
 			"exclude=" + strings.Join(excludes, "\x00"), "critical=" + strings.Join(critical, "\x00"),
 			fmt.Sprintf("arid=%t,%s,%s", *noArid, strings.Join(aridCalls, "\x00"), strings.Join(aridPackages, "\x00")),
+			fmt.Sprintf("kill-matrix=%t", *killMatrix),
 			fmt.Sprintf("thresholds=%g,%g,%g", thresholds.High, thresholds.Low, thresholds.Break),
 		})...)
 		if early != nil {
@@ -370,6 +372,7 @@ func judge(args []string, stdout, stderr io.Writer, prune bool) int {
 		return exitError
 	}
 	opts.MaxDepth = *maxDepth
+	opts.KillMatrix = *killMatrix
 	var unrepeatableMu sync.Mutex
 	var unrepeatable []string
 	depthTests, depthReaches := 0, 0
@@ -511,6 +514,9 @@ func judge(args []string, stdout, stderr io.Writer, prune bool) int {
 	rep.MutantsArid = aridSkipped
 	rep.UnrepeatableTests = slices.Sorted(slices.Values(unrepeatable))
 	rep.MaxDepthExcludedTests, rep.MaxDepthExcludedReaches = depthTests, depthReaches
+	if *killMatrix {
+		rep.ComputeKillMatrix()
+	}
 	for _, s := range skippedPkgs {
 		rep.SkippedPackages = append(rep.SkippedPackages, report.SkippedPackage{Package: s.ImportPath, Reason: s.Reason})
 	}

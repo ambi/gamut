@@ -37,6 +37,8 @@ type Mutation struct {
 	Accepted string `json:"accepted,omitempty"`
 	// Critical は、重要領域の変異体かである。重要領域の生き残りは品質の条件を満たさない。gomutants にはないフィールドである。
 	Critical bool `json:"critical,omitempty"`
+	// Killers は、-kill-matrix で、検出したトップレベルのテストのすべてである。gomutants にはないフィールドである。
+	Killers []string `json:"killers,omitempty"`
 }
 
 // survivor は、m が直すべき生き残り（LIVED か NOT COVERED で、受理していない）かを返す。
@@ -126,6 +128,8 @@ type Report struct {
 	// SkippedPackages は、パターンに当たったが判定できずに飛ばしたパッケージ（cgo の前処理ができないものなど）である。
 	// gomutants にはないフィールドである。
 	SkippedPackages []SkippedPackage `json:"skipped_packages,omitempty"`
+	// KillMatrix は、-kill-matrix のときの、テストの見直しの候補である。gomutants にはないフィールドである。
+	KillMatrix *KillMatrix `json:"kill_matrix,omitempty"`
 	// MutantsIgnored は、無効化コメントで止めた変異体の数である。MutantsTotal と効率の計算には含めない。gomutants にはないフィールドである。
 	MutantsIgnored int     `json:"mutants_ignored,omitempty"`
 	ElapsedTime    float64 `json:"elapsed_time"`
@@ -191,7 +195,7 @@ func Build(module, label string, packages []string, results []*run.Result, elaps
 			Line: m.Line, Column: m.Column,
 			Original: m.OriginalText, Replacement: m.ReplacementText,
 			Reason: res.Reason, Mode: res.Mode, Tests: res.Tests, KilledBy: res.KilledBy, Cached: res.Cached,
-			PreviouslyKilledBy: res.PreviouslyKilledBy,
+			PreviouslyKilledBy: res.PreviouslyKilledBy, Killers: res.Killers,
 		})
 	}
 	slices.Sort(order)
@@ -402,6 +406,9 @@ func WriteSummary(w io.Writer, r *Report) {
 		for _, s := range stale {
 			fmt.Fprintf(w, "  %s  (%s)\n", s.ID, s.Reason)
 		}
+	}
+	if r.KillMatrix != nil {
+		writeKillMatrix(w, r.KillMatrix)
 	}
 	if len(r.SkippedPackages) > 0 {
 		fmt.Fprintf(w, "\nskipped packages (%d): not judged; their mutants are not counted\n", len(r.SkippedPackages))

@@ -2,6 +2,7 @@ package run
 
 import (
 	"context"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -86,6 +87,9 @@ func phases(tests []*testCase, prior []string, bins []*binary) [][]*testCase {
 // execute は、変異体 m を有効にして tests を実行する。前回の検出テストを先に、別のプロセスで実行し、最初の失敗で止める。
 // binPath は、テストバイナリごとに実行するファイルを返す。誤りを返したら、変異体を構築不能とする。
 func (u *unit) execute(ctx context.Context, m *mutant.Mutant, tests []*testCase, opts Options, binPath func(*binary) (string, error)) *Result {
+	if opts.KillMatrix {
+		return u.executeAll(ctx, m, tests, opts, binPath)
+	}
 	groups := phases(tests, u.priorKillers(m, opts.Cache), u.bins)
 	if opts.onExecute != nil {
 		names := make([][]string, len(groups))
@@ -135,6 +139,96 @@ func (u *unit) execute(ctx context.Context, m *mutant.Mutant, tests []*testCase,
 			continue
 		}
 		break
+	}
+	r.Elapsed = time.Since(start)
+	return r
+}
+
+// verboseLine は、-test.v の出力の、トップレベルのテストの始まり（=== RUN）と結果（--- PASS/FAIL/SKIP）の行である。
+// サブテストの結果の行は字下げされ、サブテストの始まりの行は名前に / を含むので、どちらも当たらない。
+var verboseLine = regexp.MustCompile(`(?m)^(?:=== RUN\s+([^\s/]+)$|--- (PASS|FAIL|SKIP): ([^\s/]+) )`)
+
+// executeAll は、kill matrix のために、変異体 m を有効にして tests をすべて実行し、失敗したトップレベルのテストをすべて記録する。
+// 最初の失敗で止めない。panic や os.Exit でプロセスが落ちたら、結果の出ていない実行中のテストが検出したとし、
+// まだ始まっていないテストを新しいプロセスで実行し直す。時間切れなら TIMED OUT にし、検出したテストは記録しない。
+func (u *unit) executeAll(ctx context.Context, m *mutant.Mutant, tests []*testCase, opts Options, binPath func(*binary) (string, error)) *Result {
+	start := time.Now()
+	r := &Result{Mutant: m, Status: Lived, Reason: ReasonNotDetected, Matrix: true}
+	if opts.onExecute != nil {
+		opts.onExecute(m, [][]string{testNames(tests)})
+	}
+	killers := map[string]bool{}
+	for _, b := range u.bins {
+		var remaining []*testCase
+		for _, t := range tests {
+			if t.bin == b {
+				remaining = append(remaining, t)
+			}
+		}
+		if len(remaining) == 0 {
+			continue
+		}
+		path, err := binPath(b)
+		if err != nil {
+			return &Result{Mutant: m, Status: NotViable, Elapsed: time.Since(start)}
+		}
+		index := m.Index
+		if path != b.path {
+			index = 0
+		}
+		for len(remaining) > 0 {
+			quoted := make([]string, len(remaining))
+			for i, t := range remaining {
+				quoted[i] = regexp.QuoteMeta(t.local)
+			}
+			limit := time.Duration(float64(total(remaining))*opts.TimeoutFactor) + opts.TimeoutMin
+			runCtx, cancel := context.WithTimeout(ctx, limit)
+			cmd := testCommand(runCtx, b.dir, path, opts.TestFlags, []string{"GAMUT_MUTANT=" + strconv.Itoa(index)},
+				"-test.run", "^(?:"+strings.Join(quoted, "|")+")$", "-test.count=1", "-test.v", "-test.paniconexit0")
+			out, err := cmd.CombinedOutput()
+			timedOut := runCtx.Err() != nil && ctx.Err() == nil
+			cancel()
+			if timedOut || ctx.Err() != nil {
+				return &Result{Mutant: m, Status: TimedOut, Matrix: true, Elapsed: time.Since(start)}
+			}
+			started, finished := map[string]bool{}, map[string]bool{}
+			for _, f := range verboseLine.FindAllSubmatch(out, -1) {
+				if len(f[1]) > 0 {
+					started[string(f[1])] = true
+					continue
+				}
+				finished[string(f[3])] = true
+				if string(f[2]) == "FAIL" {
+					killers[b.prefix+string(f[3])] = true
+				}
+			}
+			var next []*testCase
+			for _, t := range remaining {
+				switch {
+				case !started[t.local]:
+					next = append(next, t)
+				case !finished[t.local] && err != nil:
+					// 結果の行を出さずにプロセスが落ちた。
+					killers[t.name] = true
+				}
+			}
+			if err != nil && len(next) == len(remaining) {
+				// どのテストも始まらずに落ちた（TestMain の失敗など）。残りを 1 件ずつ確かめる手間はかけず、先頭のテストが検出したとする。
+				killers[remaining[0].name] = true
+				next = next[1:]
+			}
+			remaining = next
+		}
+	}
+	if len(killers) > 0 {
+		r.Status, r.Reason = Killed, ""
+		r.Killers = slices.Sorted(maps.Keys(killers))
+		for _, t := range tests {
+			if killers[t.name] {
+				r.Killer, r.KilledBy = t.name, t.name
+				break
+			}
+		}
 	}
 	r.Elapsed = time.Since(start)
 	return r

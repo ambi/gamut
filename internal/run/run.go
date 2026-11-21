@@ -62,6 +62,10 @@ type Result struct {
 	Elapsed time.Duration
 	// Cached は、判定を実行せずにキャッシュから再利用したかである。
 	Cached bool
+	// Matrix は、感染したテストをすべて実行した判定（kill matrix）かである。真なら Killers が検出したテストのすべてである。
+	Matrix bool
+	// Killers は、Matrix が真のときの、検出したトップレベルのテストの名前で、名前の順に並ぶ。
+	Killers []string
 	// PreviouslyKilledBy は、前回この変異体を検出したテストが消えたので再検査し、今回は検出されなかったときの、前回の検出テストである。
 	PreviouslyKilledBy string
 }
@@ -97,6 +101,9 @@ type Options struct {
 	// Isolate は、変異体ごとに新しいテストプロセスで判定するかである。偽なら、gamut の実行の間だけ動くテストプロセスで、
 	// 複数の変異体を順に判定する（パッケージの初期化を変異体ごとに繰り返さない）。
 	Isolate bool
+	// KillMatrix は、変異体ごとに感染したテストをすべて実行し、検出したテストをすべて記録するかである（kill matrix）。
+	// 最初の失敗で止めず、プロセスは変異体ごとに新しく起動する。
+	KillMatrix bool
 
 	// rewriteHelper はテスト専用の差し替え口で、補助ファイルの内容をビルドの前に書き換える。
 	rewriteHelper func([]byte) []byte
@@ -260,7 +267,7 @@ func All(ctx context.Context, targets []Target, opts Options) ([][]*Result, erro
 	}
 
 	var srv *pool
-	if !opts.Isolate {
+	if !opts.Isolate && !opts.KillMatrix {
 		srv = newPool(ctx, opts)
 		defer srv.close()
 	}
@@ -274,7 +281,7 @@ func All(ctx context.Context, targets []Target, opts Options) ([][]*Result, erro
 	}
 	jobs := all
 	if opts.Cache != nil {
-		jobs = reuse(all, opts.Cache, duplicateIDs(targets))
+		jobs = reuse(all, opts.Cache, duplicateIDs(targets), opts.KillMatrix)
 		logf("cache: %d mutants reused, %d to execute", len(all)-len(jobs), len(jobs))
 	}
 	err = buildLazy(ctx, active, func(u *unit) []*testCase {

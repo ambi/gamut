@@ -10,7 +10,10 @@ import (
 // reuse は、キャッシュの判定を再利用できる作業の判定を書き、実行が要る作業を返す。
 // 被覆の記録は毎回やり直すので、到達と感染はいつも今のソースのものである。
 // 到達しない変異体と感染しない変異体はもともと実行しないので、キャッシュを使わない。
-func reuse(jobs []job, store *cache.Store, dup map[string]bool) []job {
+//
+// matrix（kill matrix）なら、KILLED は、感染したテストをすべて実行した判定で、実行するテストもその鍵も変わらないときだけ再利用する。
+// LIVED はもともとすべてのテストを実行しているので、通常の規則で再利用する。
+func reuse(jobs []job, store *cache.Store, dup map[string]bool, matrix bool) []job {
 	var pending []job
 	for _, j := range jobs {
 		m := j.unit.Mutants[j.index]
@@ -20,7 +23,7 @@ func reuse(jobs []job, store *cache.Store, dup map[string]bool) []job {
 			continue
 		}
 		old := store.Get(m.ID)
-		if !reusable(old, cur) {
+		if !reusable(old, cur) || matrix && Status(old.Status) == Killed && (!old.Matrix || !sameTests(old, cur)) {
 			pending = append(pending, j)
 			continue
 		}
@@ -31,6 +34,7 @@ func reuse(jobs []job, store *cache.Store, dup map[string]bool) []job {
 		j.unit.results[j.index] = &Result{
 			Mutant: m, Status: Status(old.Status), Reason: old.Reason, Mode: old.Mode,
 			Tests: tests, KilledBy: old.KilledBy, Killer: old.Killer, Cached: true,
+			Matrix: old.Matrix || Status(old.Status) == Lived, Killers: old.Killers,
 		}
 	}
 	return pending
@@ -101,6 +105,7 @@ func (j job) record(store *cache.Store, r *Result) {
 		return
 	}
 	e.Status, e.Reason, e.Mode, e.KilledBy, e.Killer = string(r.Status), r.Reason, r.Mode, r.KilledBy, r.Killer
+	e.Matrix, e.Killers = r.Matrix, r.Killers
 	store.Put(j.unit.Mutants[j.index].ID, e)
 }
 

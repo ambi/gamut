@@ -141,7 +141,7 @@ func prepare(ctx context.Context, u *unit, opts Options, logf func(string, ...an
 		return err
 	}
 	maps.Copy(files, marks.Files)
-	if !opts.Isolate {
+	if !opts.Isolate && !opts.KillMatrix {
 		srv, err := schemata.BuildServer(pkg)
 		if err != nil {
 			return err
