@@ -32,6 +32,8 @@ const (
 	// InvertAssignments と InvertBitwiseAssignments は、複合代入の演算子を置き換える。
 	InvertAssignments        Type = "INVERT_ASSIGNMENTS"
 	InvertBitwiseAssignments Type = "INVERT_BITWISE_ASSIGNMENTS"
+	// InvertLoopCtrl は、break と continue を入れ替える。
+	InvertLoopCtrl Type = "INVERT_LOOP_CTRL"
 )
 
 // AllTypes は既定で有効な変異演算子である。
@@ -39,7 +41,7 @@ var AllTypes = []Type{ArithmeticBase, ConditionalsBoundary, ConditionalsNegation
 
 // OptIn は、既定では無効で、-only や設定で選んだときだけ有効になる変異演算子である。
 // 実在のパッケージで生き残りの数と仕分けの内訳を測ってから、既定の集合に入れるかを決める。
-var OptIn = []Type{InvertBitwise, InvertAssignments, InvertBitwiseAssignments}
+var OptIn = []Type{InvertBitwise, InvertAssignments, InvertBitwiseAssignments, InvertLoopCtrl}
 
 // Known は、gamut が知っているすべての変異演算子である。-only、設定、無効化コメント、受理の名前はこれで確かめる。
 var Known = slices.Concat(AllTypes, OptIn)
@@ -114,6 +116,12 @@ var binaryRules = []rule{
 }
 
 var unaryRules = []rule{{InvertNegatives, token.SUB, token.ADD}}
+
+// branchRules は break と continue の文の規則である。goto と fallthrough は変異しない。
+var branchRules = []rule{
+	{InvertLoopCtrl, token.BREAK, token.CONTINUE},
+	{InvertLoopCtrl, token.CONTINUE, token.BREAK},
+}
 
 // assignRules は複合代入の文の規則である。単純な代入（=、:=）は変異しない。
 var assignRules = []rule{
@@ -212,6 +220,8 @@ func enumerateFile(pkg *load.Package, file *load.File, enabled []Type) []*Mutant
 			rules, opPos, op = incDecRules, x.TokPos, x.Tok
 		case *ast.AssignStmt:
 			rules, opPos, op = assignRules, x.TokPos, x.Tok
+		case *ast.BranchStmt:
+			rules, opPos, op = branchRules, x.TokPos, x.Tok
 		default:
 			return true
 		}

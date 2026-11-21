@@ -113,6 +113,11 @@ func TestEnumerate_Operators(t *testing.T) {
 			[]string{"INVERT_ASSIGNMENTS +=->-= false"}},
 		{"bitwise compound assignments", "package m\n\nfunc F(a uint) uint { a |= 1; a ^= 2; a &^= 4; a <<= 1; return a }\n",
 			[]string{"INVERT_BITWISE_ASSIGNMENTS |=->&= true", "INVERT_BITWISE_ASSIGNMENTS ^=->&= true", "INVERT_BITWISE_ASSIGNMENTS &^=->&= true", "INVERT_BITWISE_ASSIGNMENTS <<=->>>= true"}},
+		{"loop control", "package m\n\nfunc F(xs []int) int {\n\tn := 0\n\tfor _, x := range xs {\n\t\tif x < 0 {\n\t\t\tcontinue\n\t\t}\n\t\tif x > 9 {\n\t\t\tbreak\n\t\t}\n\t\tn++\n\t}\n\treturn n\n}\n",
+			[]string{"CONDITIONALS_BOUNDARY <-><= true", "CONDITIONALS_NEGATION <->>= true", "INVERT_LOOP_CTRL continue->break true",
+				"CONDITIONALS_BOUNDARY >->>= true", "CONDITIONALS_NEGATION >-><= true", "INVERT_LOOP_CTRL break->continue true", "INCREMENT_DECREMENT ++->-- true"}},
+		{"break in a switch outside a loop is not viable as continue", "package m\n\nfunc F(a int) int {\n\tswitch a {\n\tcase 1:\n\t\tbreak\n\t}\n\treturn a\n}\n",
+			[]string{"INVERT_LOOP_CTRL break->continue false"}},
 		{"plain assignments are not mutated", "package m\n\nfunc F(a int) int { b := a; b = 2; return b }\n",
 			nil},
 	}

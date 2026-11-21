@@ -98,6 +98,43 @@ func TestBuild_CompoundAssignmentsAreEmbedded(t *testing.T) {
 	}
 }
 
+func TestBuild_LoopControlBecomesTwoBranches(t *testing.T) {
+	dir := t.TempDir()
+	// G の for は break がないので終端する。continue を break にすると終端しなくなり、missing return になる。
+	src := "package m\n\nfunc F(xs []int) int {\n\tn := 0\nouter:\n\tfor _, x := range xs {\n\t\tif x < 0 {\n\t\t\tcontinue outer\n\t\t}\n\t\tn++\n\t}\n\treturn n\n}\n\nfunc G(x int) int {\n\tfor {\n\t\tif x > 0 {\n\t\t\tcontinue\n\t\t}\n\t\treturn x\n\t}\n}\n"
+	for name, s := range map[string]string{"go.mod": "module m\n\ngo 1.27.4\n", "m.go": src} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(s), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pkg, err := loadOne(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ms := mutant.Enumerate(pkg, []mutant.Type{mutant.InvertLoopCtrl})
+	mutant.CheckViability(pkg, ms)
+	res, err := schemata.Build(pkg, ms)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range res.Sites {
+		want := schemata.Wrapped
+		if s.Mutants[0].Scope == "G" {
+			want = schemata.Untouched
+		}
+		if s.Level != want {
+			t.Errorf("%s: level %d, want %d", s.Mutants[0].Scope, s.Level, want)
+		}
+	}
+	var out string
+	for _, b := range res.Files {
+		out = string(b)
+	}
+	if !strings.Contains(out, "{ break outer } else { continue outer }") {
+		t.Errorf("the labelled continue is not split into two branches:\n%s", out)
+	}
+}
+
 func TestBuild_PureOperandsNeedNoTypeName(t *testing.T) {
 	// *url.URL は、このファイルが net/url を import しないので書けない。被演算子を本文へ写せば型は要らない。
 	res := build(t, "package m\n\nimport \"net/http\"\n\nfunc F(a, b *http.Request) bool { return a.URL == b.URL }\n")

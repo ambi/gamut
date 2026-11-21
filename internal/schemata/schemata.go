@@ -58,7 +58,7 @@ type Site struct {
 
 func (s *Site) next() Level {
 	switch s.Node.(type) {
-	case *ast.IncDecStmt, *ast.AssignStmt:
+	case *ast.IncDecStmt, *ast.AssignStmt, *ast.BranchStmt:
 		// 文は値を返さないので gamutMark で包めない。
 		return Untouched
 	}
@@ -455,6 +455,17 @@ func (r *renderer) renderSite(buf *bytes.Buffer, f *load.File, sites []*Site, s 
 		m := s.Mutants[0]
 		fmt.Fprintf(buf, "func() { if gamutCovering { gamutHit(%d); gamutInfect(%d) }; if gamutActive == %d { %s%s } else { %s%s } }()",
 			s.Index, m.Index, m.Index, target, m.Replacement, target, n.Tok)
+
+	case *ast.BranchStmt:
+		// break と continue は同じ関数の中のループに作用するので、関数リテラルで包めない。文を 2 つの分岐にする。
+		// 分岐にしたことでループの終端性が変わり、missing return になれば、書き換え後の型検査で個別ビルドへ回る。
+		label := ""
+		if n.Label != nil {
+			label = " " + n.Label.Name
+		}
+		m := s.Mutants[0]
+		fmt.Fprintf(buf, "if gamutCovering { gamutHit(%d); gamutInfect(%d) }; if gamutActive == %d { %s%s } else { %s%s }",
+			s.Index, m.Index, m.Index, m.Replacement, label, n.Tok, label)
 
 	case *ast.AssignStmt:
 		// x op= v。v は 1 回だけ評価して引数で渡す。対象の式は本文に写すので、その中の箇所は個別ビルドへ回す。

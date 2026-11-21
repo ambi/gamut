@@ -31,6 +31,30 @@ func SetBit(f uint) uint {
 	return f
 }
 
+// FirstNegative の break を continue にすると最後の負の数を返すようになり、テストの入力 (1, -2, -3) で検出される。
+func FirstNegative(xs []int) int {
+	found := 0
+	for _, x := range xs {
+		if x < 0 {
+			found = x
+			break
+		}
+	}
+	return found
+}
+
+// CountPositive の continue を break にしても、テストの入力 (1, 2, 0) では 0 以下の数が最後にしかないので生き残る。
+func CountPositive(xs []int) int {
+	n := 0
+	for _, x := range xs {
+		if x <= 0 {
+			continue
+		}
+		n++
+	}
+	return n
+}
+
 // ClearHigh の f &^= 8 を f &= 8 にしても、テストの入力 0 では値が変わらないので生き残る。
 func ClearHigh(f uint) uint {
 	f &^= 8
