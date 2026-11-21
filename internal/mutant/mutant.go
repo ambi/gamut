@@ -469,6 +469,9 @@ func joinPath(path []int) string {
 	return strings.Join(parts, ".")
 }
 
+// DeclName は、最上位の宣言 n の名前を、変異体の識別子の宣言の部分と同じ形（関数は F、メソッドは T.M）で返す。
+func DeclName(n ast.Node) string { return declName(n) }
+
 func declName(n ast.Node) string {
 	switch d := n.(type) {
 	case *ast.FuncDecl:

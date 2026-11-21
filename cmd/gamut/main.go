@@ -55,15 +55,30 @@ func realMain(args []string, stdout, stderr io.Writer) int {
 	if len(args) > 0 && args[0] == "accept" {
 		return acceptMain(args[1:], stdout, stderr)
 	}
-	return judge(args, stdout, stderr, false)
+	if len(args) > 0 && args[0] == "select-tests" {
+		return judge(args[1:], stdout, stderr, modeSelectTests)
+	}
+	return judge(args, stdout, stderr, modeJudge)
 }
+
+// mode は、judge の動き方である。
+type mode int
+
+const (
+	// modeJudge は変異体を判定する。
+	modeJudge mode = iota
+	// modePrune は、判定の後に、要らなくなった受理を受理の記録から消す（gamut accept -prune）。
+	modePrune
+	// modeSelectTests は、何も実行せず、差分が壊しうるテストをキャッシュから選んで出す（gamut select-tests）。
+	modeSelectTests
+)
 
 // acceptMain は、gamut accept を実行する。
 // 識別子を渡せば、モジュールのルートの受理の記録に足す。-prune なら、残りの引数で判定し、要らなくなった受理を消す。
 func acceptMain(args []string, stdout, stderr io.Writer) int {
 	// -prune の後ろは判定のフラグとパターンなので、accept のフラグとして解釈しない。
 	if len(args) > 0 && (args[0] == "-prune" || args[0] == "--prune") {
-		return judge(args[1:], stdout, stderr, true)
+		return judge(args[1:], stdout, stderr, modePrune)
 	}
 	fs := flag.NewFlagSet("gamut accept", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -114,10 +129,15 @@ func acceptMain(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// judge は、パッケージの変異体を判定する。prune なら、判定の後に、要らなくなった受理を受理の記録から消す。
-func judge(args []string, stdout, stderr io.Writer, prune bool) int {
+// judge は、パッケージの変異体を判定する。動き方は m が決める。
+func judge(args []string, stdout, stderr io.Writer, m mode) int {
+	prune := m == modePrune
 	fs := flag.NewFlagSet("gamut", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	var selectFormat *string
+	if m == modeSelectTests {
+		selectFormat = fs.String("format", "run", "output format: run (a go test -run pattern per package) or json (groups, counts, and reasons)")
+	}
 	workers := fs.Int("workers", max(1, runtime.NumCPU()/2), "number of parallel test processes")
 	only := fs.String("only", "", "comma-separated mutator types to run, opt-in ones included (default: the default set; see -list-mutators)")
 	disable := fs.String("disable", "", "comma-separated mutator types to remove from the default set; cannot be combined with -only")
@@ -170,6 +190,19 @@ func judge(args []string, stdout, stderr io.Writer, prune bool) int {
 	if *listMutators {
 		writeMutators(stdout)
 		return exitOK
+	}
+	if m == modeSelectTests {
+		switch {
+		case *since == "":
+			fmt.Fprintln(stderr, "gamut: select-tests needs -since <ref>")
+			return exitError
+		case *noCache:
+			fmt.Fprintln(stderr, "gamut: select-tests reads the cache; it cannot be combined with -no-cache")
+			return exitError
+		case *selectFormat != "run" && *selectFormat != "json":
+			fmt.Fprintf(stderr, "gamut: unknown -format %q; use run or json\n", *selectFormat)
+			return exitError
+		}
 	}
 	if fs.NArg() < 1 {
 		fs.Usage()
@@ -259,7 +292,7 @@ func judge(args []string, stdout, stderr io.Writer, prune bool) int {
 		settings = append(settings, fmt.Sprintf("max-depth=%d", *maxDepth))
 	}
 	// 選択のない実行は、入力が前回と同じなら、読み込みもビルドもせずに前回の報告を返す。
-	quickable := !*noCache && !*dryRun && len(ids) == 0 && *since == "" && !prune
+	quickable := !*noCache && !*dryRun && len(ids) == 0 && *since == "" && m == modeJudge
 	var early *cache.Store
 	if !*noCache && earlyDir != "" {
 		if early, err = openStore(*cachePath, earlyDir, settings); err != nil {
@@ -439,6 +472,15 @@ func judge(args []string, stdout, stderr io.Writer, prune bool) int {
 			fmt.Fprintln(stderr, "gamut:", err)
 			return 1
 		}
+	}
+	if m == modeSelectTests {
+		// キャッシュは読むだけで、消えた変異体の記録も捨てない。書き換えた宣言の前の判定を、宣言の名前で引くためである。
+		store, err := openStore(*cachePath, pkgs[0].ModuleDir, settings)
+		if err != nil {
+			fmt.Fprintln(stderr, "gamut:", err)
+			return exitError
+		}
+		return selectTestsMain(stdout, stderr, *selectFormat, targets, changes, store)
 	}
 	if !*noCache {
 		if early != nil && earlyDir != pkgs[0].ModuleDir {

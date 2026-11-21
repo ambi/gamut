@@ -171,6 +171,15 @@ func Open(path, env string) (*Store, error) {
 	return s, nil
 }
 
+// Each は、すべての判定の記録を f に渡す。順は決まらない。渡した記録を書き換えてはならない。f の中で Store を使ってはならない。
+func (s *Store) Each(f func(id string, e *Entry)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id, e := range s.entries {
+		f(id, e)
+	}
+}
+
 // Get は id の記録を返す。なければ nil を返す。返した記録を書き換えてはならない。
 func (s *Store) Get(id string) *Entry {
 	s.mu.Lock()

@@ -201,6 +201,14 @@ open .gamut/report/mutation.html
 ./bin/gamut -reporter agent -since main ./path/to/pkg
 ```
 
+`gamut select-tests` は、前回の判定から、差分が壊しうるテストを何も実行せずに選ぶ。
+変わった宣言の変異体を検出したテスト、そこに到達したテスト、変わったテストの順に並べ、パッケージごとに `go test -run` の正規表現を出す（`-format json` で理由も出す）。
+判定と同じフラグで、前に gamut を実行しておく。
+
+```console
+./bin/gamut select-tests -since main ./path/to/pkg
+```
+
 `-reporter simplify` は、テストが実行するのに、消しても失敗するテストがないコード（文の削除と条件の定数化の生き残り）を、関数ごとに並べる。
 消すか、それを必要とするテストを足すかの見直しの候補である。
 
