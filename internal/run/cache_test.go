@@ -20,7 +20,7 @@ func TestAll_RecordsVerdictsFinishedBeforeCancel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mutants := mutant.Enumerate(pkg, mutant.AllTypes)
+	mutants := mutant.Enumerate(pkg, classic)
 	mutant.CheckViability(pkg, mutants)
 	sources, err := load.SourceDeps([]*load.Package{pkg})
 	if err != nil {

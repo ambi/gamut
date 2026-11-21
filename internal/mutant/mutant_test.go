@@ -47,7 +47,8 @@ func TestKnown_NewOperatorsAreOffByDefault(t *testing.T) {
 	if slices.Contains(mutant.AllTypes, mutant.InvertBitwise) {
 		t.Errorf("INVERT_BITWISE is enabled by default")
 	}
-	pkg, err := loadOne(writeModule(t, "package m\n\nfunc F(a, b int) int { return a | b }\n"))
+	// 関数の外に置き、既定の RETURN_ZERO と STATEMENT_REMOVE の箇所を作らない。
+	pkg, err := loadOne(writeModule(t, "package m\n\nvar a, b = 1, 2\n\nvar X = a | b\n"))
 	if err != nil {
 		t.Fatal(err)
 	}

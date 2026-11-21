@@ -22,7 +22,7 @@ func TestAll_BatchedCoverageMatchesOneProcessPerTest(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			mutants := mutant.Enumerate(pkg, mutant.AllTypes)
+			mutants := mutant.Enumerate(pkg, classic)
 			mutant.CheckViability(pkg, mutants)
 			opts := run.Options{Workers: 2, TimeoutFactor: 5, TimeoutMin: time.Second}
 			var log bytes.Buffer
@@ -74,7 +74,7 @@ func TestAll_ServedVerdictsMatchOneProcessPerMutant(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			mutants := mutant.Enumerate(pkg, mutant.AllTypes)
+			mutants := mutant.Enumerate(pkg, classic)
 			mutant.CheckViability(pkg, mutants)
 			opts := run.Options{Workers: 2, TimeoutFactor: 5, TimeoutMin: time.Second}
 			served, err := run.Run(context.Background(), pkg, mutants, opts)

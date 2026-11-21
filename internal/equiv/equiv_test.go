@@ -52,7 +52,7 @@ func Name(x int) string { return strconv.Itoa(x + 2) }
 		"Name ARITHMETIC_BASE":  false,
 	}
 	seen := 0
-	for _, m := range mutant.Enumerate(pkg, mutant.AllTypes) {
+	for _, m := range mutant.Enumerate(pkg, classic) {
 		w, ok := want[m.Scope+" "+string(m.Type)]
 		if !ok {
 			continue

@@ -15,7 +15,7 @@ import (
 func TestIgnore_ReportsCommentedMutantsApart(t *testing.T) {
 	reportPath := filepath.Join(t.TempDir(), "report.json")
 	var stderr strings.Builder
-	if code := realMain([]string{"-no-cache", "-workers", "2", "-o", reportPath, "../../testdata/ignore"}, io.Discard, &stderr); code != 0 {
+	if code := realMain([]string{"-no-cache", "-only", classicOnly, "-workers", "2", "-o", reportPath, "../../testdata/ignore"}, io.Discard, &stderr); code != 0 {
 		t.Fatalf("exit %d:\n%s", code, stderr.String())
 	}
 	data, err := os.ReadFile(reportPath)
@@ -75,7 +75,7 @@ func TestIgnore_ReportsCommentedMutantsApart(t *testing.T) {
 	}
 
 	// 止めた変異体を -mutant で指定したら、コメントの位置を示して終了コード 1 にする。
-	_, out, code := gamut(t, "-no-cache", "-mutant", rep.IgnoredList[0].ID, "../../testdata/ignore")
+	_, out, code := gamut(t, "-no-cache", "-only", classicOnly, "-mutant", rep.IgnoredList[0].ID, "../../testdata/ignore")
 	if code != 1 || !strings.Contains(out, "//gamut:ignore comment covers") {
 		t.Errorf("-mutant on an ignored mutant: exit %d, want 1 with the comment position:\n%s", code, out)
 	}

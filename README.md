@@ -75,8 +75,9 @@ go build -o bin/gamut ./cmd/gamut
 }
 ```
 
-変異演算子は `ARITHMETIC_BASE`、`CONDITIONALS_BOUNDARY`、`CONDITIONALS_NEGATION`、`INCREMENT_DECREMENT`、`INVERT_NEGATIVES` で、Gremlins と gomutants と同じ名前である。
-次は既定で無効で、`-only` で選んだときだけ使う。
+既定の変異演算子は `ARITHMETIC_BASE`、`CONDITIONALS_BOUNDARY`、`CONDITIONALS_NEGATION`、`INCREMENT_DECREMENT`、`INVERT_NEGATIVES`、`RETURN_ZERO`（戻り値を持つ関数の本体を、ゼロ値を返す文にする。`error` は `nil`）、`STATEMENT_REMOVE`（値を返さない呼び出しの文を実行しない。ログ出力を除く）である。
+名前は、Gremlins と gomutants に同じ演算子があればそれに合わせる。
+次は既定で無効で、`-only` で選んだときだけ使う。既定の集合の決め方は [設計](docs/design.md#既定の集合) が定める。
 
 | 名前 | 変異 |
 | --- | --- |
@@ -87,9 +88,8 @@ go build -o bin/gamut ./cmd/gamut
 | `INVERT_LOGICAL` | `&&`↔`\|\|`（短絡評価を保つ） |
 | `REMOVE_LOGICAL_NOT` | `!x`→`x` |
 | `BOOLEAN_LITERAL` | `true`↔`false` |
-| `RETURN_ZERO` | 戻り値を持つ関数の本体を、ゼロ値（`error` は `nil`）を返す文にする |
-| `STATEMENT_REMOVE` | 値を返さない呼び出しの文を実行しない（ログ出力を除く） |
 | `CONDITIONS_CONSTANT` | `if` の条件を `true`／`false`、`for` の条件を `false`、`&&` の被演算子を `true`、`\|\|` の被演算子を `false` に |
+
 テストプロセスは、gamut の 1 回の実行の間、変異体の間で使い回す。
 変異体がプロセスの状態を汚したと分かれば、そのプロセスを捨て、新しいプロセスで判定し直す。
 判定の前に、変異がテストに届くことを 1 件のテストで確かめる（forced fail）。
@@ -209,7 +209,7 @@ Pull Request では基準のコミットからの差分だけを判定し、生�
 ## 測定
 
 2026-11-21、Apple Silicon（8 コア）の macOS 27.2、Go 1.27.4。
-対象は idmagic の `backend/oauth2/internal/token/usecases`（変異体 562〜563 体、テスト 135 件）で、同じ 5 種類の変異演算子で実行した。
+対象は idmagic の `backend/oauth2/internal/token/usecases`（変異体 562〜563 体、テスト 135 件）で、gomutants と比べられるよう、両者に共通する 5 種類の変異演算子（`-only` で、`RETURN_ZERO` と `STATEMENT_REMOVE` を既定に入れる前の既定の集合）で実行した。
 macOS は、新しい実行ファイルを初めて起動するときに検査を行い、このテストバイナリでは約 0.35 秒かかる（[設計](docs/design.md#macos-の初回起動の検査)）。
 ソースを変えた後の時間はこの検査を含む。素の `go test` も同じ検査を受ける。
 

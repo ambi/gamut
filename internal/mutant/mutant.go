@@ -78,12 +78,13 @@ func (c *ConditionSite) Pos() token.Pos { return c.X.Pos() }
 // End は条件の式の終わりである。
 func (c *ConditionSite) End() token.Pos { return c.X.End() }
 
-// AllTypes は既定で有効な変異演算子である。
-var AllTypes = []Type{ArithmeticBase, ConditionalsBoundary, ConditionalsNegation, IncrementDecrement, InvertNegatives}
+// AllTypes は既定で有効な変異演算子である。RETURN_ZERO と STATEMENT_REMOVE は、実在のパッケージでの測定で、
+// 生き残りがテストの穴（結果を確かめていない関数、確かめていない副作用）を示し、時間の増加が 1〜2 割だったので既定に入れた。
+var AllTypes = []Type{ArithmeticBase, ConditionalsBoundary, ConditionalsNegation, IncrementDecrement, InvertNegatives, ReturnZero, StatementRemove}
 
 // OptIn は、既定では無効で、-only や設定で選んだときだけ有効になる変異演算子である。
 // 実在のパッケージで生き残りの数と仕分けの内訳を測ってから、既定の集合に入れるかを決める。
-var OptIn = []Type{InvertBitwise, InvertAssignments, InvertBitwiseAssignments, InvertLoopCtrl, InvertLogical, RemoveLogicalNot, BooleanLiteral, ConditionsConstant, StatementRemove, ReturnZero}
+var OptIn = []Type{InvertBitwise, InvertAssignments, InvertBitwiseAssignments, InvertLoopCtrl, InvertLogical, RemoveLogicalNot, BooleanLiteral, ConditionsConstant}
 
 // Known は、gamut が知っているすべての変異演算子である。-only、設定、無効化コメント、受理の名前はこれで確かめる。
 var Known = slices.Concat(AllTypes, OptIn)

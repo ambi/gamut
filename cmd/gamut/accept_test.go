@@ -31,9 +31,9 @@ func runAccepting(t *testing.T, args ...string) (acceptReport, string) {
 	t.Helper()
 	reportPath := filepath.Join(t.TempDir(), "report.json")
 	var stdout, stderr strings.Builder
-	full := append([]string{"-workers", "2", "-o", reportPath}, args...)
+	full := append([]string{"-only", classicOnly, "-workers", "2", "-o", reportPath}, args...)
 	if len(args) > 0 && args[0] == "accept" {
-		full = append([]string{"accept", "-prune", "-workers", "2", "-o", reportPath}, args[1:]...)
+		full = append([]string{"accept", "-prune", "-only", classicOnly, "-workers", "2", "-o", reportPath}, args[1:]...)
 	}
 	if code := realMain(full, &stdout, &stderr); code != 0 {
 		t.Fatalf("gamut %v exited %d:\n%s", full, code, stderr.String())

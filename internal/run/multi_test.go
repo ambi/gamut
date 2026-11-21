@@ -41,7 +41,7 @@ func TestAll_JudgesEveryPackageOfPatternLikeSeparateRuns(t *testing.T) {
 	}
 	targets := make([]run.Target, len(pkgs))
 	for i, pkg := range pkgs {
-		mutants := mutant.Enumerate(pkg, mutant.AllTypes)
+		mutants := mutant.Enumerate(pkg, classic)
 		mutant.CheckViability(pkg, mutants)
 		targets[i] = run.Target{Pkg: pkg, Mutants: mutants}
 	}

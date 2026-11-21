@@ -39,7 +39,7 @@ var _ = 1
 	if err != nil {
 		t.Fatal(err)
 	}
-	ms := mutant.Enumerate(pkg, mutant.AllTypes)
+	ms := mutant.Enumerate(pkg, classic)
 	scopes := func(set map[string]bool) []string {
 		var out []string
 		for _, m := range ms {

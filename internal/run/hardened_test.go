@@ -22,7 +22,7 @@ func loadAndRun(t *testing.T, dir string, tags []string, opts run.Options) ([]*r
 	if err != nil {
 		t.Fatal(err)
 	}
-	mutants := mutant.Enumerate(pkg, mutant.AllTypes)
+	mutants := mutant.Enumerate(pkg, classic)
 	mutant.CheckViability(pkg, mutants)
 	if opts.Workers == 0 {
 		opts.Workers = 2
@@ -48,7 +48,7 @@ func TestLoad_BuildTagsSelectFiles(t *testing.T) {
 			t.Fatal(err)
 		}
 		out := map[string]bool{}
-		for _, m := range mutant.Enumerate(pkg, mutant.AllTypes) {
+		for _, m := range mutant.Enumerate(pkg, classic) {
 			out[m.Scope] = true
 		}
 		return out

@@ -131,11 +131,12 @@ func TestQuality_BaselineAndSelfCheckFailures(t *testing.T) {
 		t.Errorf("failing baseline: exit %d, want %d:\n%s", code, exitBaseline, stderr)
 	}
 	// 対象のコードが panic を握りつぶすと、forced fail がテストに届かない。
+	// RETURN_ZERO の箇所は defer より前の関数の入口にあり、そこでの panic は握りつぶされないので、演算子を絞る。
 	selfCheck := t.TempDir()
 	write(t, selfCheck, "go.mod", "module swallow\n\ngo 1.27.4\n")
 	write(t, selfCheck, "swallow.go", "package swallow\n\nfunc Sum(a, b int) (s int) {\n\tdefer func() { _ = recover() }()\n\treturn a + b\n}\n")
 	write(t, selfCheck, "swallow_test.go", "package swallow\n\nimport \"testing\"\n\nfunc TestSum(t *testing.T) { _ = Sum(1, 2) }\n")
-	if code, stderr := exit(t, "-no-cache", selfCheck); code != exitSelfCheck {
+	if code, stderr := exit(t, "-no-cache", "-only", classicOnly, selfCheck); code != exitSelfCheck {
 		t.Errorf("swallowed forced fail: exit %d, want %d:\n%s", code, exitSelfCheck, stderr)
 	}
 }

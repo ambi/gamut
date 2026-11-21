@@ -24,7 +24,7 @@ func build(t *testing.T, src string) *schemata.Result {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ms := mutant.Enumerate(pkg, mutant.AllTypes)
+	ms := mutant.Enumerate(pkg, classic)
 	mutant.CheckViability(pkg, ms)
 	res, err := schemata.Build(pkg, ms)
 	if err != nil {

@@ -142,7 +142,7 @@ func take(t *testing.T, dir string) snapshot {
 	}
 	s := snapshot{decl: map[string]string{}, deps: map[string]string{}, reach: map[string]string{}, tests: map[string]string{},
 		init: keys.Init(), keys: keys}
-	for _, m := range mutant.Enumerate(pkgs[0], mutant.AllTypes) {
+	for _, m := range mutant.Enumerate(pkgs[0], classic) {
 		s.decl[m.Scope] = keys.Decl(m)
 		s.deps[m.Scope] = keys.Deps(m)
 		s.reach[m.Scope] = keys.Reach(m)

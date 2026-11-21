@@ -1,5 +1,5 @@
 ---
-status: in_progress
+status: done
 stage: 3
 depends_on: [010]
 created_at: 2026-11-20
@@ -53,9 +53,18 @@ gamut の 5 種類は演算子の置き換えに限られる。
 
 - 演算子ごとの単体テストと端から端までのテスト。
 
-## 経過
+## 要約
 
-演算子のまとまりごとにコミットする。
-
-- 済み：既定で無効な演算子の仕組み（`mutant.OptIn` と、名前を確かめる `mutant.Known`）、`INVERT_BITWISE`、`INVERT_ASSIGNMENTS`、`INVERT_BITWISE_ASSIGNMENTS`、`INVERT_LOOP_CTRL`、`INVERT_LOGICAL`、`REMOVE_LOGICAL_NOT`、`BOOLEAN_LITERAL`、`CONDITIONS_CONSTANT`、`STATEMENT_REMOVE`、`RETURN_ZERO`。変異体の表現を「区間と置き換え後の文字列」に広げた（`OriginalText` と `ReplacementText`。演算子の変異の識別子は変わらない）。固定モジュール `testdata/operators` に、演算子ごとの `KILLED` と `LIVED` の例を足していく。
-- 残り：idmagic での測定と既定の集合の決定。
+- 10 の演算子を足した。名前は着手時に gomutants 0.7.3 の `-list-mutators` で確かめ、同じ演算子があればそれに合わせた（`INVERT_ASSIGNMENTS`、`INVERT_BITWISE_ASSIGNMENTS`、`INVERT_LOGICAL`、`INVERT_LOOP_CTRL`、`REMOVE_LOGICAL_NOT`、`STATEMENT_REMOVE`、`RETURN_ZERO`）。
+- 変異体の表現を「区間と置き換え後の文字列」（`OriginalText`、`ReplacementText`）に広げた。識別子は置き換え後の文字列から作るので、演算子の変異の識別子と既存のキャッシュは変わらない。文や型を含む変異（`STATEMENT_REMOVE`、`RETURN_ZERO`）は、識別子に固定の文字列を使う。
+- 埋め込み方：
+  - 短絡評価の `&&` と `||` は、右辺を関数リテラルの中に 1 回だけ書いて必要なときだけ呼ぶ。
+  - `break` と `continue` は、文を 2 つの分岐にする。
+  - 複合代入は、右辺を 1 回だけ評価して演算子を切り替える。
+  - 条件と関数の本体は、独自の箇所のノード（`ConditionSite`、`BodySite`）で包む。
+  - 書き換え後の型検査で落ちる箇所（ループの終端性が変わる、`const` の中など）は、個別ビルドに回る。
+- 対象範囲からの変更：`RETURN_ZERO` の `error` は `errors.New("gamut")` ではなく `nil` にした。`nil` でない値には import が要り、字句の置き換えだけで構築可能性を判定できなくなるためである。`for` の条件の `CONDITIONS_CONSTANT` は、無限ループになる `true` を作らず `false` だけにした。
+- 演算子ごとに、変異する例としない例の表の単体テストと、`testdata/operators` の `KILLED` と `LIVED` の例の端から端までのテストを置いた。
+- idmagic の `usecases` で測り、`RETURN_ZERO` と `STATEMENT_REMOVE` を既定に入れた（時間は 1〜2 割増し、増えた生き残り 16 体はどれもテストの穴）。ほかは既定で無効のままにした。演算子ごとの内訳と理由は設計の「既定の集合」に書いた。
+- 既定の集合を変えたので、判定の仕組みを確かめる既存のテストは、前の 5 演算子（`classic`）に固定した。
+- 途中で、パッケージ変数をためるテストが、使い回すテストプロセスの中で誤った `LIVED` を生むことが分かり、038 として起票した。

@@ -29,7 +29,7 @@ func TestRun_ClassifiesEveryVerdictOnFixture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mutants := mutant.Enumerate(pkg, mutant.AllTypes)
+	mutants := mutant.Enumerate(pkg, classic)
 	mutant.CheckViability(pkg, mutants)
 	var log bytes.Buffer
 	results, err := run.Run(context.Background(), pkg, mutants, run.Options{
@@ -106,7 +106,7 @@ func TestRun_StopsWhenSelectionDoesNotReachTests(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mutants := mutant.Enumerate(pkg, mutant.AllTypes)
+	mutants := mutant.Enumerate(pkg, classic)
 	mutant.CheckViability(pkg, mutants)
 	opts := run.IgnoreSelection(run.Options{Workers: 2, TimeoutFactor: 5, TimeoutMin: time.Second})
 	results, err := run.Run(context.Background(), pkg, mutants, opts)
@@ -137,7 +137,7 @@ func TestRun_WarnsWhenNoTestReachesAnySite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mutants := mutant.Enumerate(pkg, mutant.AllTypes)
+	mutants := mutant.Enumerate(pkg, classic)
 	mutant.CheckViability(pkg, mutants)
 	var warn bytes.Buffer
 	results, err := run.Run(context.Background(), pkg, mutants, run.Options{

@@ -31,7 +31,7 @@ func judge(t *testing.T, dir string, store *cache.Store) judgement {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mutants := mutant.Enumerate(pkg, mutant.AllTypes)
+	mutants := mutant.Enumerate(pkg, classic)
 	mutant.CheckViability(pkg, mutants)
 	target := run.Target{Pkg: pkg, Mutants: mutants}
 	if store != nil {

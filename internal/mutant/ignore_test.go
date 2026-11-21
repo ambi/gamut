@@ -54,7 +54,7 @@ func TestIgnores_AppliesEachCommentForm(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			all := mutant.Enumerate(pkg, mutant.AllTypes)
+			all := mutant.Enumerate(pkg, classic)
 			total := len(all)
 			kept, ignored, warnings, err := mutant.Ignores(pkg, all)
 			if err != nil {
@@ -89,7 +89,7 @@ func TestIgnores_RejectsUnknownMutatorTypes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, _, err := mutant.Ignores(pkg, mutant.Enumerate(pkg, mutant.AllTypes)); err == nil || !strings.Contains(err.Error(), "ARITHMETIC") {
+	if _, _, _, err := mutant.Ignores(pkg, mutant.Enumerate(pkg, classic)); err == nil || !strings.Contains(err.Error(), "ARITHMETIC") {
 		t.Errorf("Ignores() error = %v, want one naming ARITHMETIC", err)
 	}
 }
