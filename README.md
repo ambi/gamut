@@ -47,6 +47,7 @@ go build -o bin/gamut ./cmd/gamut
 | `-test-flags` | なし | テストバイナリのすべての実行に渡すフラグ（空白区切り、例：`"-short"`） |
 | `-cache` | `.gamut/cache.json` | 判定と被覆の記録のキャッシュの読み書き先（作業ディレクトリからの相対） |
 | `-no-cache` | false | キャッシュを読みも書きもしない |
+| `-checkpoint-interval` | 10s | 実行中もこの間隔でキャッシュを書き出す。強制終了で失う判定を、この間隔の分までにする（0 で止める） |
 | `-since` | なし | この Git の参照と `HEAD` の merge-base から作業ツリーまでの差分に交わる変異体だけを判定し、残りを `PENDING` にする |
 | `-scope` | `node` | `-since` で差分と交わりを取る区間。`node` は変異箇所の式、`decl` は囲む宣言 |
 | `-include-test-changes` | false | `-since` で、差分が変えたテストが到達する、差分の外の生き残りも再検査する |

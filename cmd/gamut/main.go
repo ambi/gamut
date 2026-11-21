@@ -131,6 +131,7 @@ func judge(args []string, stdout, stderr io.Writer, prune bool) int {
 	testFlags := fs.String("test-flags", "", "space-separated flags for every test binary run, such as \"-short\"")
 	cachePath := fs.String("cache", filepath.Join(".gamut", "cache.json"), "read and write reusable verdicts at this path")
 	noCache := fs.Bool("no-cache", false, "neither reuse nor record verdicts and coverage")
+	checkpoint := fs.Duration("checkpoint-interval", 10*time.Second, "also write the cache this often during the run, so that a hard kill loses at most this much progress (0 disables)")
 	since := fs.String("since", "", "judge only mutants intersecting the diff from the merge-base of this git ref to the working tree; report the rest as PENDING")
 	scope := fs.String("scope", "node", "with -since, intersect the diff with each mutant's expression (node) or its enclosing declaration (decl)")
 	includeTestChanges := fs.Bool("include-test-changes", false, "with -since, also recheck survivors outside the diff that changed tests reach")
@@ -423,6 +424,11 @@ func judge(args []string, stdout, stderr io.Writer, prune bool) int {
 				fmt.Fprintln(stderr, "gamut: warning: saving the cache:", err)
 			}
 		}()
+		// SIGKILL（メモリ不足、CI の時間切れ）では上の書き込みが走らないので、一定の間隔でも書き出す。
+		// defer は後に登録したものが先に走るので、最後の書き込みの前に書き出しを止める。
+		if *checkpoint > 0 {
+			defer startCheckpoint(store, *checkpoint, stderr)()
+		}
 	}
 
 	vstart := time.Now()
@@ -526,6 +532,30 @@ func checkThresholds(t report.Thresholds) string {
 		return "-threshold-low must not exceed -threshold-high"
 	}
 	return ""
+}
+
+// startCheckpoint は、interval ごとにキャッシュを書き出し始める。返す関数は書き出しを止め、書き出し中なら終わるまで待つ。
+func startCheckpoint(store *cache.Store, interval time.Duration, stderr io.Writer) func() {
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				if err := store.Save(); err != nil {
+					fmt.Fprintln(stderr, "gamut: warning: writing a cache checkpoint:", err)
+				}
+			}
+		}
+	})
+	return func() {
+		close(done)
+		wg.Wait()
+	}
 }
 
 // openStore は、moduleDir の環境の下でキャッシュを開く。
