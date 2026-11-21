@@ -107,6 +107,9 @@ type Report struct {
 	MutantsTimedOut   int         `json:"mutants_timed_out"`
 	// MutantsPending は、選択の外で判定しなかった変異体の数である。MutantsTotal と効率の計算には含めない。gomutants にはないフィールドである。
 	MutantsPending int `json:"mutants_pending,omitempty"`
+	// MutantsArid は、テストが観測しないことの多いコード（ログ出力など、arid）の中なので作らなかった変異体の数である。
+	// gomutants にはないフィールドである。
+	MutantsArid int `json:"mutants_arid,omitempty"`
 	// MutantsIgnored は、無効化コメントで止めた変異体の数である。MutantsTotal と効率の計算には含めない。gomutants にはないフィールドである。
 	MutantsIgnored int     `json:"mutants_ignored,omitempty"`
 	ElapsedTime    float64 `json:"elapsed_time"`
@@ -399,6 +402,9 @@ func WriteSummary(w io.Writer, r *Report) {
 	}
 	if r.MutantsIgnored > 0 {
 		reused += fmt.Sprintf(", %d ignored by comments", r.MutantsIgnored)
+	}
+	if r.MutantsArid > 0 {
+		reused += fmt.Sprintf(", %d skipped in arid code", r.MutantsArid)
 	}
 	fmt.Fprintf(w, "\nkilled %d, lived %d, not covered %d, not viable %d, timed out %d (efficacy %.2f%%) in %.1fs%s\n",
 		r.MutantsKilled, r.MutantsLived, r.MutantsNotCovered, r.MutantsNotViable, r.MutantsTimedOut, r.TestEfficacy, r.ElapsedTime, reused)

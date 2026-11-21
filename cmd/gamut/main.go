@@ -147,6 +147,10 @@ func judge(args []string, stdout, stderr io.Writer, prune bool) int {
 	fs.Var(&reporterKinds, "reporter", "report format: text (the summary on stdout), gomutants (JSON), json (mutation-testing-elements), html, or agent (one JSON document on stdout for coding agents) (repeatable; default text, plus gomutants with -o)")
 	reportDir := fs.String("report-dir", filepath.Join(".gamut", "report"), "write the json, html, and gomutants (without -o) reports to this directory")
 	annotations := fs.String("annotations", "", "also print the survivors to fix as CI annotations on stdout (values: github)")
+	var aridCalls, aridPackages multiFlag
+	fs.Var(&aridCalls, "arid-call", "do not mutate the arguments of, or remove, calls matching this glob on <package>.<Func> or <package>.<Type>.<Method> (repeatable)")
+	fs.Var(&aridPackages, "arid-package", "do not mutate the arguments of, or remove, calls into this package or its subpackages (repeatable)")
+	noArid := fs.Bool("no-arid", false, "mutate logging, metrics, and other code that tests rarely observe (arid code), which is skipped by default")
 	var excludes multiFlag
 	fs.Var(&excludes, "exclude-files", "do not mutate files whose module-relative path matches this regular expression (repeatable)")
 	configPath := fs.String("config", "", "read settings from this JSON file instead of "+config.FileName+" at the module root; flags override it")
@@ -255,6 +259,7 @@ func judge(args []string, stdout, stderr io.Writer, prune bool) int {
 		quickKey = cache.QuickKey(slices.Concat(abs, settings, []string{
 			fmt.Sprintf("integration=%t", *integration), fmt.Sprintf("detect-equivalent=%t", *detectEquivalent),
 			"exclude=" + strings.Join(excludes, "\x00"), "critical=" + strings.Join(critical, "\x00"),
+			fmt.Sprintf("arid=%t,%s,%s", *noArid, strings.Join(aridCalls, "\x00"), strings.Join(aridPackages, "\x00")),
 			fmt.Sprintf("thresholds=%g,%g,%g", thresholds.High, thresholds.Low, thresholds.Break),
 		})...)
 		if early != nil {
@@ -295,8 +300,16 @@ func judge(args []string, stdout, stderr io.Writer, prune bool) int {
 	}
 	var ignored []mutant.Ignored
 	criticalIDs := map[string]bool{}
+	aridRules := &mutant.Arid{Off: *noArid, Calls: aridCalls, Packages: aridPackages}
+	aridSkipped := 0
 	for i, pkg := range pkgs {
-		mutants := mutant.Without(mutant.Enumerate(pkg, types), func(m *mutant.Mutant) bool { return excluded(excludeFiles, m.File.Rel) })
+		enumerated, aridN, err := mutant.EnumerateWith(pkg, types, aridRules)
+		if err != nil {
+			fmt.Fprintln(stderr, "gamut:", err)
+			return exitError
+		}
+		aridSkipped += aridN
+		mutants := mutant.Without(enumerated, func(m *mutant.Mutant) bool { return excluded(excludeFiles, m.File.Rel) })
 		mutants, skipped, warnings, err := mutant.Ignores(pkg, mutants)
 		if err != nil {
 			fmt.Fprintln(stderr, "gamut:", err)
@@ -449,6 +462,7 @@ func judge(args []string, stdout, stderr io.Writer, prune bool) int {
 	}
 	rep := report.Build(pkgs[0].ModulePath, label, paths, results, time.Since(start))
 	rep.AddIgnored(ignored)
+	rep.MutantsArid = aridSkipped
 	rep.MarkCritical(criticalIDs)
 	rep.Thresholds = &thresholds
 	// 識別子で指定したときは、ほかの変異体を報告しないので、受理の「なくなった」は判定できない。

@@ -213,17 +213,27 @@ var incDecRules = []rule{
 	{IncrementDecrement, token.DEC, token.INC},
 }
 
-// aridPackages は、呼び出しの引数を変異しないパッケージである。ログ出力はテストが観測しないことが多い。
-var aridPackages = map[string]bool{"log": true, "log/slog": true}
-
-// Enumerate は、パッケージの対象ファイルから、enabled に含まれる変異演算子の変異体を列挙する。
+// Enumerate は、パッケージの対象ファイルから、enabled に含まれる変異演算子の変異体を、既定の arid の規則で列挙する。
 func Enumerate(pkg *load.Package, enabled []Type) []*Mutant {
+	out, _, _ := EnumerateWith(pkg, enabled, &Arid{})
+	return out
+}
+
+// EnumerateWith は、arid の規則 arid で変異体を列挙する。2 つ目の戻り値は、arid のコードの中なので作らなかった変異体の数である。
+func EnumerateWith(pkg *load.Package, enabled []Type, arid *Arid) ([]*Mutant, int, error) {
+	if err := arid.Validate(); err != nil {
+		return nil, 0, err
+	}
+	checker := &aridChecker{info: pkg.Info, rule: arid}
 	var out []*Mutant
+	skipped := 0
 	for _, file := range pkg.Files {
-		out = append(out, enumerateFile(pkg, file, enabled)...)
+		ms, n := enumerateFile(pkg, file, enabled, checker)
+		out = append(out, ms...)
+		skipped += n
 	}
 	number(out)
-	return out
+	return out, skipped, nil
 }
 
 // Without は、ms から drop が真を返す変異体を除き、残りの番号を 1 から振り直す。
@@ -240,23 +250,33 @@ func number(ms []*Mutant) {
 	}
 }
 
-func enumerateFile(pkg *load.Package, file *load.File, enabled []Type) []*Mutant {
+// enumerateFile は、ファイルの変異体を列挙する。arid のコードの中の変異体は作らずに数える。
+func enumerateFile(pkg *load.Package, file *load.File, enabled []Type, arid *aridChecker) ([]*Mutant, int) {
 	var out []*Mutant
+	skipped := 0
 	type frame struct {
 		node     ast.Node
 		children int
+		arid     bool
 	}
 	var stack []frame
 	var path []int
 	scope := ""
 	aridDepth := 0
+	emit := func(m *Mutant) {
+		if aridDepth > 0 {
+			skipped++
+			return
+		}
+		out = append(out, m)
+	}
 
 	ast.Inspect(file.AST, func(n ast.Node) bool {
 		if n == nil {
 			top := stack[len(stack)-1]
 			stack = stack[:len(stack)-1]
 			path = path[:len(path)-1]
-			if isArid(pkg.Info, top.node) {
+			if top.arid {
 				aridDepth--
 			}
 			return true
@@ -266,22 +286,21 @@ func enumerateFile(pkg *load.Package, file *load.File, enabled []Type) []*Mutant
 			index = stack[len(stack)-1].children
 			stack[len(stack)-1].children++
 		}
-		stack = append(stack, frame{node: n})
+		isArid := arid.node(n)
+		stack = append(stack, frame{node: n, arid: isArid})
 		path = append(path, index)
 		if len(stack) == 2 {
 			// ファイル直下の宣言が識別子の単位になる。
 			scope = declName(n)
 		}
-		if isArid(pkg.Info, n) {
+		if isArid {
 			aridDepth++
-		}
-		if aridDepth > 0 {
-			return true
 		}
 		var rules []rule
 		var opPos token.Pos
 		var op token.Token
-		add := func(typ Type, at token.Pos, from, to token.Token, fromText, toText string) {
+		// add は、変異箇所 n の変異体を作る。識別子に入れる置き換え後の部分は idTo で、空なら toText である。
+		add := func(typ Type, at token.Pos, from, to token.Token, fromText, toText, idTo string) {
 			// 識別子の経路は宣言の中での相対位置にし、前に宣言が増えても変わらないようにする。
 			rel := path[2:]
 			pos := pkg.Fset.Position(at)
@@ -291,8 +310,11 @@ func enumerateFile(pkg *load.Package, file *load.File, enabled []Type) []*Mutant
 				Line: pos.Line, Column: pos.Column, Site: n, Scope: scope,
 				SiteKey: siteKey(file.Rel, scope, rel), path: slices.Clone(rel),
 			}
-			m.setID(file.Rel, toText)
-			out = append(out, m)
+			if idTo == "" {
+				idTo = toText
+			}
+			m.setID(file.Rel, idTo)
+			emit(m)
 		}
 		// 条件の式なら、その中の変異体より先に、条件を定数にする変異体を並べる。
 		if expr, ok := n.(ast.Expr); ok && len(path) > 2 && slices.Contains(enabled, ConditionsConstant) && pkg.Info.Types[expr].Value == nil {
@@ -310,7 +332,7 @@ func enumerateFile(pkg *load.Package, file *load.File, enabled []Type) []*Mutant
 						SiteKey: siteKey(file.Rel, scope, append(slices.Clone(rel), -1)), path: slices.Clone(rel),
 					}
 					m.setID(file.Rel, c)
-					out = append(out, m)
+					emit(m)
 				}
 			}
 		}
@@ -337,23 +359,21 @@ func enumerateFile(pkg *load.Package, file *load.File, enabled []Type) []*Mutant
 					SiteKey: siteKey(file.Rel, scope, []int{-2}),
 				}
 				m.setID(file.Rel, zeroID)
-				out = append(out, m)
+				emit(m)
 			}
 			return true
 		case *ast.ExprStmt:
 			// 値を返さない呼び出しの文を if false { ... } にする。引数でだけ使う変数や import が使われなくならないよう、文は消さずに残す。
-			// ログ出力の呼び出しは、テストが観測しないことが多いので消さない（arid）。
-			if call, ok := x.X.(*ast.CallExpr); ok && slices.Contains(enabled, StatementRemove) && returnsNothing(pkg.Info, call) && !isArid(pkg.Info, call) {
+			// ログ出力の呼び出しの文は arid の規則で除かれ、数えられる。
+			if call, ok := x.X.(*ast.CallExpr); ok && slices.Contains(enabled, StatementRemove) && returnsNothing(pkg.Info, call) {
 				text := string(file.Src[pkg.Fset.Position(x.Pos()).Offset:pkg.Fset.Position(x.End()).Offset])
-				before := len(out)
-				add(StatementRemove, x.Pos(), token.ILLEGAL, token.ILLEGAL, text, "if false { "+text+" }")
-				out[before].setID(file.Rel, removedID)
+				add(StatementRemove, x.Pos(), token.ILLEGAL, token.ILLEGAL, text, "if false { "+text+" }", removedID)
 			}
 			return true
 		case *ast.Ident:
 			// 宇宙スコープの true と false だけを変異する。同じ名前の局所変数は変異しない。
 			if slices.Contains(enabled, BooleanLiteral) && isUniverseBool(pkg.Info, x) {
-				add(BooleanLiteral, x.Pos(), token.ILLEGAL, token.ILLEGAL, x.Name, map[string]string{"true": "false", "false": "true"}[x.Name])
+				add(BooleanLiteral, x.Pos(), token.ILLEGAL, token.ILLEGAL, x.Name, map[string]string{"true": "false", "false": "true"}[x.Name], "")
 			}
 			return true
 		default:
@@ -361,12 +381,12 @@ func enumerateFile(pkg *load.Package, file *load.File, enabled []Type) []*Mutant
 		}
 		for _, r := range rules {
 			if r.from == op && slices.Contains(enabled, r.typ) {
-				add(r.typ, opPos, r.from, r.to, r.from.String(), r.replacement())
+				add(r.typ, opPos, r.from, r.to, r.from.String(), r.replacement(), "")
 			}
 		}
 		return true
 	})
-	return out
+	return out, skipped
 }
 
 // conditionConstants は、parent の子 expr が条件なら、CONDITIONS_CONSTANT で置き換える定数を返す。
@@ -483,24 +503,6 @@ func recvName(e ast.Expr) string {
 		return t.Name
 	}
 	return "_"
-}
-
-func isArid(info *types.Info, n ast.Node) bool {
-	call, ok := n.(*ast.CallExpr)
-	if !ok {
-		return false
-	}
-	var ident *ast.Ident
-	switch f := call.Fun.(type) {
-	case *ast.SelectorExpr:
-		ident = f.Sel
-	case *ast.Ident:
-		ident = f
-	default:
-		return false
-	}
-	obj := info.Uses[ident]
-	return obj != nil && obj.Pkg() != nil && aridPackages[obj.Pkg().Path()]
 }
 
 // Apply は、変異体の区間を置き換えたファイルの内容を返す。

@@ -33,7 +33,8 @@ func TestLoad_ReadsEveryItem(t *testing.T) {
 		"test_flags": ["-short"],
 		"critical": ["auth/**", "billing/fee.go"],
 		"thresholds": {"high": 90, "low": 70, "break": 50.5},
-		"fail_on_survived": true
+		"fail_on_survived": true,
+		"arid": {"calls": ["example.com/audit.*"], "packages": ["example.com/metrics"]}
 	}`)
 	c, err := config.Load(path)
 	if err != nil {
@@ -52,6 +53,8 @@ func TestLoad_ReadsEveryItem(t *testing.T) {
 		"threshold-low":    {"70"},
 		"threshold-break":  {"50.5"},
 		"fail-on-survived": {"true"},
+		"arid-call":        {"example.com/audit.*"},
+		"arid-package":     {"example.com/metrics"},
 	}
 	if got := c.Flags(); !reflect.DeepEqual(got, want) {
 		t.Errorf("Flags() = %v, want %v", got, want)
@@ -82,6 +85,8 @@ func TestLoad_RejectsInvalidFiles(t *testing.T) {
 		{"threshold out of range", `{"thresholds": {"break": 120}}`, "thresholds.break"},
 		{"low above high", `{"thresholds": {"high": 60, "low": 80}}`, "thresholds.low"},
 		{"unknown threshold", `{"thresholds": {"medium": 1}}`, "medium"},
+		{"bad arid pattern", `{"arid": {"calls": ["a/[x"]}}`, "arid.calls"},
+		{"unknown arid item", `{"arid": {"funcs": []}}`, "funcs"},
 		{"trailing data", `{"workers": 1} {}`, "after"},
 		{"not JSON", `workers: 1`, "invalid"},
 	}

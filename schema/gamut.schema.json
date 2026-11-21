@@ -68,6 +68,23 @@
     "fail_on_survived": {
       "description": "Fail with exit code 2 when any unaccepted mutant survives. The same as -fail-on-survived.",
       "type": "boolean"
+    },
+    "arid": {
+      "description": "Calls whose arguments are not mutated and whose statements are not removed, added to the built-in rules (logging, metrics, tracing, printing to stderr).",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "calls": {
+          "description": "Globs on <package>.<Func> or <package>.<Type>.<Method>; * also matches / and dots. The same as -arid-call.",
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "packages": {
+          "description": "Import paths whose calls are arid, subpackages included. The same as -arid-package.",
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
     }
   }
 }

@@ -28,6 +28,9 @@ go build -o bin/gamut ./cmd/gamut
 | --- | --- | --- |
 | `-workers` | CPU の数の半分（1 以上） | 並列に動かすテストプロセスの数 |
 | `-only` | すべて | 有効にする変異演算子（カンマ区切り） |
+| `-arid-call` | なし | この glob（`<パッケージ>.<名前>`、`<パッケージ>.<型>.<名前>`）に当たる呼び出しを、ログ出力と同じく変異しない。繰り返し指定できる |
+| `-arid-package` | なし | このパッケージとその下のパッケージの呼び出しを変異しない。繰り返し指定できる |
+| `-no-arid` | false | ログ出力など、テストが観測しないことの多いコード（arid）も変異する |
 | `-exclude-files` | なし | モジュール相対のパスがこの正規表現に当たるファイルを変異しない。繰り返し指定できる |
 | `-config` | モジュールのルートの `gamut.json` | 設定ファイルのパス |
 | `-o` | なし | gomutants 互換の JSON の報告の書き出し先 |
@@ -78,6 +81,7 @@ go build -o bin/gamut ./cmd/gamut
 既定の変異演算子は `ARITHMETIC_BASE`、`CONDITIONALS_BOUNDARY`、`CONDITIONALS_NEGATION`、`INCREMENT_DECREMENT`、`INVERT_NEGATIVES`、`RETURN_ZERO`（戻り値を持つ関数の本体を、ゼロ値を返す文にする。`error` は `nil`）、`STATEMENT_REMOVE`（値を返さない呼び出しの文を実行しない。ログ出力を除く）である。
 名前は、Gremlins と gomutants に同じ演算子があればそれに合わせる。
 次は既定で無効で、`-only` で選んだときだけ使う。既定の集合の決め方は [設計](docs/design.md#既定の集合) が定める。
+ログ出力、メトリクス、エラーメッセージ、`String()` の本体など、テストが観測しないことの多いコードは変異しない。規則は [設計](docs/design.md#arid-のコード) が定め、設定の `arid` か `-arid-call`、`-arid-package` で足せる。
 
 | 名前 | 変異 |
 | --- | --- |

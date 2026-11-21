@@ -45,6 +45,16 @@ type Config struct {
 	Thresholds *Thresholds `json:"thresholds,omitempty"`
 	// FailOnSurvived は -fail-on-survived と同じ意味である。
 	FailOnSurvived *bool `json:"fail_on_survived,omitempty"`
+	// Arid は、変異しない呼び出しを足す。-arid-call と -arid-package と同じ意味である。
+	Arid *Arid `json:"arid,omitempty"`
+}
+
+// Arid は、arid の規則に足す呼び出しとパッケージである。
+type Arid struct {
+	// Calls は関数とメソッドの glob（"<パッケージ>.<名前>"、"<パッケージ>.<型>.<名前>"）である。
+	Calls []string `json:"calls,omitempty"`
+	// Packages は import パスである。その下のパッケージも含む。
+	Packages []string `json:"packages,omitempty"`
 }
 
 // Thresholds は点数の閾値（百分率）である。
@@ -126,6 +136,11 @@ func (c *Config) check() error {
 			return errors.New("thresholds.low: must not exceed thresholds.high")
 		}
 	}
+	if a := c.Arid; a != nil {
+		if err := (&mutant.Arid{Calls: a.Calls}).Validate(); err != nil {
+			return fmt.Errorf("arid.calls: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -169,6 +184,14 @@ func (c *Config) Flags() map[string][]string {
 	}
 	if c.FailOnSurvived != nil {
 		out["fail-on-survived"] = []string{strconv.FormatBool(*c.FailOnSurvived)}
+	}
+	if a := c.Arid; a != nil {
+		if len(a.Calls) > 0 {
+			out["arid-call"] = slices.Clone(a.Calls)
+		}
+		if len(a.Packages) > 0 {
+			out["arid-package"] = slices.Clone(a.Packages)
+		}
 	}
 	return out
 }
