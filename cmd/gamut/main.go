@@ -225,6 +225,7 @@ func judge(args []string, stdout, stderr io.Writer, m mode) int {
 	fs.Var(&reporterKinds, "reporter", "report format: text (the summary on stdout), gomutants (JSON), json (mutation-testing-elements), html, agent (one JSON document on stdout for coding agents), or simplify (surviving removals by function, as candidates for unneeded code) (repeatable; default text, plus gomutants with -o)")
 	reportDir := fs.String("report-dir", filepath.Join(".gamut", "report"), "write the json, html, and gomutants (without -o) reports to this directory")
 	annotations := fs.String("annotations", "", "also print the survivors to fix as CI annotations on stdout (values: github)")
+	watch := fs.Bool("watch", false, "keep running: judge the diff from HEAD (with -include-test-changes) again each time .go files in the module are saved; failures do not stop the watch")
 	shardSpec := fs.String("shard", "", "judge only shard k/n of the mutants, split by a hash of their IDs; combine the shards' reports and caches with gamut merge")
 	timeBudget := fs.Duration("time-budget", 0, "stop starting mutants once the run has taken this long and report the rest as PENDING; the next run with the same cache continues (0: no budget)")
 	killMatrix := fs.Bool("kill-matrix", false, "run every infected test of each mutant in a fresh process instead of stopping at the first failure, record all tests that detect it, and report tests that detect nothing, subsumed tests, and duplicate tests")
@@ -246,6 +247,26 @@ func judge(args []string, stdout, stderr io.Writer, m mode) int {
 	if *listMutators {
 		writeMutators(stdout)
 		return exitOK
+	}
+	if *watch {
+		if m != modeJudge {
+			fmt.Fprintln(stderr, "gamut: -watch is for judging only")
+			return exitError
+		}
+		var inner []string
+		for _, a := range args {
+			if a != "-watch" && a != "--watch" && !strings.HasPrefix(a, "-watch=") && !strings.HasPrefix(a, "--watch=") {
+				inner = append(inner, a)
+			}
+		}
+		// 既定の範囲は、HEAD からの差分と、変わったテストが到達する生き残りである。
+		if *since == "" {
+			inner = append([]string{"-since", "HEAD"}, inner...)
+			if !*includeTestChanges {
+				inner = append([]string{"-include-test-changes"}, inner...)
+			}
+		}
+		return watchLoop(inner, fs.Args(), stdout, stderr)
 	}
 	if m == modeSelectTests {
 		switch {
