@@ -23,6 +23,7 @@ func TestOperators_OptInVerdicts(t *testing.T) {
 		{"REMOVE_LOGICAL_NOT", map[string]string{"Closed": "KILLED", "Muted": "LIVED"}},
 		{"BOOLEAN_LITERAL", map[string]string{"Enabled": "KILLED", "Verbose": "LIVED"}},
 		{"CONDITIONS_CONSTANT", map[string]string{"Positive": "KILLED", "SumAll": "LIVED"}},
+		{"STATEMENT_REMOVE", map[string]string{"Record": "KILLED", "Notify": "LIVED"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.only, func(t *testing.T) {

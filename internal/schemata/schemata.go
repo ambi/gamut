@@ -58,7 +58,7 @@ type Site struct {
 
 func (s *Site) next() Level {
 	switch s.Node.(type) {
-	case *ast.IncDecStmt, *ast.AssignStmt, *ast.BranchStmt:
+	case *ast.IncDecStmt, *ast.AssignStmt, *ast.BranchStmt, *ast.ExprStmt:
 		// 文は値を返さないので gamutMark で包めない。
 		return Untouched
 	}
@@ -472,6 +472,14 @@ func (r *renderer) renderSite(buf *bytes.Buffer, f *load.File, sites []*Site, s 
 		m := s.Mutants[0]
 		fmt.Fprintf(buf, "func() { if gamutCovering { gamutHit(%d); gamutInfect(%d) }; if gamutActive == %d { %s%s } else { %s%s } }()",
 			s.Index, m.Index, m.Index, target, m.Replacement, target, n.Tok)
+
+	case *ast.ExprStmt:
+		// STATEMENT_REMOVE：有効な変異体なら呼び出しの文を実行しない。引数の中の変異箇所は、実行する側の中で書き換える。
+		// 文を 2 つの文にするので、for の後処理のような単純な文しか書けない所では、書き換え後の型検査で個別ビルドに回る。
+		m := s.Mutants[0]
+		fmt.Fprintf(buf, "if gamutCovering { gamutHit(%d); gamutInfect(%d) }; if gamutActive != %d { ", s.Index, m.Index, m.Index)
+		r.renderRange(buf, f, without(sites, s), s.start, s.end)
+		buf.WriteString(" }")
 
 	case *mutant.ConditionSite:
 		// CONDITIONS_CONSTANT：有効な変異体なら条件を評価せずに定数を返し、そうでなければ条件を評価する。

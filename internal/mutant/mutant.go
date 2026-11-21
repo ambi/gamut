@@ -42,7 +42,13 @@ const (
 	BooleanLiteral Type = "BOOLEAN_LITERAL"
 	// ConditionsConstant は、if と for の条件と、&& と || の被演算子を定数にする。
 	ConditionsConstant Type = "CONDITIONS_CONSTANT"
+	// StatementRemove は、値を返さない呼び出しの文を実行しないようにする。
+	StatementRemove Type = "STATEMENT_REMOVE"
 )
+
+// removedID は、STATEMENT_REMOVE の識別子の置き換え後の部分である。置き換え後の文字列は文の中身を含むので、
+// 引数を書き換えても識別子が変わらないよう、識別子には固定の文字列を使う。
+const removedID = "<removed>"
 
 // ConditionSite は、CONDITIONS_CONSTANT の変異箇所である。条件の式 X を包み、X そのものの変異箇所とは別の箇所にする。
 // 範囲は X と同じで、schemata は包む側を先に書き換え、X の中の箇所をその中で書き換える。
@@ -61,7 +67,7 @@ var AllTypes = []Type{ArithmeticBase, ConditionalsBoundary, ConditionalsNegation
 
 // OptIn は、既定では無効で、-only や設定で選んだときだけ有効になる変異演算子である。
 // 実在のパッケージで生き残りの数と仕分けの内訳を測ってから、既定の集合に入れるかを決める。
-var OptIn = []Type{InvertBitwise, InvertAssignments, InvertBitwiseAssignments, InvertLoopCtrl, InvertLogical, RemoveLogicalNot, BooleanLiteral, ConditionsConstant}
+var OptIn = []Type{InvertBitwise, InvertAssignments, InvertBitwiseAssignments, InvertLoopCtrl, InvertLogical, RemoveLogicalNot, BooleanLiteral, ConditionsConstant, StatementRemove}
 
 // Known は、gamut が知っているすべての変異演算子である。-only、設定、無効化コメント、受理の名前はこれで確かめる。
 var Known = slices.Concat(AllTypes, OptIn)
@@ -294,6 +300,16 @@ func enumerateFile(pkg *load.Package, file *load.File, enabled []Type) []*Mutant
 			rules, opPos, op = assignRules, x.TokPos, x.Tok
 		case *ast.BranchStmt:
 			rules, opPos, op = branchRules, x.TokPos, x.Tok
+		case *ast.ExprStmt:
+			// 値を返さない呼び出しの文を if false { ... } にする。引数でだけ使う変数や import が使われなくならないよう、文は消さずに残す。
+			// ログ出力の呼び出しは、テストが観測しないことが多いので消さない（arid）。
+			if call, ok := x.X.(*ast.CallExpr); ok && slices.Contains(enabled, StatementRemove) && returnsNothing(pkg.Info, call) && !isArid(pkg.Info, call) {
+				text := string(file.Src[pkg.Fset.Position(x.Pos()).Offset:pkg.Fset.Position(x.End()).Offset])
+				before := len(out)
+				add(StatementRemove, x.Pos(), token.ILLEGAL, token.ILLEGAL, text, "if false { "+text+" }")
+				out[before].ID = identity(file.Rel, scope, path[2:], StatementRemove, removedID)
+			}
+			return true
 		case *ast.Ident:
 			// 宇宙スコープの true と false だけを変異する。同じ名前の局所変数は変異しない。
 			if slices.Contains(enabled, BooleanLiteral) && isUniverseBool(pkg.Info, x) {
@@ -339,6 +355,16 @@ func conditionConstants(parent ast.Node, expr ast.Expr) []string {
 		}
 	}
 	return nil
+}
+
+// returnsNothing は、call が値を返さない関数の呼び出しかを返す。型の変換や組み込み関数の呼び出しは含めない（panic は含める）。
+func returnsNothing(info *types.Info, call *ast.CallExpr) bool {
+	tv, ok := info.Types[call]
+	if !ok || tv.IsType() {
+		return false
+	}
+	tuple, ok := tv.Type.(*types.Tuple)
+	return ok && tuple.Len() == 0
 }
 
 // isUniverseBool は、id が宇宙スコープの定数 true か false を指すかを返す。

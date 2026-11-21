@@ -66,6 +66,20 @@ func SumAll(xs []int) int {
 	return s
 }
 
+var recorded []string
+
+func record(s string) { recorded = append(recorded, s) }
+
+// Record の record の呼び出しを消すと、テストが記録を確かめるので検出される。
+func Record(s string) { record(s) }
+
+var notified int
+
+func notify() { notified++ }
+
+// Notify の notify の呼び出しを消しても、テストが通知を確かめないので生き残る。
+func Notify() { notify() }
+
 // FirstNegative の break を continue にすると最後の負の数を返すようになり、テストの入力 (1, -2, -3) で検出される。
 func FirstNegative(xs []int) int {
 	found := 0

@@ -233,6 +233,39 @@ func TestBuild_ConditionsWrapTheirInnerSites(t *testing.T) {
 	}
 }
 
+func TestBuild_RemovedStatementsKeepTheirArguments(t *testing.T) {
+	dir := t.TempDir()
+	src := "package m\n\nvar total int\n\nfunc add(n int) { total += n }\n\nfunc F(n int) {\n\tadd(n * 2)\n}\n"
+	for name, s := range map[string]string{"go.mod": "module m\n\ngo 1.27.4\n", "m.go": src} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(s), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pkg, err := loadOne(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ms := mutant.Enumerate(pkg, []mutant.Type{mutant.StatementRemove, mutant.ArithmeticBase})
+	mutant.CheckViability(pkg, ms)
+	res, err := schemata.Build(pkg, ms)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range res.Sites {
+		if s.Level != schemata.Wrapped {
+			t.Errorf("%s site: level %d, want Wrapped", s.Mutants[0].Type, s.Level)
+		}
+	}
+	var out string
+	for _, b := range res.Files {
+		out = string(b)
+	}
+	// 呼び出しは有効な変異体でなければ実行し、引数の中の変異箇所はその中で書き換える。
+	if !strings.Contains(out, "if gamutActive != 1 { add(func(") {
+		t.Errorf("the removed statement does not wrap its arguments' site:\n%s", out)
+	}
+}
+
 func TestBuild_PureOperandsNeedNoTypeName(t *testing.T) {
 	// *url.URL は、このファイルが net/url を import しないので書けない。被演算子を本文へ写せば型は要らない。
 	res := build(t, "package m\n\nimport \"net/http\"\n\nfunc F(a, b *http.Request) bool { return a.URL == b.URL }\n")

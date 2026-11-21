@@ -136,6 +136,10 @@ func TestEnumerate_Operators(t *testing.T) {
 				"CONDITIONS_CONSTANT a->true true", "CONDITIONS_CONSTANT b->true true", "CONDITIONS_CONSTANT c->false true"}},
 		{"constant operands are not mutated", "package m\n\nfunc F(a bool) bool { return true && a }\n",
 			[]string{"INVERT_LOGICAL &&->|| true", "BOOLEAN_LITERAL true->false true", "CONDITIONS_CONSTANT a->true true"}},
+		{"calls without results are removed", "package m\n\nfunc g(n int) {}\n\nfunc h() int { return 1 }\n\nfunc F(n int) {\n\tg(n + 1)\n\t_ = h()\n\th()\n}\n",
+			[]string{"STATEMENT_REMOVE g(n + 1)->if false { g(n + 1) } true", "ARITHMETIC_BASE +->- true"}},
+		{"log calls are arid", "package m\n\nimport \"log\"\n\nfunc F(n int) { log.Println(n) }\n",
+			nil},
 		{"plain assignments are not mutated", "package m\n\nfunc F(a int) int { b := a; b = 2; return b }\n",
 			nil},
 	}

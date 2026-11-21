@@ -57,5 +57,5 @@ gamut の 5 種類は演算子の置き換えに限られる。
 
 演算子のまとまりごとにコミットする。
 
-- 済み：既定で無効な演算子の仕組み（`mutant.OptIn` と、名前を確かめる `mutant.Known`）、`INVERT_BITWISE`、`INVERT_ASSIGNMENTS`、`INVERT_BITWISE_ASSIGNMENTS`、`INVERT_LOOP_CTRL`、`INVERT_LOGICAL`、`REMOVE_LOGICAL_NOT`、`BOOLEAN_LITERAL`、`CONDITIONS_CONSTANT`。変異体の表現を「区間と置き換え後の文字列」に広げた（`OriginalText` と `ReplacementText`。演算子の変異の識別子は変わらない）。固定モジュール `testdata/operators` に、演算子ごとの `KILLED` と `LIVED` の例を足していく。
-- 残り：`STATEMENT_REMOVE`、`RETURN_ZERO`、idmagic での測定と既定の集合の決定。
+- 済み：既定で無効な演算子の仕組み（`mutant.OptIn` と、名前を確かめる `mutant.Known`）、`INVERT_BITWISE`、`INVERT_ASSIGNMENTS`、`INVERT_BITWISE_ASSIGNMENTS`、`INVERT_LOOP_CTRL`、`INVERT_LOGICAL`、`REMOVE_LOGICAL_NOT`、`BOOLEAN_LITERAL`、`CONDITIONS_CONSTANT`、`STATEMENT_REMOVE`。変異体の表現を「区間と置き換え後の文字列」に広げた（`OriginalText` と `ReplacementText`。演算子の変異の識別子は変わらない）。固定モジュール `testdata/operators` に、演算子ごとの `KILLED` と `LIVED` の例を足していく。
+- 残り：`RETURN_ZERO`、idmagic での測定と既定の集合の決定。

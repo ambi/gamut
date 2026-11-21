@@ -27,6 +27,16 @@ func TestConditions(t *testing.T) {
 	}
 }
 
+func TestStatements(t *testing.T) {
+	// パッケージ変数を戻してから使う。戻さないと、2 回目の実行（go test -count=2 や、gamut の使い回すテストプロセス）で結果が変わる。
+	recorded = nil
+	Record("a")
+	if len(recorded) != 1 {
+		t.Fatal("wrong")
+	}
+	Notify()
+}
+
 func TestNot(t *testing.T) {
 	if !Closed(false) {
 		t.Fatal("wrong")
