@@ -424,6 +424,24 @@ gamut は加えて `reason`、`tests`（到達したテスト）、`killed_by`�
 最上位の `package` は、1 パッケージならその import パス、複数なら引数に指定したパターンを空白でつないだものにし、判定したパッケージの import パスを `packages` に並べる。
 gomutants の報告を読む既存の検査は、そのまま gamut の報告を読める。
 
+### 報告の形式
+
+`-reporter` で形式を選ぶ（繰り返し可）。既定は `text` で、`-o` を指定すれば `gomutants` も書く。
+
+| 形式 | 書き出し先 | 中身 |
+| --- | --- | --- |
+| `text` | 標準出力 | 生き残りを理由ごとに並べた要約 |
+| `gomutants` | `-o`（なければ `-report-dir` の `gomutants.json`） | 上の gomutants 互換の JSON |
+| `json` | `-report-dir`（既定 `.gamut/report`）の `mutation.json` | mutation-testing-elements のスキーマ 2 |
+| `html` | `-report-dir` の `mutation.html` | `json` の報告を埋め込んだ 1 つの HTML |
+
+- mutation-testing-elements の形式は、ミューテーションテストの報告で広く使われ、これを読む閲覧画面やダッシュボードをそのまま使える。ファイルの中身を含むので、モジュールのディレクトリから読む。
+- 状態は、`KILLED`→Killed、`LIVED`→Survived（理由を `statusReason`）、`NOT COVERED`→NoCoverage、`NOT VIABLE`→CompileError、`TIMED OUT`→Timeout、`PENDING`→Pending に対応させる。数えない変異体（無効化コメント、受理、`EQUIVALENT`）は Ignored にし、理由を `statusReason` に入れる。
+- 到達したテストを `coveredBy`、検出したテストを `killedBy` に入れる。gamut はテストのファイルを記録しないので、`testFiles` は名前のないファイル 1 つに、テストの名前を識別子として並べる。
+- 閾値は、スキーマが整数を求めるので、`-threshold-high` と `-threshold-low` を丸めて入れる。
+- HTML は、閲覧画面のスクリプト（`mutation-testing-elements`）を同梱せず、報告のスキーマと同じ版（3.9.0）を固定して CDN から読み込む。同梱すると、版の更新と使用許諾の管理が要る。報告の JSON は `encoding/json` が `<` と `>` をエスケープするので、埋め込んだソースの `</script>` で script 要素が閉じない。
+- スキーマへの適合は、`internal/report/testdata` に固定したスキーマ（mutation-testing-report-schema 3.9.0、Apache License 2.0、同じディレクトリに使用許諾）で検証する。検証は、このスキーマが使うキーワードだけを扱う、テストの中の小さな検証器で行う。外部モジュールを足さず、ネットワークにも依存しない。
+
 ### 終了コード
 
 | コード | 意味 |
@@ -477,7 +495,7 @@ gomutants の報告を読む既存の検査は、そのまま gamut の報告を
 | 無効化コメント | 済み |
 | 重要領域（全変異体の検出を要求） | 済み |
 | 閾値と終了コード | 済み |
-| mutation-testing-elements の JSON と HTML | 段階 3 |
+| mutation-testing-elements の JSON と HTML | 済み |
 | GitHub の注釈 | 段階 3 |
 | エージェント向けの報告と skills | 段階 3 |
 | 変異演算子の拡張（戻り値、呼び出し文の削除、論理演算子、条件の真偽） | 段階 3 |

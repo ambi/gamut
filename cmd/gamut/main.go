@@ -142,6 +142,9 @@ func judge(args []string, stdout, stderr io.Writer, prune bool) int {
 	thresholdLow := fs.Float64("threshold-low", 60, "label a mutation score at or above this percentage low, and below it danger")
 	thresholdBreak := fs.Float64("threshold-break", 0, "exit with code 2 when the mutation score is below this percentage (0 disables)")
 	failOnSurvived := fs.Bool("fail-on-survived", false, "exit with code 2 when any unaccepted mutant survives")
+	var reporterKinds multiFlag
+	fs.Var(&reporterKinds, "reporter", "report format: text (the summary on stdout), gomutants (JSON), json (mutation-testing-elements), or html (repeatable; default text, plus gomutants with -o)")
+	reportDir := fs.String("report-dir", filepath.Join(".gamut", "report"), "write the json, html, and gomutants (without -o) reports to this directory")
 	var excludes multiFlag
 	fs.Var(&excludes, "exclude-files", "do not mutate files whose module-relative path matches this regular expression (repeatable)")
 	configPath := fs.String("config", "", "read settings from this JSON file instead of "+config.FileName+" at the module root; flags override it")
@@ -185,6 +188,11 @@ func judge(args []string, stdout, stderr io.Writer, prune bool) int {
 		return exitError
 	}
 	flags, err := run.ParseTestFlags(*testFlags)
+	if err != nil {
+		fmt.Fprintln(stderr, "gamut:", err)
+		return exitError
+	}
+	outputs, err := newReporters(reporterKinds, *output, *reportDir)
 	if err != nil {
 		fmt.Fprintln(stderr, "gamut:", err)
 		return exitError
@@ -248,8 +256,13 @@ func judge(args []string, stdout, stderr io.Writer, prune bool) int {
 			fmt.Sprintf("thresholds=%g,%g,%g", thresholds.High, thresholds.Low, thresholds.Break),
 		})...)
 		if early != nil {
-			if code, ok := replay(early, quickKey, *output, stdout, stderr, logw, start, *failOnSurvived); ok {
-				return code
+			if rep, ok := replay(early, quickKey, start); ok {
+				fmt.Fprintln(logw, "cache: no input changed since the last run; reporting its verdicts")
+				if err := outputs.deliver(rep, earlyDir, stdout); err != nil {
+					fmt.Fprintln(stderr, "gamut:", err)
+					return exitError
+				}
+				return qualityCode(rep, *failOnSurvived, stderr)
 			}
 		}
 	}
@@ -455,13 +468,10 @@ func judge(args []string, stdout, stderr io.Writer, prune bool) int {
 		fmt.Fprintf(logw, "accept: removed %d stale acceptances from %s\n", len(stale), accepted.Path())
 		rep.StaleAccepted = nil
 	}
-	if *output != "" {
-		if err := writeReport(*output, rep); err != nil {
-			fmt.Fprintln(stderr, "gamut:", err)
-			return 1
-		}
+	if err := outputs.deliver(rep, pkgs[0].ModuleDir, stdout); err != nil {
+		fmt.Fprintln(stderr, "gamut:", err)
+		return exitError
 	}
-	report.WriteSummary(stdout, rep)
 	if quick != nil && opts.Cache != nil {
 		var buf strings.Builder
 		if err := rep.WriteJSON(&buf); err == nil {
@@ -504,31 +514,92 @@ func openStore(path, moduleDir string, settings []string) (*cache.Store, error) 
 	return cache.Open(path, env)
 }
 
-// replay は、key の前回の実行から入力が変わっていなければ、その報告を書いて終了コードと真を返す。
-func replay(store *cache.Store, key, output string, stdout, stderr, logw io.Writer, start time.Time, failOnSurvived bool) (int, bool) {
+// replay は、key の前回の実行から入力が変わっていなければ、その報告を返す。2 つ目の戻り値は、報告を返せたかである。
+func replay(store *cache.Store, key string, start time.Time) (*report.Report, bool) {
 	q := store.Quick(key)
 	if q == nil {
-		return 0, false
+		return nil, false
 	}
 	fp, err := cache.Fingerprint(q.Files, q.Dirs, q.Trees)
 	if err != nil || fp != q.Fingerprint {
-		return 0, false
+		return nil, false
 	}
 	var rep report.Report
 	if err := json.Unmarshal(q.Report, &rep); err != nil {
-		return 0, false
+		return nil, false
 	}
 	rep.MarkReused()
 	rep.ElapsedTime = time.Since(start).Seconds()
-	fmt.Fprintln(logw, "cache: no input changed since the last run; reporting its verdicts")
-	if output != "" {
-		if err := writeReport(output, &rep); err != nil {
-			fmt.Fprintln(stderr, "gamut:", err)
-			return 1, true
+	return &rep, true
+}
+
+// 報告の形式である。
+const (
+	reporterText      = "text"
+	reporterGomutants = "gomutants"
+	reporterJSON      = "json"
+	reporterHTML      = "html"
+)
+
+// reporters は、報告の出し方である。
+type reporters struct {
+	kinds []string
+	// output は -o の書き出し先で、gomutants の形式で書く。dir は -report-dir で、ほかのファイルの形式の書き出し先である。
+	output, dir string
+}
+
+// newReporters は、-reporter の指定から報告の出し方を作る。指定がなければ text にする。
+// -o を指定すれば、-reporter によらず gomutants の形式をそこへ書く。
+func newReporters(kinds []string, output, dir string) (*reporters, error) {
+	if len(kinds) == 0 {
+		kinds = []string{reporterText}
+	}
+	for _, k := range kinds {
+		if !slices.Contains([]string{reporterText, reporterGomutants, reporterJSON, reporterHTML}, k) {
+			return nil, fmt.Errorf("unknown -reporter %q; use text, gomutants, json, or html", k)
 		}
 	}
-	report.WriteSummary(stdout, &rep)
-	return qualityCode(&rep, failOnSurvived, stderr), true
+	if output != "" && !slices.Contains(kinds, reporterGomutants) {
+		kinds = append(kinds, reporterGomutants)
+	}
+	return &reporters{kinds: kinds, output: output, dir: dir}, nil
+}
+
+// deliver は、報告を指定の形式で書く。mutation-testing-elements の形式（json、html）は、ファイルの中身を moduleDir から読む。
+func (o *reporters) deliver(rep *report.Report, moduleDir string, stdout io.Writer) error {
+	var mte *report.MTEReport
+	for _, k := range o.kinds {
+		var err error
+		switch k {
+		case reporterText:
+			report.WriteSummary(stdout, rep)
+		case reporterGomutants:
+			path := o.output
+			if path == "" {
+				path = filepath.Join(o.dir, "gomutants.json")
+			}
+			err = writeReport(path, rep)
+		case reporterJSON, reporterHTML:
+			if mte == nil {
+				if mte, err = rep.MTE(moduleDir); err != nil {
+					return err
+				}
+			}
+			if k == reporterJSON {
+				err = writeFile(filepath.Join(o.dir, "mutation.json"), func(w io.Writer) error {
+					enc := json.NewEncoder(w)
+					enc.SetIndent("", "  ")
+					return enc.Encode(mte)
+				})
+			} else {
+				err = writeFile(filepath.Join(o.dir, "mutation.html"), func(w io.Writer) error { return report.WriteHTML(w, mte) })
+			}
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // quickInputs は、前回の報告をそのまま返してよいかを次の実行で確かめるための、入力のファイルとディレクトリを集め、今の状態の指紋を取る。
@@ -857,13 +928,21 @@ func parseTypes(s string) ([]mutant.Type, error) {
 	return out, nil
 }
 
-func writeReport(path string, rep *report.Report) (err error) {
+func writeReport(path string, rep *report.Report) error {
+	return writeFile(path, rep.WriteJSON)
+}
+
+// writeFile は、path に write の書いた内容を書く。ディレクトリがなければ作る。
+func writeFile(path string, write func(io.Writer) error) (err error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		return err
+	}
 	f, err := os.Create(path)
 	if err != nil {
 		return err
 	}
 	defer func() { err = errors.Join(err, f.Close()) }()
-	return rep.WriteJSON(f)
+	return write(f)
 }
 
 // prefetch は、読み込みと並行して始める git diff と依存の一覧である。

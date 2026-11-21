@@ -30,7 +30,9 @@ go build -o bin/gamut ./cmd/gamut
 | `-only` | すべて | 有効にする変異演算子（カンマ区切り） |
 | `-exclude-files` | なし | モジュール相対のパスがこの正規表現に当たるファイルを変異しない。繰り返し指定できる |
 | `-config` | モジュールのルートの `gamut.json` | 設定ファイルのパス |
-| `-o` | なし | JSON の報告の書き出し先 |
+| `-o` | なし | gomutants 互換の JSON の報告の書き出し先 |
+| `-reporter` | `text`（`-o` があれば `gomutants` も） | 報告の形式。`text`（標準出力の要約）、`gomutants`、`json`（mutation-testing-elements）、`html`。繰り返し指定できる |
+| `-report-dir` | `.gamut/report` | `json`、`html`、`-o` のない `gomutants` の書き出し先 |
 | `-dry-run` | false | 変異体と構築可能性だけを一覧にする |
 | `-timeout-factor` | 5 | 選んだテストの基準の時間に掛ける係数 |
 | `-timeout-min` | 2s | 時間切れの上限に足す時間 |
@@ -158,6 +160,15 @@ JSON の報告は gomutants と同じ `files[].mutations[]` の形に、`reason`
 `EQUIVALENT` の変異体は `mutants_equivalent` に数え、`mutants_total` と効率には含めない。
 `files[].path` はモジュール相対のパスである。
 最上位の `package` は、1 パッケージならその import パス、複数なら引数に指定したパターンで、`packages` に判定したパッケージの import パスを並べる。
+変異体ごとの `critical`（重要領域か）と、最上位の `mutation_score` と `thresholds` も足す。
+
+`-reporter json` と `-reporter html` は、mutation-testing-elements の形式の `mutation.json` と、それを閲覧画面で表示する `mutation.html` を `-report-dir` に書く。
+HTML は閲覧画面のスクリプトを、固定した版で CDN から読み込む。
+
+```console
+./bin/gamut -reporter text -reporter html ./path/to/module/...
+open .gamut/report/mutation.html
+```
 
 ## 測定
 
