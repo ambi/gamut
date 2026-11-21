@@ -196,6 +196,7 @@ func judge(args []string, stdout, stderr io.Writer, m mode) int {
 	only := fs.String("only", "", "comma-separated mutator types to run, opt-in ones included (default: the default set; see -list-mutators)")
 	disable := fs.String("disable", "", "comma-separated mutator types to remove from the default set; cannot be combined with -only")
 	listMutators := fs.Bool("list-mutators", false, "print every mutator type with its description, example, and whether it is in the default set, then exit")
+	showVersion := fs.Bool("version", false, "print the gamut version and exit")
 	output := fs.String("o", "", "write the JSON report to this path")
 	dryRun := fs.Bool("dry-run", false, "list mutants and their viability without running tests")
 	timeoutFactor := fs.Float64("timeout-factor", 5, "multiply the selected tests' baseline time by this for the per-mutant timeout")
@@ -243,6 +244,10 @@ func judge(args []string, stdout, stderr io.Writer, m mode) int {
 	}
 	if err := fs.Parse(args); err != nil {
 		return exitError
+	}
+	if *showVersion {
+		fmt.Fprintln(stdout, "gamut", version())
+		return exitOK
 	}
 	if *listMutators {
 		writeMutators(stdout)

@@ -62,10 +62,13 @@ gamut -reporter html ./...        # .gamut/report/mutation.html
 - uses: actions/setup-go@v7
   with:
     go-version-file: go.mod
-- uses: ambi/gamut@main
+- uses: ambi/gamut@v0.1.0
   with:
+    version: v0.1.0
     args: ./...
 ```
+
+`version` は Action が入れる gamut の版である。Action の参照と同じ版に固定する。
 
 Pull Request では基準のコミットからの差分だけを判定し、生き残りをその行に注釈として出す。
 `.gamut/` は Actions のキャッシュに保存し、品質の条件で失敗しても保存する。

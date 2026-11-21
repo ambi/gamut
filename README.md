@@ -9,13 +9,25 @@ gamut は Go 向けのミューテーションテストツールである。
 - **依存がない**：Go の標準ライブラリと `go` コマンドだけを使う。
 
 設計は [docs/design.md](docs/design.md) が定める。
+変更は [CHANGELOG.md](CHANGELOG.md) に記録する。
+1.0.0 までは、マイナー版で報告の形と変異体の識別子の計算を変えうる。
+
+## 導入
+
+Go 1.27 以降が要る。
+
+```console
+go install github.com/ambi/gamut/cmd/gamut@v0.1.0
+gamut -version
+```
+
+macOS と Linux で動作を確かめている。Windows はまだ確かめていない（[033](work-items/033-windows-support.md)）。
 
 ## 使い方
 
 ```console
-go build -o bin/gamut ./cmd/gamut
-./bin/gamut -o report.json ./path/to/package
-./bin/gamut -o report.json ./path/to/module/...
+gamut -o report.json ./path/to/package
+gamut -o report.json ./path/to/module/...
 ```
 
 引数はパッケージディレクトリか、その下のすべてのパッケージを表す `<ディレクトリ>/...` で、複数を並べられる。
@@ -30,6 +42,7 @@ go build -o bin/gamut ./cmd/gamut
 | `-only` | 既定の集合 | 有効にする変異演算子（カンマ区切り）。既定で無効な演算子も選べる |
 | `-disable` | なし | 既定の集合から外す変異演算子（カンマ区切り）。`-only` とは併用できない |
 | `-list-mutators` | false | 変異演算子の名前、説明、例、既定の集合に入るかを出して終わる |
+| `-version` | false | gamut の版を出して終わる |
 | `-arid-call` | なし | この glob（`<パッケージ>.<名前>`、`<パッケージ>.<型>.<名前>`）に当たる呼び出しを、ログ出力と同じく変異しない。繰り返し指定できる |
 | `-arid-package` | なし | このパッケージとその下のパッケージの呼び出しを変異しない。繰り返し指定できる |
 | `-no-arid` | false | ログ出力など、テストが観測しないことの多いコード（arid）も変異する |
@@ -134,11 +147,11 @@ Ctrl-C で止めても、それまでの判定は保存される。
 
 ```console
 # main から変えた箇所の変異体だけを判定する。ほかは PENDING になる。
-./bin/gamut -since main ./path/to/module/...
+gamut -since main ./path/to/module/...
 # 生き残りを埋めるテストを書いたら、その変異体だけを確かめ直す。
-./bin/gamut -mutant 'pkg/file.go::CONDITIONALS_BOUNDARY::IsAdult::1a2b' ./path/to/pkg
+gamut -mutant 'pkg/file.go::CONDITIONALS_BOUNDARY::IsAdult::1a2b' ./path/to/pkg
 # 呼び出し元のパッケージのテストでも検出を試す。
-./bin/gamut -integration ./path/to/pkg
+gamut -integration ./path/to/pkg
 ```
 
 `-since` は、差分の外でも、前回の検出テストが消えた変異体を再検査し、検出されなくなったものを `previously_killed_by` 付きで報告する。
@@ -173,9 +186,9 @@ func Fast(a, b int) bool {
 
 ```console
 # 報告の id を渡して受理する。
-./bin/gamut accept -reason 'equivalent: callers read only the sign' 'pkg/file.go::ARITHMETIC_BASE::Double::1a2b3c4d5e'
+gamut accept -reason 'equivalent: callers read only the sign' 'pkg/file.go::ARITHMETIC_BASE::Double::1a2b3c4d5e'
 # テストが検出するようになった受理と、変異体がなくなった受理を、判定してから消す。
-./bin/gamut accept -prune ./path/to/module/...
+gamut accept -prune ./path/to/module/...
 ```
 
 受理した変異体は引き続き判定し、報告に `accepted`（理由）を付けるが、数と効率には含めず、要約の直す一覧にも並べない。
@@ -199,7 +212,7 @@ JSON の報告は gomutants と同じ `files[].mutations[]` の形に、`reason`
 HTML は閲覧画面のスクリプトを、固定した版で CDN から読み込む。
 
 ```console
-./bin/gamut -reporter text -reporter html ./path/to/module/...
+gamut -reporter text -reporter html ./path/to/module/...
 open .gamut/report/mutation.html
 ```
 
@@ -207,15 +220,15 @@ open .gamut/report/mutation.html
 手順は [skills/mutation-test-loop](skills/mutation-test-loop/SKILL.md) が、導入と CI は [skills/gamut](skills/gamut/SKILL.md) が定める。
 
 ```console
-./bin/gamut -reporter agent -since main ./path/to/pkg
+gamut -reporter agent -since main ./path/to/pkg
 ```
 
 大きなモジュールは、CI のジョブごとに `-shard` で分けて判定し、`gamut merge` でまとめられる。
 
 ```console
-./bin/gamut -shard 1/2 -o r1.json -cache c1.json ./...   # ジョブ 1
-./bin/gamut -shard 2/2 -o r2.json -cache c2.json ./...   # ジョブ 2
-./bin/gamut merge -o report.json -cache c1.json -cache c2.json -cache-out .gamut/cache.json r1.json r2.json
+gamut -shard 1/2 -o r1.json -cache c1.json ./...   # ジョブ 1
+gamut -shard 2/2 -o r2.json -cache c2.json ./...   # ジョブ 2
+gamut merge -o report.json -cache c1.json -cache c2.json -cache-out .gamut/cache.json r1.json r2.json
 ```
 
 `gamut select-tests` は、前回の判定から、差分が壊しうるテストを何も実行せずに選ぶ。
@@ -223,14 +236,14 @@ open .gamut/report/mutation.html
 判定と同じフラグで、前に gamut を実行しておく。
 
 ```console
-./bin/gamut select-tests -since main ./path/to/pkg
+gamut select-tests -since main ./path/to/pkg
 ```
 
 `-reporter simplify` は、テストが実行するのに、消しても失敗するテストがないコード（文の削除と条件の定数化の生き残り）を、関数ごとに並べる。
 消すか、それを必要とするテストを足すかの見直しの候補である。
 
 ```console
-./bin/gamut -only STATEMENT_REMOVE,CONDITIONS_CONSTANT -reporter simplify ./path/to/pkg
+gamut -only STATEMENT_REMOVE,CONDITIONS_CONSTANT -reporter simplify ./path/to/pkg
 ```
 
 GitHub Actions では、リポジトリのルートの `action.yml` を使える。
@@ -242,10 +255,13 @@ Pull Request では基準のコミットからの差分だけを判定し、生�
 - uses: actions/setup-go@v7
   with:
     go-version-file: go.mod
-- uses: ambi/gamut@main
+- uses: ambi/gamut@v0.1.0
   with:
+    version: v0.1.0
     args: -threshold-break 70 ./...
 ```
+
+`version` は Action が `go install` する gamut の版で、既定は `latest` である。Action の参照と同じ版に固定する。
 
 ## 機能の比較
 
@@ -287,7 +303,7 @@ gamut の「一部」「ない」には、作業項目へのリンクを付け�
 
 比べた版は次のとおりである。
 
-- gamut：未公開（コミット e1fd6fd の後）
+- gamut：v0.1.0（比べたのはその直前のコミット e1fd6fd の機能で、その後に変異演算子を 10 種類足した）
 - gomutants：[v0.7.3][gm-readme]
 - Gremlins：[v0.6.0][gr-releases]（2025-12-06）
 - go-mutesting：avito-tech の fork の [v2.3.1][gms-releases]（2025-12-26）。元の zimmski/go-mutesting より機能が多い

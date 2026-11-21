@@ -28,7 +28,7 @@ runs:
   steps:
     - name: Restore the gamut cache
       if: inputs.cache == 'true'
-      uses: actions/cache/restore@v6
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ inputs.working-directory }}/.gamut
         # 同じ参照の最新のキャッシュを先に、なければ Pull Request の基準のブランチのものを使う。
@@ -80,7 +80,7 @@ runs:
     - name: Save the gamut cache
       # 品質の条件で失敗しても、判定は有効なので保存する。
       if: always() && inputs.cache == 'true'
-      uses: actions/cache/save@v6
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ inputs.working-directory }}/.gamut
         key: gamut-${{ runner.os }}-${{ github.ref }}-${{ github.sha }}
