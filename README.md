@@ -33,6 +33,7 @@ go build -o bin/gamut ./cmd/gamut
 | `-o` | なし | gomutants 互換の JSON の報告の書き出し先 |
 | `-reporter` | `text`（`-o` があれば `gomutants` も） | 報告の形式。`text`（標準出力の要約）、`gomutants`、`json`（mutation-testing-elements）、`html`。繰り返し指定できる |
 | `-report-dir` | `.gamut/report` | `json`、`html`、`-o` のない `gomutants` の書き出し先 |
+| `-annotations` | なし | `github` なら、直すべき生き残りを GitHub Actions の注釈として標準出力に書く |
 | `-dry-run` | false | 変異体と構築可能性だけを一覧にする |
 | `-timeout-factor` | 5 | 選んだテストの基準の時間に掛ける係数 |
 | `-timeout-min` | 2s | 時間切れの上限に足す時間 |
@@ -168,6 +169,20 @@ HTML は閲覧画面のスクリプトを、固定した版で CDN から読み�
 ```console
 ./bin/gamut -reporter text -reporter html ./path/to/module/...
 open .gamut/report/mutation.html
+```
+
+GitHub Actions では、リポジトリのルートの `action.yml` を使える。
+Pull Request では基準のコミットからの差分だけを判定し、生き残りをその行に注釈として出す。
+`.gamut/` は Actions のキャッシュに保存し、品質の条件で失敗しても保存する。
+
+```yaml
+- uses: actions/checkout@v6
+- uses: actions/setup-go@v7
+  with:
+    go-version-file: go.mod
+- uses: ambi/gamut@main
+  with:
+    args: -threshold-break 70 ./...
 ```
 
 ## 測定

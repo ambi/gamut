@@ -442,6 +442,22 @@ gomutants の報告を読む既存の検査は、そのまま gamut の報告を
 - HTML は、閲覧画面のスクリプト（`mutation-testing-elements`）を同梱せず、報告のスキーマと同じ版（3.9.0）を固定して CDN から読み込む。同梱すると、版の更新と使用許諾の管理が要る。報告の JSON は `encoding/json` が `<` と `>` をエスケープするので、埋め込んだソースの `</script>` で script 要素が閉じない。
 - スキーマへの適合は、`internal/report/testdata` に固定したスキーマ（mutation-testing-report-schema 3.9.0、Apache License 2.0、同じディレクトリに使用許諾）で検証する。検証は、このスキーマが使うキーワードだけを扱う、テストの中の小さな検証器で行う。外部モジュールを足さず、ネットワークにも依存しない。
 
+### GitHub の注釈と Action
+
+`-annotations github` は、直すべき生き残り（受理していない `LIVED` と `NOT COVERED`）を、GitHub Actions のワークフローコマンド（`::warning file=,line=,col=,title=::`）で標準出力に書く。
+Pull Request では、その行に注釈として表示される。
+
+- 重要領域の生き残りは品質の条件を満たさないので `::error`、ほかは `::warning` にする。題名に分類と変異演算子、本文に変異、直し方の指針、受理の命令を入れる。
+- ファイルはリポジトリ相対で指定するので、`git rev-parse --show-toplevel` からモジュールのルートへの相対パスを前に付ける。
+- 本文の `%`、`\r`、`\n` と、属性ではさらに `:`、`,` を GitHub の規則でエスケープする。
+
+リポジトリのルートの `action.yml`（複合 Action）は、gamut を `go install` で入れ、`-annotations github` を付けて実行する。
+
+- 入力は `since`（既定は Pull Request の基準のコミット、ほかは全体の実行。`none` で全体の実行）、`args`（既定 `./...`）、`working-directory`、`cache`、`version` である。Go は利用者の手順（`actions/setup-go` など）で入れる。
+- `.gamut/` を Actions のキャッシュに保存する。鍵は参照とコミットで、同じ参照の最新のもの、なければ Pull Request の基準のブランチのものを戻す。キャッシュの記録はモジュール相対のパスで引くので、チェックアウト先が変わっても再利用できる。
+- 品質の条件で失敗しても、判定は有効なのでキャッシュを保存してから、gamut の終了コードで終える。
+- 浅いチェックアウトでは、基準のコミットを取得し、merge-base が見つかるまで履歴を 100 ずつ深め、10 回で見つからなければ全履歴を取得する。
+
 ### 終了コード
 
 | コード | 意味 |
@@ -496,7 +512,7 @@ gomutants の報告を読む既存の検査は、そのまま gamut の報告を
 | 重要領域（全変異体の検出を要求） | 済み |
 | 閾値と終了コード | 済み |
 | mutation-testing-elements の JSON と HTML | 済み |
-| GitHub の注釈 | 段階 3 |
+| GitHub の注釈と Action | 一部（公開リポジトリの Pull Request での確認が残る） |
 | エージェント向けの報告と skills | 段階 3 |
 | 変異演算子の拡張（戻り値、呼び出し文の削除、論理演算子、条件の真偽） | 段階 3 |
 | 変更が壊しうるテストの選択（`select-tests`） | 段階 4 |

@@ -1,0 +1,92 @@
+name: gamut
+description: Mutation testing for Go packages, with survivors annotated on pull requests
+branding:
+  icon: check-circle
+  color: green
+
+inputs:
+  since:
+    description: >-
+      Git ref passed to -since. On pull requests it defaults to the base commit; elsewhere
+      the default is a full run. Set it to "none" to force a full run.
+    default: ""
+  args:
+    description: Extra gamut arguments, such as flags and package patterns (default ./...)
+    default: ./...
+  working-directory:
+    description: Directory to run gamut in, inside the Go module
+    default: .
+  cache:
+    description: Restore and save .gamut/ with the Actions cache ("true" or "false")
+    default: "true"
+  version:
+    description: gamut version to install with go install (requires Go, for example from actions/setup-go)
+    default: latest
+
+runs:
+  using: composite
+  steps:
+    - name: Restore the gamut cache
+      if: inputs.cache == 'true'
+      uses: actions/cache/restore@v6
+      with:
+        path: ${{ inputs.working-directory }}/.gamut
+        # 同じ参照の最新のキャッシュを先に、なければ Pull Request の基準のブランチのものを使う。
+        key: gamut-${{ runner.os }}-${{ github.ref }}-${{ github.sha }}
+        restore-keys: |
+          gamut-${{ runner.os }}-${{ github.ref }}-
+          gamut-${{ runner.os }}-refs/heads/${{ github.base_ref }}-
+
+    - name: Install gamut
+      shell: bash
+      run: go install "github.com/ambi/gamut/cmd/gamut@${GAMUT_VERSION}"
+      env:
+        GAMUT_VERSION: ${{ inputs.version }}
+
+    - name: Run gamut
+      id: run
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        GAMUT_SINCE: ${{ inputs.since }}
+        GAMUT_ARGS: ${{ inputs.args }}
+        BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      run: |
+        set -u
+        since="$GAMUT_SINCE"
+        if [ -z "$since" ] && [ -n "$BASE_SHA" ]; then
+          since="$BASE_SHA"
+        fi
+        flags=(-annotations github)
+        if [ -n "$since" ] && [ "$since" != none ]; then
+          # 浅いチェックアウトでは、基準のコミットと merge-base までの履歴を取得する。
+          if [ "$(git rev-parse --is-shallow-repository)" = true ]; then
+            git fetch --no-tags --depth=1 origin "$since" || true
+            for _ in 1 2 3 4 5 6 7 8 9 10; do
+              git merge-base "$since" HEAD >/dev/null 2>&1 && break
+              git fetch --no-tags --deepen=100 origin
+            done
+            git merge-base "$since" HEAD >/dev/null 2>&1 || git fetch --no-tags --unshallow origin
+          fi
+          flags+=(-since "$since")
+        fi
+        set +e
+        # shellcheck disable=SC2086 # args は空白で区切った引数の並びとして渡す。
+        gamut "${flags[@]}" $GAMUT_ARGS
+        code=$?
+        set -e
+        echo "exit-code=$code" >> "$GITHUB_OUTPUT"
+
+    - name: Save the gamut cache
+      # 品質の条件で失敗しても、判定は有効なので保存する。
+      if: always() && inputs.cache == 'true'
+      uses: actions/cache/save@v6
+      with:
+        path: ${{ inputs.working-directory }}/.gamut
+        key: gamut-${{ runner.os }}-${{ github.ref }}-${{ github.sha }}
+
+    - name: Report the result
+      shell: bash
+      env:
+        CODE: ${{ steps.run.outputs.exit-code }}
+      run: exit "${CODE:-1}"

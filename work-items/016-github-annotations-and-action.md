@@ -1,5 +1,5 @@
 ---
-status: pending
+status: in_progress
 stage: 3
 depends_on: [007, 014]
 created_at: 2026-11-20
@@ -35,3 +35,13 @@ Pull Request では、差分の生き残りがその行に注釈として出る�
 ## 検証
 
 - 単体テストと、公開リポジトリでの実地の確認。
+
+## 経過
+
+公開リポジトリの Pull Request での確認が残るので、`in_progress` のままにしている。
+gamut にはまだリモートのリポジトリがなく、公開と Pull Request の作成は利用者の判断を要する。
+
+- `-annotations github` は、受理していない生き残りを、重要領域なら `::error`、ほかは `::warning` で書く。題名に分類と演算子、本文に変異、直し方の指針、受理の命令を入れ、本文と属性を GitHub の規則でエスケープする。ファイルは `git rev-parse --show-toplevel` からのリポジトリ相対にする。単体テスト（`TestWriteGitHubAnnotations`）で書式とエスケープを確かめた。
+- `action.yml` は複合 Action で、`since`、`args`、`working-directory`、`cache`、`version` を受け取る。Actions のキャッシュは `actions/cache/restore@v6` と `actions/cache/save@v6` で、品質の条件で失敗しても保存してから gamut の終了コードで終える。
+- 実行の段のスクリプトは shellcheck を通し、手元で、浅いクローンから基準のコミットを取得して `-since` で判定すること、`since: none` の全体の実行で注釈が出て `-fail-on-survived` の終了コード 2 を出力に書くことを確かめた。
+- 残り：公開リポジトリの Pull Request で Action を動かし、注釈がその行に付くこと、キャッシュの保存と復元を確かめる。`go install github.com/ambi/gamut/cmd/gamut@latest` が動くには、024 の公開が要る。

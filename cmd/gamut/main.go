@@ -10,6 +10,7 @@ import (
 	"io"
 	"maps"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"regexp"
@@ -145,6 +146,7 @@ func judge(args []string, stdout, stderr io.Writer, prune bool) int {
 	var reporterKinds multiFlag
 	fs.Var(&reporterKinds, "reporter", "report format: text (the summary on stdout), gomutants (JSON), json (mutation-testing-elements), or html (repeatable; default text, plus gomutants with -o)")
 	reportDir := fs.String("report-dir", filepath.Join(".gamut", "report"), "write the json, html, and gomutants (without -o) reports to this directory")
+	annotations := fs.String("annotations", "", "also print the survivors to fix as CI annotations on stdout (values: github)")
 	var excludes multiFlag
 	fs.Var(&excludes, "exclude-files", "do not mutate files whose module-relative path matches this regular expression (repeatable)")
 	configPath := fs.String("config", "", "read settings from this JSON file instead of "+config.FileName+" at the module root; flags override it")
@@ -192,7 +194,7 @@ func judge(args []string, stdout, stderr io.Writer, prune bool) int {
 		fmt.Fprintln(stderr, "gamut:", err)
 		return exitError
 	}
-	outputs, err := newReporters(reporterKinds, *output, *reportDir)
+	outputs, err := newReporters(reporterKinds, *output, *reportDir, *annotations)
 	if err != nil {
 		fmt.Fprintln(stderr, "gamut:", err)
 		return exitError
@@ -546,11 +548,16 @@ type reporters struct {
 	kinds []string
 	// output は -o の書き出し先で、gomutants の形式で書く。dir は -report-dir で、ほかのファイルの形式の書き出し先である。
 	output, dir string
+	// annotations は CI の注釈の形式（github）で、空なら書かない。
+	annotations string
 }
 
 // newReporters は、-reporter の指定から報告の出し方を作る。指定がなければ text にする。
 // -o を指定すれば、-reporter によらず gomutants の形式をそこへ書く。
-func newReporters(kinds []string, output, dir string) (*reporters, error) {
+func newReporters(kinds []string, output, dir, annotations string) (*reporters, error) {
+	if annotations != "" && annotations != "github" {
+		return nil, fmt.Errorf("unknown -annotations %q; use github", annotations)
+	}
 	if len(kinds) == 0 {
 		kinds = []string{reporterText}
 	}
@@ -562,7 +569,29 @@ func newReporters(kinds []string, output, dir string) (*reporters, error) {
 	if output != "" && !slices.Contains(kinds, reporterGomutants) {
 		kinds = append(kinds, reporterGomutants)
 	}
-	return &reporters{kinds: kinds, output: output, dir: dir}, nil
+	return &reporters{kinds: kinds, output: output, dir: dir, annotations: annotations}, nil
+}
+
+// repoPrefix は、Git のリポジトリのルートから moduleDir への相対パスを返す。リポジトリの外なら空を返す。
+// CI の注釈のファイルはリポジトリ相対で指定するので、モジュール相対のパスの前に付ける。
+func repoPrefix(moduleDir string) string {
+	out, err := exec.Command("git", "-C", moduleDir, "rev-parse", "--show-toplevel").Output()
+	if err != nil {
+		return ""
+	}
+	top, err := filepath.EvalSymlinks(strings.TrimSpace(string(out)))
+	if err != nil {
+		return ""
+	}
+	dir, err := filepath.EvalSymlinks(moduleDir)
+	if err != nil {
+		return ""
+	}
+	rel, err := filepath.Rel(top, dir)
+	if err != nil || rel == "." {
+		return ""
+	}
+	return filepath.ToSlash(rel)
 }
 
 // deliver は、報告を指定の形式で書く。mutation-testing-elements の形式（json、html）は、ファイルの中身を moduleDir から読む。
@@ -598,6 +627,9 @@ func (o *reporters) deliver(rep *report.Report, moduleDir string, stdout io.Writ
 		if err != nil {
 			return err
 		}
+	}
+	if o.annotations == "github" {
+		report.WriteGitHubAnnotations(stdout, rep, repoPrefix(moduleDir))
 	}
 	return nil
 }
