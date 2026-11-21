@@ -177,7 +177,7 @@ func TestSchema_ListsEveryMutator(t *testing.T) {
 		t.Fatal(err)
 	}
 	var want []string
-	for _, m := range mutant.AllTypes {
+	for _, m := range mutant.Known {
 		want = append(want, string(m))
 	}
 	if got := schema.Properties.Mutators.Items.Enum; !slices.Equal(got, want) {

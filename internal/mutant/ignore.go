@@ -159,7 +159,7 @@ func parseIgnoreArgs(args string) ([]Type, string, error) {
 		if name = strings.TrimSpace(name); name == "" {
 			continue
 		}
-		if !slices.Contains(AllTypes, Type(name)) {
+		if !slices.Contains(Known, Type(name)) {
 			return nil, "", fmt.Errorf("unknown mutator type %q in %s%s", name, directivePrefix, ignoreDirective)
 		}
 		types = append(types, Type(name))

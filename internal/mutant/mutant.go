@@ -28,10 +28,18 @@ const (
 	ConditionalsNegation Type = "CONDITIONALS_NEGATION"
 	IncrementDecrement   Type = "INCREMENT_DECREMENT"
 	InvertNegatives      Type = "INVERT_NEGATIVES"
+	InvertBitwise        Type = "INVERT_BITWISE"
 )
 
 // AllTypes は既定で有効な変異演算子である。
 var AllTypes = []Type{ArithmeticBase, ConditionalsBoundary, ConditionalsNegation, IncrementDecrement, InvertNegatives}
+
+// OptIn は、既定では無効で、-only や設定で選んだときだけ有効になる変異演算子である。
+// 実在のパッケージで生き残りの数と仕分けの内訳を測ってから、既定の集合に入れるかを決める。
+var OptIn = []Type{InvertBitwise}
+
+// Known は、gamut が知っているすべての変異演算子である。-only、設定、無効化コメント、受理の名前はこれで確かめる。
+var Known = slices.Concat(AllTypes, OptIn)
 
 // Mutant は、演算子の字句 1 つを置き換える変異体である。
 type Mutant struct {
@@ -94,6 +102,12 @@ var binaryRules = []rule{
 	{ConditionalsNegation, token.LEQ, token.GTR},
 	{ConditionalsNegation, token.GTR, token.LEQ},
 	{ConditionalsNegation, token.GEQ, token.LSS},
+	{InvertBitwise, token.AND, token.OR},
+	{InvertBitwise, token.OR, token.AND},
+	{InvertBitwise, token.XOR, token.AND},
+	{InvertBitwise, token.AND_NOT, token.AND},
+	{InvertBitwise, token.SHL, token.SHR},
+	{InvertBitwise, token.SHR, token.SHL},
 }
 
 var unaryRules = []rule{{InvertNegatives, token.SUB, token.ADD}}

@@ -1,5 +1,5 @@
 ---
-status: pending
+status: in_progress
 stage: 3
 depends_on: [010]
 created_at: 2026-11-20
@@ -51,3 +51,10 @@ gamut の 5 種類は演算子の置き換えに限られる。
 ## 検証
 
 - 演算子ごとの単体テストと端から端までのテスト。
+
+## 経過
+
+演算子のまとまりごとにコミットする。
+
+- 済み：既定で無効な演算子の仕組み（`mutant.OptIn` と、名前を確かめる `mutant.Known`）、`INVERT_BITWISE`。固定モジュール `testdata/operators` に、演算子ごとの `KILLED` と `LIVED` の例を足していく。
+- 残り：`BOOLEAN_LITERAL`、`ASSIGNMENT_OPERATOR`、`INVERT_BITWISE_ASSIGNMENT`、`BRANCH_SWAP`、`CONDITIONALS_LOGICAL`、`NEGATE_UNARY`、`CONDITIONS_CONSTANT`、`STATEMENT_REMOVE`、`RETURN_ZERO`、idmagic での測定と既定の集合の決定。

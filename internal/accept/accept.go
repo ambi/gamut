@@ -133,5 +133,5 @@ func InPackages(id string, dirs []string) bool {
 
 func wellFormed(id string) bool {
 	parts := strings.Split(id, "::")
-	return len(parts) >= 4 && parts[0] != "" && slices.Contains(mutant.AllTypes, mutant.Type(parts[1])) && parts[len(parts)-1] != ""
+	return len(parts) >= 4 && parts[0] != "" && slices.Contains(mutant.Known, mutant.Type(parts[1])) && parts[len(parts)-1] != ""
 }

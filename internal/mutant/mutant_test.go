@@ -3,6 +3,7 @@ package mutant_test
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -28,9 +29,28 @@ func enumerate(t *testing.T, src string) []*mutant.Mutant {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ms := mutant.Enumerate(pkg, mutant.AllTypes)
+	ms := mutant.Enumerate(pkg, mutant.Known)
 	mutant.CheckViability(pkg, ms)
 	return ms
+}
+
+// TestKnown_NewOperatorsAreOffByDefault は、測ってから既定の集合を決める演算子が、既定では列挙されないことを確かめる。
+func TestKnown_NewOperatorsAreOffByDefault(t *testing.T) {
+	for _, typ := range mutant.Known {
+		if !slices.Contains(mutant.AllTypes, typ) && !slices.Contains(mutant.OptIn, typ) {
+			t.Errorf("%s is neither a default nor an opt-in operator", typ)
+		}
+	}
+	if slices.Contains(mutant.AllTypes, mutant.InvertBitwise) {
+		t.Errorf("INVERT_BITWISE is enabled by default")
+	}
+	pkg, err := loadOne(writeModule(t, "package m\n\nfunc F(a, b int) int { return a | b }\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ms := mutant.Enumerate(pkg, mutant.AllTypes); len(ms) != 0 {
+		t.Errorf("default operators enumerate %d mutants for a | b, want 0", len(ms))
+	}
 }
 
 func TestEnumerate_IDsDoNotDependOnLinesAndColumns(t *testing.T) {
@@ -80,6 +100,13 @@ func TestEnumerate_Operators(t *testing.T) {
 			[]string{"INCREMENT_DECREMENT --->++ true"}},
 		{"log arguments are arid", "package m\n\nimport \"log\"\n\nfunc F(a int) { log.Println(a + 1) }\n",
 			nil},
+		// | と ^ は同じ優先順位なので、(a&b | a) ^ b と読まれ、外側の ^ が先に並ぶ。
+		{"bitwise and, or, xor", "package m\n\nfunc F(a, b int) int { return a&b | a^b }\n",
+			[]string{"INVERT_BITWISE ^->& true", "INVERT_BITWISE |->& true", "INVERT_BITWISE &->| true"}},
+		{"shifts", "package m\n\nfunc F(a uint) uint { return a<<2 + a>>1 }\n",
+			[]string{"ARITHMETIC_BASE +->- true", "INVERT_BITWISE <<->>> true", "INVERT_BITWISE >>-><< true"}},
+		{"and not", "package m\n\nfunc F(a, b int) int { return a &^ b }\n",
+			[]string{"INVERT_BITWISE &^->& true"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

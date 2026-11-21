@@ -959,13 +959,7 @@ func parseTypes(s string) ([]mutant.Type, error) {
 	var out []mutant.Type
 	for name := range strings.SplitSeq(s, ",") {
 		t := mutant.Type(strings.TrimSpace(name))
-		found := false
-		for _, known := range mutant.AllTypes {
-			if t == known {
-				found = true
-			}
-		}
-		if !found {
+		if !slices.Contains(mutant.Known, t) {
 			return nil, fmt.Errorf("unknown mutator type %q", t)
 		}
 		out = append(out, t)

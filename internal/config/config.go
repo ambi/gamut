@@ -94,7 +94,7 @@ func Load(path string) (*Config, error) {
 
 func (c *Config) check() error {
 	for _, name := range c.Mutators {
-		if !slices.Contains(mutant.AllTypes, mutant.Type(name)) {
+		if !slices.Contains(mutant.Known, mutant.Type(name)) {
 			return fmt.Errorf("mutators: unknown mutator type %q", name)
 		}
 	}
