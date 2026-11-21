@@ -5,45 +5,17 @@ depends_on: [004]
 created_at: 2026-11-20
 ---
 
-# 変更が壊しうるテストを選んで出力する
+# Select and print the tests a change may break
 
-## 動機
+## Motivation
 
-前回の判定と被覆の記録には、どのテストがどの関数の変異を検出したかが残っている。
-これを使えば、変更が壊しうるテストを、何も実行せずに 1 秒未満で選べる。
+The previous verdicts and coverage records say which tests detected mutations of which functions, so the tests a change may break can be selected in under a second without running anything.
 
-## 対象範囲
+## Summary
 
-- `gamut select-tests --since <ref>` で、キャッシュから次の順にテストを並べる。
-  1. 変わった宣言の変異体を検出したテスト（検出数の多い順）。
-  2. 変わった宣言に到達したほかのテスト。キャッシュにない新しい宣言は、そのファイルのパッケージのテスト全体にする。
-  3. 変わったテストと、変わったテスト用の補助を使うテスト。
-- `--format run` は `go test -run` に渡せる正規表現をパッケージごとに出す。`--format json` は群、検出数、到達数、選んだ理由を出す。
-- キャッシュがない、または環境のハッシュが違うときは終了コード 1 で止める。
-
-## 対象外
-
-- テストの実行。
-
-## 設計
-
-検出テストは最初の 1 件しか記録されない（実行は最初の失敗で止まる）ので、1 群は検出しうるテストの一部である。
-[021](021-kill-matrix.md) の kill matrix の結果があれば、全検出テストを使う。
-
-## 完了の条件
-
-- 固定モジュールで、1 関数を変えたときに選ばれるテストの順序を表明する。
-
-## 検証
-
-- 端から端までのテスト。
-
-## 要約
-
-- `gamut select-tests` を、判定と同じ関数（`judge`）の動き方の 1 つとして足した。フラグの解釈、読み込み、鍵の計算を共有し、キャッシュの環境も判定と同じ設定から求める。テストの実行の手前で `selectTestsMain` に分かれる。
-- フラグは作業項目の `--format` に合わせて `-format run|json` とし、gamut のほかのフラグと同じく 1 つのハイフンで書く。
-- 前回の判定を、変異体の識別子ではなくファイルと宣言の名前で引く（`cache.Store.Each`、`mutant.DeclName`）。宣言を書き換えると識別子が変わりうるためで、キャッシュは読むだけにした。
-- `Keys.ChangedTests` は変わった補助の宣言の名前も返すので、テスト関数の名前だけを選ぶ。
-- キャッシュがないか、環境が変わって読み捨てたときは終了コード 1 にした。
-- 固定モジュール `testdata/selecttests` の端から端までのテスト（`TestSelectTests`）で、kill matrix の判定の後に `Add` と補助を変えたとき、検出数 2 のテスト、検出数 1 のテスト、到達だけのテスト、補助を使うテストの順に選ばれ、変わらない `Mul` だけのテストは選ばれないことを、両方の形式で表明した。
-- idmagic の `usecases` で、1 関数を変えたときの選択は 0.22 秒だった。
+- `gamut select-tests` is a mode of `judge`, sharing flag parsing, loading, key computation, and the cache environment, and branching to `selectTestsMain` before any test runs.
+- `-format run|json` prints a `go test -run` regular expression per package, or the groups, counts, and reasons.
+- Previous verdicts are looked up by file and declaration name (`cache.Store.Each`, `mutant.DeclName`), since rewriting a declaration may change identifiers; the cache is only read.
+- Only test function names are selected from `Keys.ChangedTests`, which also returns changed helpers.
+- Without a usable cache it exits with code 1.
+- `TestSelectTests` (`testdata/selecttests`) asserts the order after a kill matrix run in both formats. Selecting after a one-function change on idmagic's `usecases` took 0.22 s.

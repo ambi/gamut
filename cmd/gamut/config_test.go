@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// twoFiles は、2 つのファイルに変異箇所を持ち、どちらもテストが到達するモジュールを作る。
+// twoFiles creates a module with mutation sites in two files, both reached by tests.
 func twoFiles(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()

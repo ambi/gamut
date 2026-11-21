@@ -5,47 +5,16 @@ depends_on: [004]
 created_at: 2026-11-20
 ---
 
-# 被覆の記録を、影響を受けるテストだけやり直す
+# Redo coverage recording only for affected tests
 
-## 動機
+## Motivation
 
-[004](004-result-cache.md) の後も、被覆の記録は毎回全テストを 1 件ずつ実行する。
-idmagic の 135 件のテストを持つパッケージでは、これだけで約 7 秒かかり、変更のない再実行の大半になる。
+After [004](004-result-cache.md), coverage recording still ran every test one by one; on a package of idmagic with 135 tests this alone took about 7 s, most of an unchanged rerun.
 
-## 対象範囲
+## Summary
 
-- テストごとの到達と感染の記録をキャッシュに保存する。
-- 次のテストだけを測り直す。
-  - 変わった宣言に到達していたテスト。
-  - 本体または参照する宣言が変わったテスト。
-  - 新しいテスト。
-- 消えた宣言に到達していたテストも測り直す。
-- 書き換え後のバイナリは毎回ビルドする（ビルドは Go のキャッシュで速い）。
-
-## 対象外
-
-- 新しい宣言にだけ到達するテストの推定。新しい宣言は、変わった呼び出し元を経由して到達するので、呼び出し元の側で測り直される。
-
-## 設計
-
-変異箇所の番号は書き換えのたびに変わるので、到達の記録は変異体の識別子と変異箇所の位置に依存しない識別子で保存する。
-パッケージの初期化で到達する変異箇所（パッケージ変数の初期化式）は全テストに現れるので、初期化の変更は全テストの測り直しにする。
-
-## 完了の条件
-
-- 1 関数を変えた後の再実行で、その関数に到達していたテストだけが被覆の記録で実行される。
-- 測り直しの有無で、判定がすべて一致する。
-
-## 検証
-
-- 固定モジュールで、変更の前後に実行したテストの一覧を表明する端から端までのテスト。
-- idmagic の代表パッケージで、1 関数を変えた後の再実行時間を測る。
-
-## 要約
-
-- 被覆の記録をキャッシュ（形式の版 2）に、対象パッケージとテストバイナリの組ごと、トップレベルのテストごとに保存する。変異箇所は行と列に依存しない `SiteKey`、変異体は識別子のハッシュの部分で書く。
-- 名前の一致でテストの到達を静的に推定する案は採らず、schemata の書き換えで関数の宣言の本文の先頭に `gamutEnter` を差し込み、テストが入った関数を動的に記録した。静的な推定は、同名の識別子で測り直しが増え、外のパッケージ（`sort.Sort` など）から呼ばれる宣言を捉えないためである。
-- 宣言の到達の鍵は、宣言と、関数を経由しない依存（定数、型、変数）だけから作る。呼ぶ関数の変更は、そこに入ったテストの記録で捉えられるので、含めると呼び出し元に入っただけのテストまで測り直す。
-- パッケージ変数、`init`、生成ファイルの宣言の変更、外の依存の変更、変異箇所の書き換えの段階の変更は、全テストの測り直しにした。
-- 端から端までのテスト（`internal/run/incremental_test.go`）で、変更なし、コメント、1 関数、補助関数、テスト、新しいテスト、パッケージ変数の各段階について、測ったテストの一覧と、キャッシュなしの判定との一致を表明した。
-- idmagic の `backend/oauth2/internal/token/usecases` で、変更なしの再実行は 10.4 秒から 2.9 秒になり、1 関数を変えた後は 5.9 秒で、その関数の変異箇所に到達していた 28 件だけを測った。判定はキャッシュなしと一致した。
+- Coverage records are cached per pair of target package and test binary, per top-level test. Sites use the position-independent `SiteKey`, mutants the hash part of their identifiers.
+- Rather than estimating reach statically by name, the rewrite inserts `gamutEnter` at the start of each function body and records entered functions at run time. Static estimates over-remeasure on same-named identifiers and miss declarations called from other packages (such as `sort.Sort`).
+- A declaration's reach key covers the declaration and its non-function dependencies only; called functions are caught by their own records.
+- Changes to package variables, `init`, generated files, external dependencies, or rewrite levels remeasure every test.
+- `internal/run/incremental_test.go` asserts the measured tests and the match with uncached verdicts across edits. On idmagic's `usecases`, an unchanged rerun went from 10.4 s to 2.9 s, and a one-function change took 5.9 s, measuring only the 28 tests that reached it.

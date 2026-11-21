@@ -9,42 +9,42 @@ import (
 	"testing"
 )
 
-// mutation は、報告の 1 体の変異体を、テストが比べやすい形にしたものである（readReport が作る）。
+// mutation is one mutant of the report in a form easy for tests to compare (made by readReport).
 type mutation struct {
 	ID     string
 	Type   string
 	Status string
-	// Reason は statusReason、Original は置き換える前の字句である。
+	// Reason is statusReason, and Original the text before replacement.
 	Reason   string
 	Original string
 	Mode     string
 	Cached   bool
-	// KilledBy は最初の検出テスト、Killers は検出したテストのすべて、PreviouslyKilledBy は消えた前回の検出テストである。
+	// KilledBy is the first detecting test, Killers all detecting tests, and PreviouslyKilledBy the previous detecting test that is gone.
 	KilledBy           string
 	Killers            []string
 	PreviouslyKilledBy string
-	// Tests は、変異箇所に到達したテストである。
+	// Tests are the tests that reached the mutation site.
 	Tests    []string
 	Critical bool
-	// Accepted は受理の理由、AcceptedStatus は受理した変異体の判定した状態である。
+	// Accepted is the reason for acceptance, and AcceptedStatus the judged status of an accepted mutant.
 	Accepted       string
 	AcceptedStatus string
 }
 
-// scope は識別子から囲む宣言の名前を取り出す。
+// scope extracts the enclosing declaration's name from an identifier.
 func (m mutation) scope() string {
 	parts := strings.Split(m.ID, "::")
 	return parts[2]
 }
 
-// executed は、判定のために変異体を実行したかを返す。到達しない変異体と感染しない変異体はもともと実行しない。
+// executed reports whether the mutant was run for judging. Mutants not reached and not infected are never run.
 func (m mutation) executed() bool {
 	needsRun := m.Status == "Killed" || m.Status == "Timeout" || m.Status == "Survived" && m.Reason == "not detected"
 	return needsRun && !m.Cached
 }
 
-// TestCache_ReusesOnlyVerdictsWhoseKeysAreUnchanged は、固定モジュールのコピーを書き換えながら gamut を実行し、
-// 実行し直す変異体が変更の影響を受けるものだけであることと、キャッシュなしの判定と一致することを確かめる。
+// TestCache_ReusesOnlyVerdictsWhoseKeysAreUnchanged runs gamut while editing a copy of a fixed module, and checks
+// that only mutants the change affects run again, and that the verdicts match those without a cache.
 func TestCache_ReusesOnlyVerdictsWhoseKeysAreUnchanged(t *testing.T) {
 	dir := copyModule(t, "../../testdata/reuse")
 	cachePath := filepath.Join(t.TempDir(), "cache.json")
@@ -52,7 +52,7 @@ func TestCache_ReusesOnlyVerdictsWhoseKeysAreUnchanged(t *testing.T) {
 	steps := []struct {
 		name string
 		edit func(t *testing.T)
-		// check は、キャッシュありの実行で実行した変異体の囲む宣言を受け取る。
+		// check receives the enclosing declarations of the mutants run in the run with a cache.
 		check func(t *testing.T, executed map[string]int, all []mutation)
 	}{
 		{
@@ -75,8 +75,8 @@ func TestCache_ReusesOnlyVerdictsWhoseKeysAreUnchanged(t *testing.T) {
 		{
 			name: "comments and shifted lines execute nothing",
 			edit: func(t *testing.T) {
-				replace(t, dir, "reuse.go", "package reuse\n", "package reuse\n\n// 行をずらすだけの注釈。\n\n")
-				replace(t, dir, "reuse.go", "\treturn v + v\n", "\t// 本文の注釈。\n\treturn v +\n\t\tv\n")
+				replace(t, dir, "reuse.go", "package reuse\n", "package reuse\n\n// A note that only shifts lines.\n\n")
+				replace(t, dir, "reuse.go", "\treturn v + v\n", "\t// A note in the body.\n\treturn v +\n\t\tv\n")
 			},
 			check: wantExecuted(),
 		},
@@ -111,7 +111,7 @@ func TestCache_ReusesOnlyVerdictsWhoseKeysAreUnchanged(t *testing.T) {
 		{
 			name: "changing go.mod executes every mutant",
 			edit: func(t *testing.T) {
-				replace(t, dir, "go.mod", "go 1.27.4\n", "go 1.27.4\n\n// 環境の変更。\n")
+				replace(t, dir, "go.mod", "go 1.27.4\n", "go 1.27.4\n\n// A change to the environment.\n")
 			},
 			check: func(t *testing.T, _ map[string]int, all []mutation) {
 				for _, m := range all {
@@ -136,7 +136,7 @@ func TestCache_ReusesOnlyVerdictsWhoseKeysAreUnchanged(t *testing.T) {
 		}
 		t.Logf("%s: executed %v", step.name, executed)
 		step.check(t, executed, cached)
-		// キャッシュの有無で判定が一致する。
+		// Verdicts match with and without the cache.
 		want := map[string]mutation{}
 		for _, m := range fresh {
 			want[m.ID] = m
@@ -157,7 +157,7 @@ func TestCache_ReusesOnlyVerdictsWhoseKeysAreUnchanged(t *testing.T) {
 	}
 }
 
-// wantExecuted は、実行した変異体の囲む宣言が scopes とちょうど一致することを確かめる。
+// wantExecuted checks that the enclosing declarations of the run mutants are exactly scopes.
 func wantExecuted(scopes ...string) func(*testing.T, map[string]int, []mutation) {
 	return func(t *testing.T, executed map[string]int, _ []mutation) {
 		t.Helper()
@@ -218,8 +218,8 @@ func replace(t *testing.T, dir, name, old, repl string) {
 	}
 }
 
-// TestCache_ReportsUnchangedInputsWithoutLoading は、入力が前回と同じ再実行が、読み込みもビルドもせずに同じ判定を返し、
-// パッケージのディレクトリへのファイルの追加、testdata の変更、フラグの変更では近道を使わないことを確かめる。
+// TestCache_ReportsUnchangedInputsWithoutLoading checks that a rerun with unchanged inputs returns the same verdicts without loading or building,
+// and that adding a file to a package directory, changing testdata, or changing flags skips the shortcut.
 func TestCache_ReportsUnchangedInputsWithoutLoading(t *testing.T) {
 	dir := copyModule(t, "../../testdata/reuse")
 	cachePath := filepath.Join(t.TempDir(), "cache.json")
@@ -254,7 +254,7 @@ func TestCache_ReportsUnchangedInputsWithoutLoading(t *testing.T) {
 		{"another flag", nil, []string{"-only", "ARITHMETIC_BASE"}},
 	}
 	for _, step := range steps {
-		// 直前の状態を近道に記録する。
+		// Record the latest state in the shortcut.
 		mustGamut(t, append(slices.Clone(step.args), "-cache", cachePath, dir)...)
 		if step.edit != nil {
 			step.edit()

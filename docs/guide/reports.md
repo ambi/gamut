@@ -1,53 +1,53 @@
-# gamut の手引き：報告
+# gamut guide: reports
 
-この文書は、JSON と HTML の報告、エージェント向けの報告、不要かもしれないコードの報告を説明する。
+This document covers the JSON and HTML reports, the report for agents, and the report of possibly unneeded code.
 
-## JSON の報告
+## JSON report
 
-JSON の報告（`-o`、`-reporter json`）は [mutation-testing-elements](https://github.com/stryker-mutator/mutation-testing-elements) のスキーマ 2 の形式で、HTML の閲覧画面やダッシュボードがそのまま読める。
-`files` の鍵はモジュール相対のパスで、各ファイルは元のソースを埋め込む。
-変異体の `status` と、gamut の判定の対応は次のとおりである。
+The JSON report (`-o`, `-reporter json`) uses version 2 of the [mutation-testing-elements](https://github.com/stryker-mutator/mutation-testing-elements) schema, so its HTML viewer and dashboards read it as is.
+The keys of `files` are module-relative paths, and each file embeds its original source.
+A mutant's `status` maps to gamut's verdicts as follows.
 
-| `status` | 判定 | `statusReason` |
+| `status` | Verdict | `statusReason` |
 | --- | --- | --- |
-| `Killed` | 検出された | |
-| `Survived` | 生き残った | `not infected`（到達したが値が変わらなかった）か `not detected`（値は変わったが失敗しなかった） |
-| `NoCoverage` | どのテストも到達しなかった | |
-| `CompileError` | 構築できない | |
-| `Timeout` | 時間切れ（検出に数える） | |
-| `Pending` | 選択（`-since`、`-shard`、`-time-budget`）の外で判定しなかった | |
-| `Ignored` | 数えない | `accepted: <理由>`（受理）、`equivalent: <理由>`（等価）、`ignored by comment: <理由>`（無効化コメント） |
+| `Killed` | Detected | |
+| `Survived` | Survived | `not infected` (reached but no value changed) or `not detected` (a value changed but no test failed) |
+| `NoCoverage` | No test reached it | |
+| `CompileError` | Not viable | |
+| `Timeout` | Timed out (counted as detected) | |
+| `Pending` | Not judged because it is outside the selection (`-since`, `-shard`, `-time-budget`) | |
+| `Ignored` | Not counted | `accepted: <reason>` (accepted), `equivalent: <reason>` (equivalent), `ignored by comment: <reason>` (disable comment) |
 
-`killedBy` は検出したテスト（`-kill-matrix` ならすべて）、`coveredBy` は変異箇所に到達したテストである。
-gamut 固有の情報は `gamut` という名前のオブジェクトにまとめる。
-変異体の `gamut` は、`original`（置き換える前の字句）、`mode`（`schemata` か `standalone`）、`cached`、`critical`（重要領域か）、`previouslyKilledBy`（前回の検出テストが消えた生き残り）、`acceptedStatus`（受理した変異体の判定）を持つ。
-最上位の `gamut` は、`goModule`、`package`、`packages`、`mutationScore`、`counts`（状態ごとの数）、`staleAccepted`（要らなくなった受理）、`killMatrix` などを持つ。
-`Pending` と `Ignored` は、`counts.total` と点数に含めない。
+`killedBy` lists the tests that detected the mutant (all of them with `-kill-matrix`), and `coveredBy` the tests that reached the mutated site.
+Information particular to gamut is grouped in an object named `gamut`.
+A mutant's `gamut` has `original` (the text before replacement), `mode` (`schemata` or `standalone`), `cached`, `critical` (whether it is in a critical region), `previouslyKilledBy` (for a survivor whose previous detecting test is gone), and `acceptedStatus` (the verdict of an accepted mutant).
+The top-level `gamut` has `goModule`, `package`, `packages`, `mutationScore`, `counts` (the number per status), `staleAccepted` (acceptances no longer needed), `killMatrix`, and more.
+`Pending` and `Ignored` are left out of `counts.total` and the score.
 
-## HTML の報告
+## HTML report
 
-`-reporter html` は、報告を閲覧画面で表示する `mutation.html` を `-report-dir` に書く。
-`-o` がなければ、`-reporter json` は `mutation.json` を `-report-dir` に書く。
-HTML は閲覧画面のスクリプトを、固定した版で CDN から読み込む。
+`-reporter html` writes `mutation.html`, which shows the report in the viewer, to `-report-dir`.
+Without `-o`, `-reporter json` writes `mutation.json` to `-report-dir`.
+The HTML loads the viewer's script from a CDN at a pinned version.
 
 ```console
 gamut -reporter text -reporter html ./path/to/module/...
 open .gamut/report/mutation.html
 ```
 
-## エージェント向けの報告
+## Report for agents
 
-コーディングエージェントに生き残りを埋めさせるときは、`-reporter agent` で、生き残りごとの分類、変異の前後の行、囲む宣言のソース、到達したテスト、直し方の指針を JSON で渡す。
-手順は [skills/mutation-test-loop](../../skills/mutation-test-loop/SKILL.md) が、導入と CI は [skills/gamut](../../skills/gamut/SKILL.md) が定める。
+When a coding agent fills survivors, `-reporter agent` hands it JSON with, per survivor, its class, the line before and after the mutation, the source of the enclosing declaration, the tests that reached it, and hints on how to fix it.
+[skills/mutation-test-loop](../../skills/mutation-test-loop/SKILL.md) defines the steps, and [skills/gamut](../../skills/gamut/SKILL.md) setup and CI.
 
 ```console
 gamut -reporter agent -since main ./path/to/pkg
 ```
 
-## 不要かもしれないコードの報告
+## Report of possibly unneeded code
 
-`-reporter simplify` は、テストが実行するのに、消しても失敗するテストがないコード（文の削除と条件の定数化の生き残り）を、関数ごとに並べる。
-消すか、それを必要とするテストを足すかの見直しの候補である。
+`-reporter simplify` lists, per function, code that tests run but whose removal fails no test (survivors of statement removal and constant conditions).
+They are candidates to review: remove the code, or add a test that needs it.
 
 ```console
 gamut -only STATEMENT_REMOVE,CONDITIONS_CONSTANT -reporter simplify ./path/to/pkg

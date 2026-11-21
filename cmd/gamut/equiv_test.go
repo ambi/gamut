@@ -8,8 +8,8 @@ import (
 	"time"
 )
 
-// TestDetectEquivalent_MarksSurvivorsWithTheSameMachineCode は、-detect-equivalent が、コンパイル結果が元と同じ生き残りだけを
-// EQUIVALENT にし、数から外し、次の実行ではキャッシュの比較を使うことを確かめる。
+// TestDetectEquivalent_MarksSurvivorsWithTheSameMachineCode checks that -detect-equivalent marks EQUIVALENT only survivors that compile to the original's code,
+// leaves them out of the counts, and uses the cached comparison in the next run.
 func TestDetectEquivalent_MarksSurvivorsWithTheSameMachineCode(t *testing.T) {
 	dir := "../../testdata/equiv"
 	plain, _ := mustGamut(t, "-no-cache", "-only", "ARITHMETIC_BASE", dir)
@@ -22,7 +22,7 @@ func TestDetectEquivalent_MarksSurvivorsWithTheSameMachineCode(t *testing.T) {
 	dir = copyModule(t, dir)
 	for i, wantLog := range []string{"2 survivors compiled, 0 reused from the cache, 1 equivalent", "0 survivors compiled, 2 reused from the cache, 1 equivalent"} {
 		if i > 0 {
-			// 中身を変えずに更新時刻だけを変え、変更のない再実行の近道を外す。比較の鍵は中身から作るので変わらない。
+			// Change only the modification time to skip the unchanged-rerun shortcut. The comparison keys come from contents, so they stay the same.
 			later := time.Now().Add(time.Minute)
 			if err := os.Chtimes(filepath.Join(dir, "equiv_test.go"), later, later); err != nil {
 				t.Fatal(err)

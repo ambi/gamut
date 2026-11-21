@@ -7,12 +7,12 @@ import (
 	"github.com/ambi/gamut/internal/cache"
 )
 
-// reuse は、キャッシュの判定を再利用できる作業の判定を書き、実行が要る作業を返す。
-// 被覆の記録は毎回やり直すので、到達と感染はいつも今のソースのものである。
-// 到達しない変異体と感染しない変異体はもともと実行しないので、キャッシュを使わない。
+// reuse writes the verdicts of the jobs whose cached verdicts can be reused, and returns the jobs that need running.
+// Coverage records are redone every time, so reach and infection always come from the current source.
+// Mutants not reached and not infected are never run anyway, so they do not use the cache.
 //
-// matrix（kill matrix）なら、KILLED は、感染したテストをすべて実行した判定で、実行するテストもその鍵も変わらないときだけ再利用する。
-// LIVED はもともとすべてのテストを実行しているので、通常の規則で再利用する。
+// With matrix (kill matrix), a KILLED verdict is reused only when it ran every infected test and neither the tests to run nor their keys changed.
+// LIVED already ran every test, so it is reused by the usual rules.
 func reuse(jobs []job, store *cache.Store, dup map[string]bool, matrix bool) []job {
 	var pending []job
 	for _, j := range jobs {
@@ -40,12 +40,12 @@ func reuse(jobs []job, store *cache.Store, dup map[string]bool, matrix bool) []j
 	return pending
 }
 
-// reusable は、今の鍵 cur の下で、前の判定 old を再利用してよいかを返す。
+// reusable reports whether the previous verdict old may be reused under the current keys cur.
 //
-//   - どの状態も、囲む宣言と判定の方式が変わらないことを求める。
-//   - KILLED：依存が変わらず、検出したテスト（トップレベル）が変わらずに今も実行される。検出したテストが分からなければ LIVED と同じ規則にする。
-//   - LIVED：依存が変わらず、到達したテストと実行するテストの集合が同じで、そのどれも変わらない。
-//   - TIMED OUT と個別ビルドの NOT VIABLE：依存が変わらない。
+//   - Every status requires the enclosing declaration and the judging mode to be unchanged.
+//   - KILLED: the dependencies are unchanged, and the detecting (top-level) test is unchanged and still run. When the detecting test is unknown, the rule for LIVED applies.
+//   - LIVED: the dependencies are unchanged, the sets of reaching tests and tests to run are the same, and none of them changed.
+//   - TIMED OUT, and NOT VIABLE of standalone builds: the dependencies are unchanged.
 func reusable(old, cur *cache.Entry) bool {
 	if old == nil || old.Decl != cur.Decl || old.Mode != cur.Mode {
 		return false
@@ -73,7 +73,7 @@ func sameTests(old, cur *cache.Entry) bool {
 	return slices.Equal(old.Reached, cur.Reached) && slices.Equal(old.Ran, cur.Ran) && maps.Equal(old.TestKeys, cur.TestKeys)
 }
 
-// entry は、作業の今の鍵を持ち、判定を持たない記録を返す。鍵がなければ nil を返す。
+// entry returns a record with the job's current keys and no verdict, or nil when there are no keys.
 func (j job) entry() *cache.Entry {
 	keys := j.unit.Keys
 	if keys == nil {
@@ -87,7 +87,7 @@ func (j job) entry() *cache.Entry {
 	}
 	for _, t := range slices.Concat(j.reached, j.ran) {
 		if t.key == "" {
-			// 鍵のないテスト（キャッシュの鍵を持たない逆依存パッケージのもの）が関わる判定は記録しない。
+			// Verdicts involving a test without a key (from a reverse dependency without cache keys) are not recorded.
 			return nil
 		}
 		e.TestKeys[t.name] = t.key
@@ -95,7 +95,7 @@ func (j job) entry() *cache.Entry {
 	return e
 }
 
-// record は、実行した判定を今の鍵とともにキャッシュへ書く。
+// record writes the verdict of a run to the cache with the current keys.
 func (j job) record(store *cache.Store, r *Result) {
 	if store == nil {
 		return
@@ -118,7 +118,7 @@ func sortedNames(ts []*testCase) []string {
 	return names
 }
 
-// duplicateIDs は、2 体以上の変異体が持つ識別子を返す。同じ形の init が 2 つあるときなどに起こり、キャッシュで区別できない。
+// duplicateIDs returns identifiers shared by two or more mutants. This happens with two init functions of the same shape, for example, and the cache cannot tell them apart.
 func duplicateIDs(targets []Target) map[string]bool {
 	count := map[string]int{}
 	for _, t := range targets {

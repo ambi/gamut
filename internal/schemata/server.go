@@ -13,30 +13,30 @@ import (
 	"github.com/ambi/gamut/internal/load"
 )
 
-// ServerTestName は、1 つのテストプロセスで変異体を順に判定する、overlay で足すテストの名前である。
+// ServerTestName is the name of the test, added with the overlay, that judges mutants one after another in one test process.
 const ServerTestName = "TestGamutServer"
 
-// ServerFileName は、そのテストを置くファイルの名前である。
+// ServerFileName is the name of the file holding that test.
 const ServerFileName = "gamut_server_test.go"
 
-// Server は、1 つのテストプロセスで複数の変異体を順に判定するためのテストファイルである。
-// 判定のテストは、標準入力から「変異体の番号 テスト名...」の行を受け取り、選択を切り替え、テストを t.Run で順に呼ぶ。
-// 各テストを始める前に「run <名前>」を、終わったら「pass」か「fail <名前>」を、ファイル記述子 3 へ書く。
-// 「cover テスト名...」の行は、変異なしでテストを順に実行して被覆を記録し、各テストの所要時間を「d <名前> <ナノ秒>」で書き、
-// 最後に被覆の記録を止める。被覆を測ったプロセスを、そのまま変異体の判定に使い回すために使う。
-// 各テストは同じプロセスでもう一度実行し、2 回目に失敗すれば「u <名前>」を書く（繰り返し実行できないテスト）。
+// Server is the test file for judging several mutants one after another in one test process.
+// The judging test reads lines "mutant-number test-name..." from stdin, switches the selection, and calls the tests in order with t.Run.
+// Before starting each test it writes "run <name>" to file descriptor 3, and when they are done, "pass" or "fail <name>".
+// A line "cover test-name..." runs the tests in order without mutations to record coverage, writes each test's duration as "d <name> <nanoseconds>",
+// and finally stops coverage recording. It lets the process that measured coverage be reused as is to judge mutants.
+// Each test is run once more in the same process, and "u <name>" is written if the second run fails (a test that cannot be repeated).
 type Server struct {
-	// Path と Src は、overlay で足すファイルのパスと内容である。
+	// Path and Src are the path and contents of the file added with the overlay.
 	Path string
 	Src  []byte
-	// Tests は、判定のテストから呼べるテスト（func(*testing.T) の形のトップレベルのテスト）の名前である。
-	// Example と Fuzz は t.Run で呼べないので含めない。
+	// Tests are the names of the tests the judging test can call (top-level tests of the form func(*testing.T)).
+	// Example and Fuzz functions cannot be called with t.Run, so they are not included.
 	Tests map[string]bool
 }
 
-// BuildServer は、pkg の判定のテストを作る。作れなければ（名前が衝突する、main パッケージに外部テストがあるなど）nil を返す。
-// 判定のテストは外部テストのパッケージに置き、内部テストは対象パッケージの公開された関数として、外部テストはそのまま呼ぶ。
-// main パッケージは外部テストから import できないので、内部テストのパッケージに置く。
+// BuildServer builds pkg's judging test. When it cannot (a name collides, a main package has external tests, and so on), it returns nil.
+// The judging test goes in the external test package; it calls internal tests as exported functions of the target package, and external tests directly.
+// A main package cannot be imported by external tests, so for it the judging test goes in the internal test package.
 func BuildServer(pkg *load.Package) (*Server, error) {
 	fset := token.NewFileSet()
 	type test struct {
@@ -103,7 +103,7 @@ func BuildServer(pkg *load.Package) (*Server, error) {
 	}
 	fmt.Fprintf(&buf, `}
 
-// %s は、GAMUT_SERVE が設定されたときだけ、標準入力の命令に従って変異体を順に判定する。
+// %s judges mutants one after another as the commands on stdin say, only when GAMUT_SERVE is set.
 func %s(t *testing.T) {
 	if os.Getenv("GAMUT_SERVE") == "" {
 		t.Skip("run by gamut only")
@@ -127,14 +127,14 @@ func %s(t *testing.T) {
 			fn := gamutServed[name]
 			fmt.Fprintln(out, "run "+name)
 			start := time.Now()
-			// 外側の t.Run は、並列のサブテストが終わるまで戻らない。
+			// The outer t.Run does not return until the parallel subtests finish.
 			if !t.Run("g", func(t *testing.T) { t.Run(name, fn) }) {
 				result = "fail " + name
 				break
 			}
 			if cover {
 				fmt.Fprintf(out, "d %%s %%d\n", name, time.Since(start))
-				// 同じプロセスでもう一度実行する。失敗するテストは状態を持ち越すので、使い回すプロセスでは判定を誤りうる。
+				// Run it once more in the same process. A test that fails then carries state over, so verdicts in a reused process may be wrong.
 				if !t.Run("g", func(t *testing.T) { t.Run(name, fn) }) {
 					fmt.Fprintln(out, "u "+name)
 				}
@@ -150,7 +150,7 @@ func %s(t *testing.T) {
 	return &Server{Path: filepath.Join(pkg.Dir, ServerFileName), Src: buf.Bytes(), Tests: names}, nil
 }
 
-// takesT は、関数が引数を 1 つだけ取り、その型が *<何か>.T であるかを返す。
+// takesT reports whether the function takes exactly one parameter of type *<something>.T.
 func takesT(fd *ast.FuncDecl) bool {
 	params := fd.Type.Params.List
 	if len(params) != 1 || len(params[0].Names) > 1 {

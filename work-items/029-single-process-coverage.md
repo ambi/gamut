@@ -5,41 +5,15 @@ depends_on: [005]
 created_at: 2026-11-21
 ---
 
-# 被覆の記録を、テストバイナリごとに 1 つのプロセスで行う
+# Record coverage in one process per test binary
 
-## 動機
+## Motivation
 
-被覆の記録は、テストごとの到達を知るため、テスト 1 件につき 1 プロセスを起動する。
-idmagic の統合モード（テスト 2,773 件）では、初回の被覆の記録だけで 115 秒かかる。
+Coverage recording started one process per test to learn each test's reach; in idmagic's integration mode (2,773 tests) the first recording alone took 115 s.
 
-## 対象範囲
+## Summary
 
-- 1 つのプロセスで全テストを実行し、テストごとの到達、感染、入った関数を振り分ける。
-- 振り分けられないとき（テストの境目の外での記録など）は、1 件ずつの測定に戻る。
-
-## 設計
-
-テストファイルを overlay で書き換え、トップレベルのテスト関数の先頭に、記録の境目を書く呼び出し（`GamutTestStart("TestX")`）を差し込む。
-`t.Parallel()` を本文の文として呼ぶテストは、その直後にも差し込む。並列のテストは `Parallel` で止まり、ほかのテストの後に再開するので、再開した所を境目にする。
-テストは `-test.parallel=1` で実行し、同時に走るテストを 1 つにする。
-本文の中（サブテスト）でも `Parallel` を呼ぶテストは、サブテストの間に別のテストが再開しうるので、まとめずに 1 件ずつ測る。
-
-`-test.v` の出力の `=== RUN` を境目にする方式は採らない。記録はファイルに、出力は標準出力に書かれるので、両者の前後関係が分からないためである。
-
-## 完了の条件
-
-- 振り分けの結果が、1 件ずつの測定と一致する。
-- idmagic の統合モードで、初回の被覆の記録が 1 件ずつの測定より短い。
-
-## 検証
-
-- 固定モジュールで、両方式の記録の一致を表明する端から端までのテスト。
-- idmagic での測定。
-
-## 要約
-
-- パッケージ自身のテストは、ワーカー数の組に分け、組ごとに 1 つのプロセスで測る。組のプロセスが失敗するか、境目のないテストがあれば、その組を 1 件ずつの測定に戻す。最初の境目より前の記録（パッケージの初期化）は、すべてのテストに足す。
-- 逆依存パッケージのテストは、テストバイナリごとにまとめて 1 回実行し、到達も関数への入りも記録されなければ、すべて空の記録とする。到達があるパッケージのテストは 1 件ずつ測る。まとめて測る方式も試したが、並列のサブテストが直列になって遅くなった（[032](032-batch-revdep-coverage.md)）。
-- `TestAll_BatchedCoverageMatchesOneProcessPerTest` で、fixture、concurrent（`t.Parallel` と多数のゴルーチン）、reuse、ordering の固定モジュールについて、まとめた記録が 1 件ずつの記録と同じ判定と到達のテストを生むことを表明した。
-- idmagic の `usecases`（テスト 135 件）の被覆の記録は、1 件ずつで 7.4 秒（ワーカー数 2）だったものが、0.3 秒（ワーカー数 4、判定のテストのプロセスで測る。[030](030-reuse-test-processes.md)）になった。
-- idmagic の統合モード（`backend/signinpolicy/domain`、テスト 2,773 件）の初回の被覆の記録は、1 件ずつで 115 秒だったものが 82 秒（ワーカー数 4）になった。到達のない 101 個のパッケージのテスト 1,880 件を、パッケージごとの 1 回の実行で済ませた。
+- Test files are rewritten through the overlay to call `GamutTestStart("TestX")` at the start of each top-level test, and right after a `t.Parallel()` statement, since parallel tests resume after the others. Tests run with `-test.parallel=1`. Tests that also call `Parallel` in subtests are measured one by one. Using `=== RUN` lines as boundaries was rejected, as records go to a file and output to stdout with no ordering between them.
+- The package's own tests are split into as many chunks as workers, one process per chunk; a failing chunk or a test without a boundary falls back to one-by-one measurement. Records before the first boundary (initialization) are added to every test.
+- Reverse dependency tests run once per test binary; when nothing is recorded, all get empty records. Packages with reach are measured one by one; batching them was slower ([032](032-batch-revdep-coverage.md)).
+- `TestAll_BatchedCoverageMatchesOneProcessPerTest` asserts identical verdicts and reaching tests. On `usecases`, recording went from 7.4 s to 0.3 s; in integration mode on `signinpolicy/domain`, from 115 s to 82 s.

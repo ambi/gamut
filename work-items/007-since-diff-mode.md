@@ -5,46 +5,17 @@ depends_on: [004]
 created_at: 2026-11-20
 ---
 
-# `--since` で差分の変異体だけを実行して報告する
+# Run and report only the mutants of a diff with `--since`
 
-## 動機
+## Motivation
 
-Pull Request の検査やコーディングエージェントの反復では、変更した箇所の検出能力だけを知りたい。
-今の gamut はパッケージの全変異体を実行するので、変更が小さくても待ち時間は変わらない。
+Pull request checks and coding agents want the detection power of the changed code only, but gamut ran every mutant of the package however small the change.
 
-## 対象範囲
+## Summary
 
-- `--since <ref>` で、`git merge-base` から作業ツリーまでの差分を `git diff -M --no-prefix` で得る。
-- 差分の新しい側の字句の区間と、変異体の字句の区間の交わりで選ぶ（行ではなく区間）。
-- `--scope node|decl` で、変異体の区間か、囲む宣言の区間で交わりを取るかを選ぶ。宣言の署名の変更も捉えるため。
-- 差分の外の変異体は `PENDING` として報告し、数えない。
-- 差分の外の変異体のうち、前回の検出テストがすべて消えたものは再検査し、「以前は検出されたが今は検出されない」として別に報告する。
-- テストだけを変えた差分では、`--include-test-changes` で、変えたテストが到達する生き残りを再検査する。
-- `git` がない、または参照が解決できないときは終了コード 1 で止める。
-
-## 対象外
-
-- 外部の差分ファイルの入力。必要になったら、新しい側の内容と作業ツリーの一致を確かめる形で足す。
-
-## 設計
-
-名前の変更は `-M` で追い、キャッシュの項目を旧パスから引き継ぐ。
-差分の範囲を選ぶのは変異体だけで、被覆の記録は [005](005-incremental-coverage.md) の規則に従う。
-
-## 完了の条件
-
-- 1 関数だけ変えた固定モジュールのコピーで、その関数の変異体だけが判定され、ほかは `PENDING` になる。
-- テストを削除して検出テストが消えた変異体が、差分の外でも再検査される。
-
-## 検証
-
-- 一時的な Git リポジトリを作る端から端までのテスト。
-
-## 要約
-
-- 新しいパッケージ `internal/diff` が、`git diff -M --no-prefix -U0` と追跡していないファイルから、作業ツリーで変わった区間を求める。Go のファイルは変わった行の前後を字句に分けて最長共通部分列で突き合わせ、変わった字句だけを区間にする。コメントと空白だけの変更は区間を作らない。
-- 差分に触れないパッケージはビルドしない。テストファイルの変更（検出テストの削除）は差分の外の変異体の再検査を要しうるので、パッケージのディレクトリのファイルが変われば準備する。
-- 前回の検出テストが消えた変異体は、キャッシュの `killer` で見つける。キャッシュがなければ再検査しない。検出されなくなったものは、実行せずに決まる判定（`NOT COVERED` など）も含めて `previously_killed_by` を付けて報告する。
-- 名前の変更は `IDAt` で旧パスの識別子を求め、キャッシュの判定を写す。被覆の記録は変異箇所の鍵が変わるので測り直す。
-- `PENDING` は gomutants にもある状態の名前で、`mutants_total` と効率に含めず、`mutants_pending` に数える。
-- `cmd/gamut/select_test.go` で、一時的な Git リポジトリを作り、1 関数の変更、署名の変更（`-scope decl`）、テストの変更（`-include-test-changes`）、検出テストの削除の各段階を表明した。
+- `internal/diff` finds the changed ranges of the working tree from `git diff -M --no-prefix -U0` and untracked files. Go files are matched token by token (longest common subsequence), so comment and whitespace changes make no ranges.
+- Mutants are selected by intersecting their token ranges (or, with `-scope decl`, their enclosing declarations) with the diff. The rest are `PENDING` and not counted.
+- Packages the diff does not touch are not built; changed test files prepare the package, as removed detecting tests may require rechecks.
+- Mutants whose previous detecting test (the cache's `killer`) is gone are rechecked and reported with `previously_killed_by` when no longer detected. `-include-test-changes` rechecks survivors that changed tests reach.
+- Renames carry cached verdicts over through `IDAt`.
+- `cmd/gamut/select_test.go` asserts each case in a temporary Git repository.

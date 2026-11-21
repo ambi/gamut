@@ -1,7 +1,7 @@
 package c
 
-// Double は、cgo の関数を呼ぶ。このファイルは import "C" を持たないので変異する。
+// Double calls a cgo function. This file has no import "C", so it is mutated.
 func Double(n int) int { return Add(n, n) }
 
-// Inc は n に 1 を足す。
+// Inc adds 1 to n.
 func Inc(n int) int { return n + 1 }

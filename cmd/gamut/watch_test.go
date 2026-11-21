@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// TestWatch_JudgesTheChangedFunction は、-watch が、保存されたファイルの変更を見つけて、変わった関数の変異体だけを判定することを確かめる。
+// TestWatch_JudgesTheChangedFunction checks that -watch finds changes to saved files and judges only the mutants of the changed function.
 func TestWatch_JudgesTheChangedFunction(t *testing.T) {
 	dir := copyModule(t, "../../testdata/selecttests")
 	gitRepo(t, dir)
@@ -35,7 +35,7 @@ func TestWatch_JudgesTheChangedFunction(t *testing.T) {
 			t.Fatalf("run %d did not finish", want)
 		}
 	}
-	// 1 回目は、変更がないので何も判定しない。
+	// The first time nothing changed, so nothing is judged.
 	wait(1)
 	for _, m := range readReport(t, reportPath) {
 		if m.Status != "Pending" {

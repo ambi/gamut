@@ -7,13 +7,13 @@ import (
 	"strings"
 )
 
-// Shard は、変異体を識別子のハッシュで N 個に分けたうちの K 番目（1 から数える）である。
-// 識別子で分けるので、変異体が増えても減っても、ほかの変異体の割り当ては変わらず、シャードごとのキャッシュが効き続ける。
+// Shard is the K-th (counting from 1) of N groups of mutants split by a hash of their identifiers.
+// Splitting by identifier keeps the other mutants' assignments when mutants are added or removed, so each shard's cache stays effective.
 type Shard struct {
 	K, N uint64
 }
 
-// ParseShard は、k/n の形の指定を読む。
+// ParseShard reads a specification of the form k/n.
 func ParseShard(s string) (*Shard, error) {
 	ks, ns, ok := strings.Cut(s, "/")
 	k, kerr := strconv.ParseUint(ks, 10, 64)
@@ -24,7 +24,7 @@ func ParseShard(s string) (*Shard, error) {
 	return &Shard{K: k, N: n}, nil
 }
 
-// Contains は、識別子 id の変異体がこのシャードに入るかを返す。s が nil なら、どの変異体も入る。
+// Contains reports whether the mutant with identifier id belongs to this shard. When s is nil, every mutant does.
 func (s *Shard) Contains(id string) bool {
 	if s == nil {
 		return true

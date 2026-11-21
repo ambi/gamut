@@ -1,29 +1,29 @@
-# 変更履歴
+# Changelog
 
-gamut の版ごとの変更を記録する。
-版は [Semantic Versioning](https://semver.org/lang/ja/) に従う。
-1.0.0 までは、マイナー版で報告の形と変異体の識別子の計算を変えうる。
+This file records the changes in each version of gamut.
+Versions follow [Semantic Versioning](https://semver.org/).
+Until 1.0.0, a minor version may change the report's shape and how mutant identifiers are computed.
 
-次の変更は、利用者の記録（受理の記録、キャッシュ、報告を読むスクリプト）に影響するので、必ず理由とともに書く。
+The following changes affect users' records (the record of accepted mutants, the cache, scripts that read reports), so always record them with the reason:
 
-- 変異体の識別子の計算の変更。`gamut.accepted.json` の受理と、キャッシュの判定が引き継がれなくなる。
-- 報告の形の変更（フィールドの追加を除く）と、判定の状態の名前の変更。
-- 設定ファイル `gamut.json` の項目の変更と削除。
-- 既定の変異演算子の集合の変更。点数と生き残りの数が変わる。
+- A change to how mutant identifiers are computed. Acceptances in `gamut.accepted.json` and cached verdicts no longer carry over.
+- A change to the report's shape (other than adding fields) or to the status names.
+- A change to or removal of keys in the config file `gamut.json`.
+- A change to the default set of mutators. Scores and survivor counts change.
 
-## 未公開
+## Unreleased
 
 ## [0.1.0] - 2026-11-21
 
-最初の版。
+The first version.
 
-- 全変異体を 1 回のビルドに埋め込む（mutant schemata）。変異体ごとのビルド結果を共有の Go ビルドキャッシュへ書かない。
-- 式単位の被覆と感染の記録で、生き残りを `NOT COVERED`、`LIVED`（`not infected`）、`LIVED`（`not detected`）に分ける。
-- 変異演算子は 25 種類で、既定の集合は `ARITHMETIC_BASE`、`CONDITIONALS_BOUNDARY`、`CONDITIONALS_NEGATION`、`INCREMENT_DECREMENT`、`INVERT_NEGATIVES`、`RETURN_ZERO`、`STATEMENT_REMOVE` の 7 種類。
-- 判定と被覆の記録の再利用、差分だけの判定（`-since`）、変異体の再実行（`-mutant`）、逆依存パッケージのテストでの検出（`-integration`）、保存のたびの判定（`-watch`）。
-- 無効化コメント、等価な変異体の受理（`gamut accept`）と自動検出（`-detect-equivalent`）、重要領域、閾値と終了コード。
-- 報告：mutation-testing-elements の形式の JSON（gamut 固有の情報は `gamut` のオブジェクト）と、それを埋め込んだ HTML、エージェント向けの JSON、GitHub の注釈と Action。
-- `gamut select-tests`、`-kill-matrix`、`-reporter simplify`、`-max-depth`、`-shard` と `gamut merge`、`-time-budget`。
-- macOS と Linux で動作を確かめた。Windows は確かめていない。
+- Embeds every mutant in one build (mutant schemata) and never writes per-mutant build results to the shared Go build cache.
+- Records coverage and infection per expression and sorts survivors into `NOT COVERED`, `LIVED` (`not infected`), and `LIVED` (`not detected`).
+- 25 mutators; the default set is the 7 of `ARITHMETIC_BASE`, `CONDITIONALS_BOUNDARY`, `CONDITIONALS_NEGATION`, `INCREMENT_DECREMENT`, `INVERT_NEGATIVES`, `RETURN_ZERO`, and `STATEMENT_REMOVE`.
+- Reuse of verdicts and coverage, judging only the diff (`-since`), rerunning a mutant (`-mutant`), detection by the tests of reverse dependencies (`-integration`), and judging on every save (`-watch`).
+- Disable comments, accepting (`gamut accept`) and detecting (`-detect-equivalent`) equivalent mutants, critical regions, thresholds, and exit codes.
+- Reports: JSON in the mutation-testing-elements format (gamut-specific data in a `gamut` object) and HTML that embeds it, JSON for agents, and GitHub annotations and an Action.
+- `gamut select-tests`, `-kill-matrix`, `-reporter simplify`, `-max-depth`, `-shard` with `gamut merge`, and `-time-budget`.
+- Tested on macOS and Linux. Windows is not verified.
 
 [0.1.0]: https://github.com/ambi/gamut/releases/tag/v0.1.0

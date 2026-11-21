@@ -12,9 +12,9 @@ import (
 	"github.com/ambi/gamut/internal/run"
 )
 
-// TestAll_BatchedCoverageMatchesOneProcessPerTest は、1 つのプロセスでまとめて記録した被覆が、テスト 1 件ずつのプロセスの記録と同じ判定と到達のテストを生むことを確かめる。
-// まとめる方法は 2 つある。判定のテストのプロセスで測ってそのまま判定に使い回す方法（既定）と、-isolate のときの go test の 1 回の実行である。
-// concurrent のテストは t.Parallel を呼び、多数のゴルーチンから変異箇所を通る。
+// TestAll_BatchedCoverageMatchesOneProcessPerTest checks that coverage recorded together in one process gives the same verdicts and reaching tests as one process per test.
+// There are two ways to batch: measuring in a judging test process and reusing it for judging (the default), and one go test run under -isolate.
+// The tests of concurrent call t.Parallel and pass mutation sites from many goroutines.
 func TestAll_BatchedCoverageMatchesOneProcessPerTest(t *testing.T) {
 	for _, dir := range []string{"../../testdata/fixture", "../../testdata/concurrent", "../../testdata/reuse", "../../testdata/ordering"} {
 		t.Run(dir, func(t *testing.T) {
@@ -65,8 +65,8 @@ func sorted(s []string) []string {
 	return slices.Sorted(slices.Values(s))
 }
 
-// TestAll_ServedVerdictsMatchOneProcessPerMutant は、テストプロセスを変異体の間で使い回す判定が、変異体ごとに新しいプロセスで判定したものと一致することを確かめる。
-// fixture は時間切れと panic で落ちる変異体を、concurrent は t.Parallel のテストを含む。
+// TestAll_ServedVerdictsMatchOneProcessPerMutant checks that verdicts from reusing test processes across mutants match those from a new process per mutant.
+// fixture has mutants that time out and that crash with a panic, and concurrent has t.Parallel tests.
 func TestAll_ServedVerdictsMatchOneProcessPerMutant(t *testing.T) {
 	for _, dir := range []string{"../../testdata/fixture", "../../testdata/concurrent", "../../testdata/reuse", "../../testdata/ordering"} {
 		t.Run(dir, func(t *testing.T) {

@@ -7,7 +7,7 @@ import (
 	"syscall"
 )
 
-// isolate は、cmd を新しいプロセスグループで起動し、取り消しではグループ全体へ SIGKILL を送る。
+// isolate starts cmd in a new process group, and on cancellation sends SIGKILL to the whole group.
 func isolate(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {

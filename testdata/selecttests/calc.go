@@ -1,8 +1,8 @@
-// Package calc は、gamut select-tests の端から端までのテストが使う。
+// Package calc is used by the gamut select-tests end-to-end test.
 package calc
 
-// Add は和を返す。
+// Add returns the sum.
 func Add(a, b int) int { return a + b }
 
-// Mul は積を返す。
+// Mul returns the product.
 func Mul(a, b int) int { return a * b }

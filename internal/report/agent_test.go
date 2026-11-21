@@ -12,7 +12,7 @@ import (
 
 func TestAgent_DescribesEachSurvivor(t *testing.T) {
 	dir := t.TempDir()
-	src := "package p\n\n// Clamp は v を max までに抑える。\nfunc Clamp(v, max int) int {\n\tif v > max {\n\t\treturn max\n\t}\n\treturn v\n}\n\nfunc Unused(a int) int { return a * 2 }\n"
+	src := "package p\n\n// Clamp limits v to max.\nfunc Clamp(v, max int) int {\n\tif v > max {\n\t\treturn max\n\t}\n\treturn v\n}\n\nfunc Unused(a int) int { return a * 2 }\n"
 	test := `package p
 
 import (
@@ -64,10 +64,10 @@ func TestChild(t *testing.T) { _ = exec.Command(os.Args[0], "-test.run=TestX") }
 	if s.Diff.Before != "\tif v > max {" || s.Diff.After != "\tif v >= max {" {
 		t.Errorf("diff %+v", s.Diff)
 	}
-	if !strings.HasPrefix(s.Declaration, "// Clamp は") || !strings.HasSuffix(s.Declaration, "return v\n}") {
+	if !strings.HasPrefix(s.Declaration, "// Clamp limits") || !strings.HasSuffix(s.Declaration, "return v\n}") {
 		t.Errorf("declaration %q, want the function with its doc comment", s.Declaration)
 	}
-	// 宣言の名前を含むテストを先に、最大 10 件並べ、総数も出す。
+	// Tests containing the declaration's name come first, up to 10, with the total.
 	if s.TestsTotal != 13 || len(s.Tests) != 10 || s.Tests[0] != "TestClampBelow" {
 		t.Errorf("tests %v (total %d), want TestClampBelow first, 10 shown of 13", s.Tests, s.TestsTotal)
 	}

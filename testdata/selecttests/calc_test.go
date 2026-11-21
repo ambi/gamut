@@ -9,7 +9,7 @@ func check(t *testing.T, got, want int) {
 	}
 }
 
-// TestAddSmall と TestAddBig は、Add の 2 体の変異体（+ -> - と RETURN_ZERO）をどちらも検出する。
+// TestAddSmall and TestAddBig both detect Add's two mutants (+ -> - and RETURN_ZERO).
 func TestAddSmall(t *testing.T) {
 	if Add(1, 2) != 3 {
 		t.Fatal("wrong")
@@ -22,21 +22,21 @@ func TestAddBig(t *testing.T) {
 	}
 }
 
-// TestAddFive は RETURN_ZERO だけを検出する（5 - 0 も 5 である）。
+// TestAddFive detects only RETURN_ZERO (5 - 0 is also 5).
 func TestAddFive(t *testing.T) {
 	if Add(5, 0) != 5 {
 		t.Fatal("wrong")
 	}
 }
 
-// TestAddZero は Add に到達するが、どの変異体も検出しない。
+// TestAddZero reaches Add but detects no mutant.
 func TestAddZero(t *testing.T) {
 	if Add(0, 0) != 0 {
 		t.Fatal("wrong")
 	}
 }
 
-// TestMul は補助の check を使う。
+// TestMul uses the helper check.
 func TestMul(t *testing.T) {
 	check(t, Mul(2, 3), 6)
 }

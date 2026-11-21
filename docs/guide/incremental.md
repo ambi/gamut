@@ -1,36 +1,36 @@
-# gamut の手引き：繰り返しの実行
+# gamut guide: incremental runs
 
-この文書は、判定の再利用、差分と変異体の指定、統合モード、変更が壊しうるテストの選択を説明する。
+This document covers reusing verdicts, selecting by diff and by mutant, integration mode, and selecting the tests a change may break.
 
-## 判定の再利用
+## Reusing verdicts
 
-判定はキャッシュに保存し、次の実行では、囲む宣言、それが参照する同じパッケージの宣言、手元のモジュールの依存パッケージ、到達したテスト、環境（Go の版、gamut、`go.mod`、`go.sum`、フラグ）が変わらない変異体を実行しない。
-被覆の記録もテストごとに保存し、変わった宣言に入っていたテスト、変わったテスト、新しいテストだけを測り直す。
-コメントや空白の変更、行の移動では実行し直さない。
-Ctrl-C で止めても、それまでの判定は保存される。
-規則は [設計](../design/reuse.md#判定の再利用) が定める。
+Verdicts are saved in the cache. The next run does not run a mutant again when its enclosing declaration, the declarations of the same package it refers to, the local module's packages it depends on, the tests that reached it, and the environment (the Go version, gamut, `go.mod`, `go.sum`, the flags) are unchanged.
+Coverage records are saved per test too, and only tests that entered a changed declaration, changed tests, and new tests are measured again.
+Changes to comments or whitespace, and moved lines, do not cause a rerun.
+Stopping with Ctrl-C keeps the verdicts reached so far.
+The [design](../design/reuse.md#reusing-verdicts) defines the rules.
 
-## 差分、変異体の指定、統合モード
+## Diffs, selecting mutants, and integration mode
 
 ```console
-# main から変えた箇所の変異体だけを判定する。ほかは PENDING になる。
+# Judge only the mutants at code changed since main. The rest become PENDING.
 gamut -since main ./path/to/module/...
-# 生き残りを埋めるテストを書いたら、その変異体だけを確かめ直す。
+# After writing a test for a survivor, check just that mutant again.
 gamut -mutant 'pkg/file.go::CONDITIONALS_BOUNDARY::IsAdult::1a2b' ./path/to/pkg
-# 呼び出し元のパッケージのテストでも検出を試す。
+# Also try to detect mutants with the tests of calling packages.
 gamut -integration ./path/to/pkg
 ```
 
-`-since` は、差分の外でも、前回の検出テストが消えた変異体を再検査し、検出されなくなったものを、報告の `gamut.previouslyKilledBy` に前回の検出テストを入れて報告する。
-`-integration` では、逆依存パッケージのテストの名前を `<import パス>.<テスト名>` で表す。
-どのテストも変異箇所に到達しない逆依存パッケージは、次の実行からビルドしない。
-規則は [設計](../design/selection.md#判定する変異体の選択) と [設計](../design/selection.md#統合モード) が定める。
+`-since` also rechecks mutants outside the diff whose previous detecting test is gone, and reports those no longer detected with the previous detecting test in the report's `gamut.previouslyKilledBy`.
+Under `-integration`, a test of a reverse dependency is named `<import path>.<test name>`.
+Reverse dependencies where no test reaches a mutated site are not built from the next run on.
+The [design](../design/selection.md#selecting-mutants-to-judge) and the [design](../design/selection.md#integration-mode) define the rules.
 
-## 変更が壊しうるテストの選択
+## Selecting the tests a change may break
 
-`gamut select-tests` は、前回の判定から、差分が壊しうるテストを何も実行せずに選ぶ。
-変わった宣言の変異体を検出したテスト、そこに到達したテスト、変わったテストの順に並べ、パッケージごとに `go test -run` の正規表現を出す（`-format json` で理由も出す）。
-判定と同じフラグで、前に gamut を実行しておく。
+`gamut select-tests` selects, from the previous verdicts and without running anything, the tests the diff may break.
+It orders them as tests that detected mutants of changed declarations, tests that reached those declarations, then changed tests, and prints a `go test -run` regular expression per package (`-format json` also gives the reasons).
+Run gamut beforehand with the same flags as for judging.
 
 ```console
 gamut select-tests -since main ./path/to/pkg

@@ -30,7 +30,7 @@ func TestSourceDeps_ListsLocalPackagesTheTestBinaryUses(t *testing.T) {
 			got[path] = append(got[path], rel(f))
 		}
 	}
-	// b は a を import する。自分の Go ファイルとテストファイルは鍵が別に持つので含めない。
+	// b imports a. Its own Go and test files are held separately by the key, so they are not included.
 	want := map[string][]string{"multi/a": nil, "multi/b": {"a/a.go"}, "multi/c": nil}
 	for path, w := range want {
 		if !slices.Equal(got[path], w) {

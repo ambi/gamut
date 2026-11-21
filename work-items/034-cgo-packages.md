@@ -5,41 +5,15 @@ depends_on: []
 created_at: 2026-11-21
 ---
 
-# cgo を使うパッケージを判定する
+# Judge packages that use cgo
 
-## 動機
+## Motivation
 
-読み込みは、cgo を使うパッケージ（`CgoFiles` を持つパッケージ）を誤りとして止める。
-`go/types` で `import "C"` を検査するには cgo の前処理が要り、schemata の書き換えも cgo のファイルを扱わないためである。
-実在のプロジェクトでは、パッケージの一部だけが cgo を使うことがあり、そのモジュールで `./...` を指定すると判定全体が止まる。
+Loading stopped with an error on packages with `CgoFiles`, so `./...` on a module where only some packages use cgo stopped the whole run.
 
-## 対象範囲
+## Summary
 
-- cgo を使うパッケージを、止めずに飛ばし、飛ばしたことを報告する。`./...` の判定が、cgo のパッケージ以外について続くようにする。
-- そのうえで、cgo のパッケージのうち、`import "C"` を持たない Go ファイルを変異の対象にする。型検査は、`go list` の `CompiledGoFiles`（cgo の前処理の後のファイル）で行う。
-
-## 対象外
-
-- `import "C"` を持つファイルの変異。前処理の後のファイルは生成されたコードで、位置と識別子を元のソースに戻す手間が大きい。
-- C のソースの変異。
-
-## 設計
-
-前処理の後のファイルで型を検査するには、`go list -compiled` が要り、前処理のために C コンパイラが要る。
-C コンパイラがない環境では、前の段階（飛ばして報告する）に戻る。
-
-## 完了の条件
-
-- cgo を使うパッケージを含むモジュールに `./...` を指定しても、ほかのパッケージの判定が止まらず、飛ばしたパッケージを報告する。
-- cgo を使うパッケージの、`import "C"` を持たないファイルの変異体を判定する。
-
-## 検証
-
-- cgo を使うパッケージを含む固定モジュールでの、端から端までのテスト（C コンパイラのある環境で）。
-
-## 要約
-
-- cgo のパッケージがあるときだけ `go list -e -compiled` を実行し、`CompiledGoFiles` のうち `GoFiles` にないもの（cgo の生成物）を、型の検査にだけ使うファイル（`Package.Others`）に加えた。変異の対象は `GoFiles` のままなので、`import "C"` を持つファイルは変異しない。ビルドは `go test -c -overlay` が cgo を処理する。
-- 等価の自動検出は、`go tool compile` に cgo の生成物を渡す手順を持たないので、cgo のパッケージでは行わない。
-- 前処理に失敗すると `CompiledGoFiles` が空になるので、そのパッケージを飛ばし、`load.WithHint` の戻り値の `Skipped` に理由を返す。gamut は警告、報告の `skipped_packages`、要約の節に出す。すべて飛ばしたときは誤り（終了コード 1）にする。
-- 固定モジュール `testdata/cgo`（cgo のファイルと純粋なファイルを持つ `c` と、`plain`）の端から端までのテスト（`TestCgo`）で、C コンパイラがあれば `c/pure.go` と `plain` を判定し `c/c.go` を変異しないこと、`CC` を存在しないパスにすると `cgo/c` を飛ばして報告し `plain` を判定することを表明した。C コンパイラがない環境では、前者を飛ばす。
+- Only when cgo packages exist, `go list -e -compiled` runs, and the files in `CompiledGoFiles` but not in `GoFiles` (cgo's outputs) are added to `Package.Others`, used only for type-checking. Mutation targets stay `GoFiles`, so files with `import "C"` are never mutated. `go test -c -overlay` handles cgo in builds.
+- Equivalence detection is not done for cgo packages, since `go tool compile` is not given cgo's outputs.
+- When preprocessing fails, `CompiledGoFiles` is empty, and the package is skipped with the reason in `Skipped`; gamut warns and lists it in the report and summary. If every package is skipped, it is an error (exit code 1).
+- `TestCgo` (`testdata/cgo`) asserts that with a C compiler `c/pure.go` and `plain` are judged and `c/c.go` is not mutated, and that with `CC` pointing nowhere `cgo/c` is skipped and `plain` is still judged.

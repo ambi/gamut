@@ -1,147 +1,147 @@
-# gamut の設計：判定と報告
+# gamut design: verdicts and reports
 
-この文書は、判定の状態、報告の形式、終了コードと品質の条件、設定ファイル、変更が壊しうるテストの選択、kill matrix を定める。
-全体の目的とロードマップは [設計の概要](README.md) が定める。
+This document defines the statuses, report formats, exit codes and the quality gate, the config file, selecting the tests a change may break, and the kill matrix.
+The [design overview](README.md) sets out the overall purpose and roadmap.
 
-## 判定と報告
+## Verdicts and reports
 
-| 状態 | 意味 |
+| Status | Meaning |
 | --- | --- |
-| `KILLED` | 選んだテストのどれかが失敗した |
-| `LIVED` | 生き残った。`reason` が `not infected`（到達したが値が変わらない）か `not detected`（値は変わったが失敗しない） |
-| `NOT COVERED` | どのテストも到達しなかった |
-| `NOT VIABLE` | 変異後のパッケージが型検査を通らない |
-| `TIMED OUT` | 時間切れの上限を超えた |
-| `PENDING` | 選択（`-since`）の外にあり、判定しなかった。数えない |
+| `KILLED` | One of the chosen tests failed |
+| `LIVED` | It survived. The reason is `not infected` (reached, but the value did not change) or `not detected` (the value changed, but nothing failed) |
+| `NOT COVERED` | No test reached it |
+| `NOT VIABLE` | The mutated package fails to type-check |
+| `TIMED OUT` | It exceeded the timeout |
+| `PENDING` | Outside the selection (`-since`) and not judged. Not counted |
 
-状態の名前は、gamut の内部と標準出力の要約で使う。機械向けの報告では、次の節のとおり mutation-testing-elements の状態に写す。
+These status names are used inside gamut and in the summary on stdout. The machine-readable report maps them to mutation-testing-elements statuses as the next section describes.
 
-### 報告の形式
+### Report formats
 
-`-reporter` で形式を選ぶ（繰り返し可）。既定は `text` で、`-o` を指定すれば `json` も書く。
+`-reporter` chooses the formats (repeatable). The default is `text`; with `-o`, `json` is written too.
 
-| 形式 | 書き出し先 | 中身 |
+| Format | Destination | Contents |
 | --- | --- | --- |
-| `text` | 標準出力 | 生き残りを理由ごとに並べた要約 |
-| `json` | `-o`（なければ `-report-dir`（既定 `.gamut/report`）の `mutation.json`） | mutation-testing-elements のスキーマ 2 |
-| `html` | `-report-dir` の `mutation.html` | `json` の報告を埋め込んだ 1 つの HTML |
+| `text` | stdout | A summary listing the survivors by reason |
+| `json` | `-o` (otherwise `mutation.json` in `-report-dir`, `.gamut/report` by default) | mutation-testing-elements schema 2 |
+| `html` | `mutation.html` in `-report-dir` | One HTML file embedding the `json` report |
 
-機械向けの報告は `json` の 1 つだけにする。
+There is only one machine-readable report, `json`.
 
-- mutation-testing-elements の形式は、公開された JSON Schema に版があり、多くの言語のミューテーションテストツールが書き、これを読む閲覧画面やダッシュボードをそのまま使える。形式を 2 つ保つと、情報を足すたびに両方の形を決めることになる。
-- 報告は出力にだけ使い、gamut のどのコマンドも入力に読まない。シャードのまとめ（`gamut merge`）はキャッシュに残した内部の報告を、変更のない再実行もキャッシュを読む。報告の形を内部の都合に縛らないためである。内部の報告（`report.Report`）の形は外向きの形と切り離し、`report.MTE` で写す。
-- 状態は、`KILLED`→Killed、`LIVED`→Survived（分類を `statusReason`）、`NOT COVERED`→NoCoverage、`NOT VIABLE`→CompileError、`TIMED OUT`→Timeout、`PENDING`→Pending に対応させる。数えない変異体は Ignored にし、理由を `statusReason` に `accepted: `（受理）、`equivalent: `（`EQUIVALENT`）、`ignored by comment: `（無効化コメント）を前に付けて入れる。受理した変異体は判定を保つので、判定した状態を `gamut.acceptedStatus` に残す。
-- 到達したテストを `coveredBy`、検出したテストを `killedBy`（kill matrix ならすべて）に入れる。gamut はテストのファイルを記録しないので、`testFiles` は名前のないファイル 1 つに、テストの名前を識別子として並べる。
-- スキーマにない情報は、`gamut` という名前のオブジェクトにまとめる。スキーマが将来フィールドを足しても衝突しないためである。変異体の `gamut` は `original`、`mode`、`cached`、`critical`、`previouslyKilledBy`、`acceptedStatus` を、最上位の `gamut` は `goModule`、`package`、`packages`、`mutationScore`、`testEfficacy`、`mutationsCoverage`、`thresholdBreak`、`elapsedTime`、`counts`、`staleAccepted`、`unrepeatableTests`、`maxDepthExcluded`、`skippedPackages`、`killMatrix` を持つ。gamut の版は `framework.version` に入れる。
-- `files` の鍵はモジュール相対のパスで、ファイルの中身を含むので、モジュールのディレクトリから読む。`location` の終わりは、置き換える字句が複数行にわたる（`BRANCH_*`、`RETURN_ERROR_NIL`）ときも、最後の改行の後ろの行と列にする。
-- 最上位の `gamut.package` は、1 パッケージならその import パス、複数なら引数に指定したパターンを空白でつないだものにし、判定したパッケージの import パスを `packages` に並べる。
-- 閾値は、スキーマが整数を求めるので、`-threshold-high` と `-threshold-low` を丸めて入れる。
-- HTML は、閲覧画面のスクリプト（`mutation-testing-elements`）を同梱せず、報告のスキーマと同じ版（3.9.0）を固定して CDN から読み込む。同梱すると、版の更新と使用許諾の管理が要る。報告の JSON は `encoding/json` が `<` と `>` をエスケープするので、埋め込んだソースの `</script>` で script 要素が閉じない。
-- スキーマへの適合は、`internal/report/testdata` に固定したスキーマ（mutation-testing-report-schema 3.9.0、Apache License 2.0、同じディレクトリに使用許諾）で検証する。検証は、このスキーマが使うキーワードだけを扱う、テストの中の小さな検証器で行う。外部モジュールを足さず、ネットワークにも依存しない。
+- The mutation-testing-elements format has a published, versioned JSON Schema, is written by mutation testing tools for many languages, and works with the viewers and dashboards that read it. Keeping two formats would mean deciding both shapes for every piece of information added.
+- Reports are output only; no gamut command reads them as input. Combining shards (`gamut merge`) reads the internal report kept in the cache, and unchanged reruns read the cache too. That keeps the report's shape free of internal needs. The internal report (`report.Report`) is decoupled from the outward shape, and `report.MTE` maps it.
+- Statuses map as `KILLED`→Killed, `LIVED`→Survived (the kind in `statusReason`), `NOT COVERED`→NoCoverage, `NOT VIABLE`→CompileError, `TIMED OUT`→Timeout, `PENDING`→Pending. Mutants that are not counted are Ignored, with the reason in `statusReason` prefixed by `accepted: ` (accepted), `equivalent: ` (`EQUIVALENT`), or `ignored by comment: ` (disable comments). Accepted mutants keep their verdicts, so the judged status stays in `gamut.acceptedStatus`.
+- Reaching tests go in `coveredBy`, and killing tests in `killedBy` (all of them for the kill matrix). gamut does not record test files, so `testFiles` lists the test names as identifiers in a single file with an empty name.
+- Information not in the schema goes in an object named `gamut`, so that fields the schema adds in the future cannot collide. A mutant's `gamut` holds `original`, `mode`, `cached`, `critical`, `previouslyKilledBy`, and `acceptedStatus`; the top-level `gamut` holds `goModule`, `package`, `packages`, `mutationScore`, `testEfficacy`, `mutationsCoverage`, `thresholdBreak`, `elapsedTime`, `counts`, `staleAccepted`, `unrepeatableTests`, `maxDepthExcluded`, `skippedPackages`, and `killMatrix`. The gamut version goes in `framework.version`.
+- The keys of `files` are module-relative paths, and each file includes its contents, read from the module directory. The end of `location` is the line and column after the last line break even when the replaced text spans several lines (`BRANCH_*`, `RETURN_ERROR_NIL`).
+- The top-level `gamut.package` is the import path for one package, or the argument patterns joined by spaces for several, and `packages` lists the import paths of the judged packages.
+- The schema requires integer thresholds, so `-threshold-high` and `-threshold-low` are rounded.
+- The HTML does not bundle the viewer script (`mutation-testing-elements`); it loads the same version as the report schema (3.9.0), pinned, from a CDN. Bundling would mean managing version updates and the license. `encoding/json` escapes `<` and `>` in the report JSON, so `</script>` in embedded sources does not close the script element.
+- Conformance to the schema is checked against the schema fixed in `internal/report/testdata` (mutation-testing-report-schema 3.9.0, Apache License 2.0, with the license in the same directory). The check uses a small validator inside the test that handles only the keywords this schema uses. It adds no external module and needs no network.
 
-### エージェント向けの報告
+### Report for agents
 
-`-reporter agent` は、コーディングエージェントが生き残りを埋めるための JSON を 1 つ、標準出力に書く。
-進行状況は標準エラーに出るので、標準出力をそのまま JSON として読める。
-同じく標準出力に書く `text` と `-annotations` とは併用できない（終了コード 1）。
+`-reporter agent` writes one JSON document to stdout for coding agents to fill survivors.
+Progress goes to stderr, so stdout can be read as JSON as it is.
+It cannot be combined with `text` and `-annotations`, which also write to stdout (exit code 1).
 
-- 直すべき生き残り（受理していない `LIVED` と `NOT COVERED`）ごとに、識別子、分類（`not detected`、`not infected`、`not covered`、`no longer detected`）、位置、変異の前後の行、囲む最上位の宣言のソース（Doc コメントを含む）、到達したテスト（名前に宣言の名前を含むものを先に最大 10 件と総数）、直し方の指針、重要領域かを持つ。
-- 指針は分類と変異演算子に合わせる。たとえば境界の比較の `not infected` は「両辺が等しい場合を足す」、`not covered` は「宣言を呼ぶ場合を表駆動のテストか `t.Run` で足す」とする。
-- 警告として、`t.Skip` を呼びうるテストと、テストバイナリ自身（`os.Args[0]`、`os.Executable`）を `exec.Command` で起動するテストを挙げる。前者は飛ばしたときにだけ検出できない変異体を生き残りに見せ、後者は子プロセスの中の到達と失敗が判定に現れないことがある。どちらも構文木の近似で、型は見ない。
-- ソースとテストファイルは、報告とモジュールのディレクトリから読み直す。変更のない再実行で前回の報告を返すときも同じ形で出せる。
+- For each survivor to fix (unaccepted `LIVED` and `NOT COVERED`), it holds the identifier, the kind (`not detected`, `not infected`, `not covered`, `no longer detected`), the position, the line before and after the mutation, the source of the enclosing top-level declaration (Doc comment included), the reaching tests (up to 10, those whose names contain the declaration's name first, with the total), a hint on how to fix it, and whether it is in a critical region.
+- Hints fit the kind and the mutator. For instance, a `not infected` boundary comparison gets "add the case where both sides are equal", and `not covered` gets "add the cases that call the declaration, in a table-driven test or with `t.Run`".
+- As warnings, it lists tests that may call `t.Skip` and tests that start the test binary itself (`os.Args[0]`, `os.Executable`) with `exec.Command`. The former make mutants that are undetectable only when skipped look like survivors; for the latter, reach and failures inside the child process may not show in the verdicts. Both are approximations on the syntax tree, without types.
+- Sources and test files are read again from the report and the module directory, so the same output is possible when an unchanged rerun returns the previous report.
 
-利用者のエージェント向けの skill を、リポジトリのルートの `skills/` に置く。
-`gamut` は導入、実行、設定、終了コード、CI を、`mutation-test-loop` は生き残りを 1 体ずつ埋める手順（`-reporter agent -since` で得る、分類に合わせてテストを書く、`-mutant` で確かめ直す、等価なら `gamut accept` で受理する）を定める。
+Skills for users' agents live in `skills/` at the repository root.
+`gamut` covers setup, running, configuration, exit codes, and CI; `mutation-test-loop` covers the steps to fill survivors one at a time (get them with `-reporter agent -since`, write tests for the kind, check again with `-mutant`, and accept with `gamut accept` if equivalent).
 
-### 不要かもしれないコードの報告
+### Report of possibly unneeded code
 
-`-reporter simplify` は、コードを消す変異（`STATEMENT_REMOVE`、`CONDITIONS_CONSTANT`）の生き残りを、囲む関数ごとに、消える字句とともに標準出力に書く。
-コードを消しても失敗するテストがないのは、テストの不足か、コードが不要かのどちらかなので、「消すか、それを必要とするテストを足すか」の見直しの候補にする。
+`-reporter simplify` writes to stdout, by enclosing function, the survivors of mutations that remove code (`STATEMENT_REMOVE`, `CONDITIONS_CONSTANT`), with the text that disappears.
+When removing code makes no test fail, either the tests are missing or the code is unneeded, so these are candidates for review: "remove it, or add a test that needs it".
 
-- 候補にするのは、受理していない `LIVED` のうち `not detected` のもの、つまりテストがそのコードを実行し、消したことで値も変わったのに、どのテストも失敗しなかったものだけである。
-- `not infected`（エラーの分岐に入る入力がないなど）と `NOT COVERED` は、入力やテストのないことが問題であることが多いので、数だけを出す。2026-11-21 に idmagic の `usecases` で測ると、削除の変異の生き残り 511 体のうち `not infected` が 254 体、`NOT COVERED` が 170 体で、それらを並べると候補が埋もれた。残る 87 体（32 関数）を候補にした。
-- 複数行の文は最初の行だけを出す。
-- 受理した変異体と無効化コメントで止めた変異体は含めない。点数と品質の条件には影響しない。
-- `CONDITIONS_CONSTANT` は既定の集合にないので、`-only` で選んだときに候補が増える。
-- 同じく標準出力に書く `agent` とは併用できない。
+- Candidates are only unaccepted `LIVED` with `not detected`: tests ran the code and removing it changed a value, yet no test failed.
+- `not infected` (no input enters an error branch, for instance) and `NOT COVERED` usually mean inputs or tests are missing, so only their numbers are shown. They outnumber the `not detected` survivors many times over, and listing them buries the candidates.
+- Only the first line of a multi-line statement is shown.
+- Accepted mutants and mutants stopped by disable comments are excluded. It does not affect the score or the quality gate.
+- `CONDITIONS_CONSTANT` is not in the default set, so choosing it with `-only` adds candidates.
+- It cannot be combined with `agent`, which also writes to stdout.
 
-### GitHub の注釈と Action
+### GitHub annotations and the Action
 
-`-annotations github` は、直すべき生き残り（受理していない `LIVED` と `NOT COVERED`）を、GitHub Actions のワークフローコマンド（`::warning file=,line=,col=,title=::`）で標準出力に書く。
-Pull Request では、その行に注釈として表示される。
+`-annotations github` writes the survivors to fix (unaccepted `LIVED` and `NOT COVERED`) to stdout as GitHub Actions workflow commands (`::warning file=,line=,col=,title=::`).
+On a pull request, they appear as annotations on those lines.
 
-- 重要領域の生き残りは品質の条件を満たさないので `::error`、ほかは `::warning` にする。題名に分類と変異演算子、本文に変異、直し方の指針、受理の命令を入れる。
-- ファイルはリポジトリ相対で指定するので、`git rev-parse --show-toplevel` からモジュールのルートへの相対パスを前に付ける。
-- 本文の `%`、`\r`、`\n` と、属性ではさらに `:`、`,` を GitHub の規則でエスケープする。
+- Survivors in critical regions fail the quality gate, so they are `::error`; the others are `::warning`. The title holds the kind and the mutator, and the body the mutation, a hint on how to fix it, and the command to accept it.
+- Files are given relative to the repository, so the path from `git rev-parse --show-toplevel` to the module root is prepended.
+- `%`, `\r`, and `\n` in the body, and also `:` and `,` in properties, are escaped by GitHub's rules.
 
-リポジトリのルートの `action.yml`（複合 Action）は、gamut を `go install` で入れ、`-annotations github` を付けて実行する。
+The composite Action `action.yml` at the repository root installs gamut with `go install` and runs it with `-annotations github`.
 
-- 入力は `since`（既定は Pull Request の基準のコミット、ほかは全体の実行。`none` で全体の実行）、`args`（既定 `./...`）、`working-directory`、`cache`、`version` である。Go は利用者の手順（`actions/setup-go` など）で入れる。
-- `.gamut/` を Actions のキャッシュに保存する。鍵は参照とコミットで、同じ参照の最新のもの、なければ Pull Request の基準のブランチのものを戻す。キャッシュの記録はモジュール相対のパスで引くので、チェックアウト先が変わっても再利用できる。
-- 品質の条件で失敗しても、判定は有効なのでキャッシュを保存してから、gamut の終了コードで終える。
-- 浅いチェックアウトでは、基準のコミットを取得し、merge-base が見つかるまで履歴を 100 ずつ深め、10 回で見つからなければ全履歴を取得する。
+- Its inputs are `since` (by default the base commit on pull requests, and a full run elsewhere; `none` forces a full run), `args` (default `./...`), `working-directory`, `cache`, and `version`. Go is installed by the user's own steps (`actions/setup-go` and so on).
+- `.gamut/` is saved in the Actions cache. The key is the ref and the commit; the latest cache of the same ref is restored, or else that of the pull request's base branch. Cache records are looked up by module-relative paths, so they are reused even when the checkout location changes.
+- Even when the quality gate fails, the verdicts are valid, so the cache is saved before exiting with gamut's exit code.
+- With a shallow checkout, the base commit is fetched, and history is deepened 100 commits at a time until the merge base is found; if it is not found after 10 tries, the full history is fetched.
 
-### 終了コード
+### Exit codes
 
-| コード | 意味 |
+| Code | Meaning |
 | --- | --- |
-| 0 | 判定を終え、品質の条件を満たした |
-| 1 | 引数、設定、読み込み、ビルドなどの誤り |
-| 2 | 判定を終えたが、品質の条件を満たさない |
-| 4 | 変異なしでテストが失敗し、判定しなかった |
-| 5 | forced fail の自己検査で変異がテストに届かないと分かり、判定しなかった |
+| 0 | Judging finished and the quality gate is met |
+| 1 | An error in arguments, configuration, loading, building, and so on |
+| 2 | Judging finished but the quality gate is not met |
+| 4 | Tests fail without mutations, so nothing was judged |
+| 5 | The forced-fail self-check found that mutations do not reach the tests, so nothing was judged |
 
-品質の条件を満たさなくても、報告と要約は書く。
+The report and the summary are written even when the quality gate is not met.
 
-### 品質の条件
+### Quality gate
 
-全体の点数だけを閾値にすると、等価な変異体のせいで 100% にできず、点数を上げるためのテストが増える。
-そこで、認証、認可、金額の計算のような箇所を重要領域として、領域内ではすべての変異体の検出か明示的な受理を求め、全体には閾値を置く。
+With only a threshold on the overall score, equivalent mutants make 100% unreachable, and tests get written just to raise the score.
+So places such as authentication, authorization, and money calculations can be made critical regions, where every mutant must be detected or explicitly accepted, while the whole has a threshold.
 
-- 点数（報告の `gamut.mutationScore`）は、検出した変異体（`KILLED`、`TIMED OUT`）の、検出したものと生き残り（`LIVED`、`NOT COVERED`）の和に対する割合である。到達した変異体のうちの検出の割合（`gamut.testEfficacy`）は、到達しない変異体を含めないので、テストのない箇所が多くても高く出る。閾値はこの点数に当てる。判定する変異体がなければ 100 とする。
-- 重要領域は、`-critical`（設定の `critical`）の glob に当たるファイルと、関数の宣言の Doc に `//gamut:critical` を持つ関数である。glob はモジュール相対の `/` 区切りのパスに `path.Match` で当て、要素 `**` は 0 個以上のディレクトリに当たる。報告の変異体には `critical` を付ける。関数の Doc の外の `//gamut:critical` は警告して無視する。
-- 重要領域に、受理していない生き残り（`LIVED`、`NOT COVERED`）があれば、条件を満たさない。受理した変異体と `EQUIVALENT` は許す。要約では、重要領域の生き残りを先頭の組に並べ、重要領域の変異体の数と生き残りの数を点数の行に添える。
-- 点数は `-threshold-high`（既定 80）以上を `high`、`-threshold-low`（既定 60）以上を `low`、それ未満を `danger` として要約に付ける。`-threshold-break`（既定 0、無効）が正なら、点数がそれ未満のとき条件を満たさない。
-- `-fail-on-survived` なら、受理していない生き残りが 1 体でもあれば条件を満たさない。
-- `-since` の実行では、`PENDING` は生き残りに数えないので、条件は選んだ変異体だけに当たる。
+- The score (the report's `gamut.mutationScore`) is the share of detected mutants (`KILLED`, `TIMED OUT`) in the detected plus the survivors (`LIVED`, `NOT COVERED`). The share of detected among reached mutants (`gamut.testEfficacy`) leaves out mutants nothing reaches, so it stays high even with much untested code. Thresholds apply to the score. With no mutants to judge, it is 100.
+- Critical regions are the files matching the globs of `-critical` (the config's `critical`) and functions with `//gamut:critical` in their declaration's Doc. Globs match module-relative `/`-separated paths with `path.Match`, and an element `**` matches zero or more directories. Mutants in the report carry `critical`. `//gamut:critical` outside a function's Doc is ignored with a warning.
+- An unaccepted survivor (`LIVED`, `NOT COVERED`) in a critical region fails the gate. Accepted mutants and `EQUIVALENT` are allowed. The summary lists critical survivors in the first group and adds the numbers of mutants and survivors in critical regions to the score line.
+- The summary labels a score at or above `-threshold-high` (default 80) `high`, at or above `-threshold-low` (default 60) `low`, and below it `danger`. When `-threshold-break` (default 0, disabled) is positive, a score below it fails the gate.
+- With `-fail-on-survived`, any unaccepted survivor fails the gate.
+- In `-since` runs, `PENDING` does not count as surviving, so the gate applies only to the selected mutants.
 
-## 設定ファイル
+## Config file
 
-CI と手元で設定がずれないよう、モジュールのルートの `gamut.json`（`-config` で別のファイル）から設定を読む。
-形式は [schema/gamut.schema.json](../../schema/gamut.schema.json) が定める。
+So that CI and local runs do not drift apart, settings are read from `gamut.json` at the module root (another file with `-config`).
+[schema/gamut.schema.json](../../schema/gamut.schema.json) defines the format.
 
-- 項目は、同じ意味のフラグを持つものだけにする（`mutators`→`-only`、`exclude_files`→`-exclude-files`、`timeout.factor`→`-timeout-factor`、`timeout.min`→`-timeout-min`、`workers`、`tags`、`test_flags`→`-test-flags`）。設定の値は、コマンドラインで指定されなかったフラグにだけ入れる。後段は、フラグで指定したときと同じ値を受け取るので、同じ判定になる。
-- 未知の項目と、値の誤り（未知の変異演算子、正規表現、時間の形）は、終了コード 1 で止める。誤った項目が黙って無視されると、CI の設定が効いていないことに気づけないためである。
-- arid の規則、重要領域、閾値の項目は、それぞれの機能と一緒に足す。機能より先に受け付けると、効かない項目を書けてしまう。
-- 設定ファイル自体はキャッシュの鍵に入れない。判定に影響する値（変異演算子、タグ、テストのフラグ、時間切れ）は、フラグと同じく実際の値でキャッシュの環境に入る。`exclude_files` は変異体の集合だけを変えるので、環境ではなく、変更のない再実行の鍵に入れる。外したファイルの変異体の記録は、列挙されなかった変異体として捨てる。
-- `exclude_files` の正規表現は、モジュール相対の `/` 区切りのパスに当てる。外した後の変異体の番号は 1 から振り直す（schemata は番号を補助ファイルの配列の添字に使う）。
-- 形式は標準ライブラリで読める JSON に限る。YAML や TOML は依存を増やす。
+- There are keys only for settings that have an equivalent flag (`mutators`→`-only`, `exclude_files`→`-exclude-files`, `timeout.factor`→`-timeout-factor`, `timeout.min`→`-timeout-min`, `workers`, `tags`, `test_flags`→`-test-flags`). Config values go only into flags not given on the command line. Later stages receive the same values as when the flags are given, so the verdicts are the same.
+- Unknown keys and invalid values (unknown mutators, regular expressions, durations) stop with exit code 1. A wrong key silently ignored would hide that a CI setting has no effect.
+- Keys for arid rules, critical regions, and thresholds are added together with those features. Accepting them before the features would allow writing keys that do nothing.
+- The config file itself is not part of the cache keys. Values that affect verdicts (mutators, tags, test flags, timeouts) enter the cache's environment by their actual values, as with flags. `exclude_files` changes only the set of mutants, so it is part of the unchanged-rerun key rather than the environment. Records of mutants in excluded files are discarded as mutants not enumerated.
+- `exclude_files` regular expressions match module-relative `/`-separated paths. After excluding, mutants are numbered from 1 again (schemata uses the numbers as indexes into the helper file's arrays).
+- The format is limited to JSON, which the standard library reads. YAML or TOML would add dependencies.
 
-## 変更が壊しうるテストの選択
+## Selecting the tests a change may break
 
-`gamut select-tests -since <ref> [フラグ] <パターン>` は、前回の判定と被覆の記録から、差分が壊しうるテストを、何も実行せずに選ぶ。
-判定と同じフラグの解釈、読み込み、鍵の計算を通り、テストの実行の手前で分かれる。キャッシュの環境は判定と同じ設定から求めるので、判定と同じフラグで実行する。
+`gamut select-tests -since <ref> [flags] <patterns>` chooses, from the previous verdicts and coverage records, the tests a diff may break, without running anything.
+It goes through the same flag parsing, loading, and key computation as judging, and branches off just before running tests. The cache's environment is computed from the same settings as judging, so run it with the same flags as judging.
 
-- 群 1：変わった宣言の変異体を検出したテストを、検出数の多い順に。kill matrix の判定なら検出したテストのすべてを、そうでなければ最初の 1 件を数える。
-- 群 2：変わった宣言の変異体に到達したほかのテストを、到達数の多い順に。前回の判定のない宣言（新しい宣言、変異体のない宣言）があれば、パッケージのテスト全体を加える。
-- 群 3：変わったテストと、変わったテスト用の補助を推移的に参照するテスト（`Keys.ChangedTests`）。
-- 前回の判定は、変異体の識別子ではなく、ファイルと宣言の名前（識別子の宣言の部分）で引く。宣言を書き換えると識別子は変わりうるためである。そのため、キャッシュは読むだけで、消えた変異体の記録を捨てる処理も書き込みもしない。
-- `-format run` は、パッケージごとに `go test -run` に渡せる正規表現を出す。`-format json` は、テストごとに群、検出数、到達数、選んだ理由を出す。
-- キャッシュがないか、環境が変わって読み捨てたときは、終了コード 1 で止める。
-- idmagic の `usecases` で、1 関数を変えたときの選択は 0.22 秒だった。
+- Group 1: tests that killed mutants of changed declarations, by number of kills. For kill-matrix verdicts every killing test counts; otherwise the first one.
+- Group 2: other tests that reached mutants of changed declarations, by number of reaches. If a declaration has no previous verdicts (a new declaration, or one without mutants), the package's whole test set is added.
+- Group 3: changed tests and tests that transitively refer to changed test helpers (`Keys.ChangedTests`).
+- Previous verdicts are looked up by file and declaration name (the declaration part of the identifier), not by mutant identifier, because rewriting a declaration can change identifiers. So the cache is only read; neither discarding vanished mutants' records nor writing happens.
+- `-format run` prints, per package, a regular expression to pass to `go test -run`. `-format json` prints each test's group, kills, reaches, and the reason it was chosen.
+- Without a cache, or when it was discarded because the environment changed, it stops with exit code 1.
+- It runs no tests, so it finishes in well under a second.
 
-## kill matrix
+## Kill matrix
 
-通常の判定は最初の失敗で止めるので、変異体を検出しうるテストの全体は分からない。
-`-kill-matrix` は、変異体ごとに感染したテストをすべて実行し、検出したトップレベルのテストをすべて記録する（報告の変異体の `killers`）。
+Ordinary judging stops at the first failure, so the full set of tests that can detect a mutant is unknown.
+`-kill-matrix` runs every infected test of each mutant and records every top-level test that detects it (`killedBy` of the report's mutants).
 
-- テストバイナリは `-test.failfast` を外しても、失敗したテストを名前で報告する（`-test.v` の `--- FAIL:` の行）。そこで変異体ごとに 1 つのプロセスで感染したテストを流し、プロセスの起動を変異体ごとに 1 回にする。テストを 1 件ずつ別のプロセスで実行する案より、起動の回数がテストの数の分だけ少ない。
-- panic や `os.Exit` でプロセスが落ちたら、`=== RUN` の行があり結果の行のないテストが検出したとし、まだ始まっていないテストを新しいプロセスで実行し直す。
-- テストプロセスは使い回さない。検出したテストの後も同じプロセスで別のテストを流すので、使い回すと前の変異体の汚れが検出の全体に混ざる。idmagic の `usecases` では 6.9 秒が 44.4 秒になった（判定は同じ）。
-- 判定は `matrix` の印と検出したテストのすべてとともにキャッシュに残す。通常の実行はそれを通常の規則で再利用する。kill matrix の実行は、`KILLED` を、印があり、実行するテストとその鍵が変わらないときだけ再利用する。`LIVED` はもともとすべてのテストを実行しているので、通常の規則で再利用する。
-- 報告の `kill_matrix` に次を出し、要約にも節を設ける。
-  - 何も検出しないテスト：変異体に到達したのに 1 体も検出しなかったテスト。表明のないテストの候補である。
-  - 包含されるテスト：検出した変異体の集合が、ほかのテストの集合に真に含まれるテストと、含む側のテスト。
-  - 重複するテスト：検出した変異体の集合が同じテストの組。
-  - テストが到達したのに検出したテストのすべてが分からない変異体（`TIMED OUT`、`PENDING`）は計算から除き、数を出す。
-- 包含は今の変異体に対するもので、将来の故障に対するものではないので、テストを消す提案はしない。
+- Even without `-test.failfast`, a test binary reports failing tests by name (`--- FAIL:` lines of `-test.v`). So the infected tests of each mutant run in one process, starting one process per mutant. That is fewer launches, by the number of tests, than running each test in its own process.
+- If the process crashes with a panic or `os.Exit`, the test with a `=== RUN` line and no result line counts as detecting, and the tests not yet started run again in a new process.
+- Test processes are not reused. Other tests run in the same process after a detecting test, so with reuse, pollution from the previous mutant would mix into the whole detection. That makes it several times slower than an ordinary run.
+- Verdicts are kept in the cache with the `matrix` mark and every killing test. Ordinary runs reuse them by the ordinary rules. Kill-matrix runs reuse `KILLED` only when it has the mark and the tests to run and their keys are unchanged. `LIVED` already ran every test, so it is reused by the ordinary rules.
+- The report's `gamut.killMatrix` holds the following, and the summary has a section for it:
+  - Tests that detect nothing: tests that reached mutants but detected none. Candidates for tests without assertions.
+  - Subsumed tests: tests whose set of detected mutants is a proper subset of another test's set, with the tests that contain them.
+  - Duplicate tests: groups of tests with the same set of detected mutants.
+  - Mutants that tests reached but whose full set of killing tests is unknown (`TIMED OUT`, `PENDING`) are left out of the computation, and their number is shown.
+- Subsumption is about the current mutants, not future faults, so it never suggests removing tests.

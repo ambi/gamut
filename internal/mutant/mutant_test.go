@@ -34,12 +34,12 @@ func enumerate(t *testing.T, src string) []*mutant.Mutant {
 	return ms
 }
 
-// everywhere は、ほとんどの条件、関数、リテラル、分岐、複合代入に現れる変異演算子である。それを確かめる例でだけ数える。
+// everywhere are the mutators that appear at most conditions, functions, literals, branches, and compound assignments. They are counted only in the examples that check them.
 var everywhere = []mutant.Type{mutant.ConditionsConstant, mutant.ReturnZero, mutant.RemoveSelfAssignments,
 	mutant.IntegerIncrement, mutant.IntegerDecrement, mutant.FloatIncrement, mutant.FloatDecrement,
 	mutant.BranchIf, mutant.BranchElse, mutant.BranchCase}
 
-// TestKnown_NewOperatorsAreOffByDefault は、測ってから既定の集合を決める演算子が、既定では列挙されないことを確かめる。
+// TestKnown_NewOperatorsAreOffByDefault checks that mutators whose place in the default set is decided after measuring are not enumerated by default.
 func TestKnown_NewOperatorsAreOffByDefault(t *testing.T) {
 	for _, typ := range mutant.Known {
 		if !slices.Contains(mutant.AllTypes, typ) && !slices.Contains(mutant.OptIn, typ) {
@@ -49,7 +49,7 @@ func TestKnown_NewOperatorsAreOffByDefault(t *testing.T) {
 	if slices.Contains(mutant.AllTypes, mutant.InvertBitwise) {
 		t.Errorf("INVERT_BITWISE is enabled by default")
 	}
-	// 関数の外に置き、既定の RETURN_ZERO と STATEMENT_REMOVE の箇所を作らない。
+	// Keep it outside functions so there are no sites for the default RETURN_ZERO and STATEMENT_REMOVE.
 	pkg, err := loadOne(writeModule(t, "package m\n\nvar a, b = 1, 2\n\nvar X = a | b\n"))
 	if err != nil {
 		t.Fatal(err)
@@ -61,8 +61,8 @@ func TestKnown_NewOperatorsAreOffByDefault(t *testing.T) {
 
 func TestEnumerate_IDsDoNotDependOnLinesAndColumns(t *testing.T) {
 	before := enumerate(t, "package m\n\nfunc F(a, b int) bool { return a < b }\n")
-	after := enumerate(t, "package m\n\n// 説明を足しても識別子は変わらない。\nvar X = \"x\"\n\nfunc F(a, b int) bool {\n\treturn a < b\n}\n")
-	// 比較の 2 体と、関数の本体の RETURN_ZERO の 1 体。RETURN_ZERO の識別子も、行と列によらない。
+	after := enumerate(t, "package m\n\n// Adding a comment does not change identifiers.\nvar X = \"x\"\n\nfunc F(a, b int) bool {\n\treturn a < b\n}\n")
+	// Two for the comparison, and one RETURN_ZERO for the function body. The RETURN_ZERO identifier does not depend on lines and columns either.
 	if len(before) != 3 || len(after) != 3 {
 		t.Fatalf("got %d and %d mutants, want 3 each", len(before), len(after))
 	}
@@ -107,7 +107,7 @@ func TestEnumerate_Operators(t *testing.T) {
 			[]string{"INCREMENT_DECREMENT --->++ true"}},
 		{"log arguments are arid", "package m\n\nimport \"log\"\n\nfunc F(a int) { log.Println(a + 1) }\n",
 			nil},
-		// | と ^ は同じ優先順位なので、(a&b | a) ^ b と読まれ、外側の ^ が先に並ぶ。
+		// | and ^ have the same precedence, so this reads as (a&b | a) ^ b and the outer ^ comes first.
 		{"bitwise and, or, xor", "package m\n\nfunc F(a, b int) int { return a&b | a^b }\n",
 			[]string{"INVERT_BITWISE ^->& true", "INVERT_BITWISE |->& true", "INVERT_BITWISE &->| true"}},
 		{"shifts", "package m\n\nfunc F(a uint) uint { return a<<2 + a>>1 }\n",
@@ -133,7 +133,7 @@ func TestEnumerate_Operators(t *testing.T) {
 			[]string{"CONDITIONALS_BOUNDARY >->>= true", "CONDITIONALS_NEGATION >-><= true", "BOOLEAN_LITERAL true->false true", "BOOLEAN_LITERAL false->true true"}},
 		{"a shadowed true is not a literal", "package m\n\nfunc F() bool {\n\ttrue := false\n\treturn true\n}\n",
 			[]string{"BOOLEAN_LITERAL false->true true"}},
-		// 条件の変異体は、条件の式を訪れたときに、その中の変異体より先に並ぶ。
+		// Condition mutants are listed when the condition expression is visited, before the mutants inside it.
 		{"if conditions become true and false", "package m\n\nfunc F(a int) int {\n\tif a > 0 {\n\t\treturn 1\n\t}\n\treturn 0\n}\n",
 			[]string{"CONDITIONS_CONSTANT a > 0->true true", "CONDITIONS_CONSTANT a > 0->false true", "CONDITIONALS_BOUNDARY >->>= true", "CONDITIONALS_NEGATION >-><= true"}},
 		{"for conditions become false only", "package m\n\nfunc F(n int) int {\n\ts := 0\n\tfor i := 0; i < n; i++ {\n\t\ts++\n\t}\n\treturn s\n}\n",
@@ -181,7 +181,7 @@ func TestEnumerate_Operators(t *testing.T) {
 		{"fmt.Errorf inside logging is arid", "package m\n\nimport (\n\t\"fmt\"\n\t\"log\"\n)\n\nfunc F(err error) { log.Println(fmt.Errorf(\"x: %w\", err)) }\n",
 			nil},
 		{"returned errors become nil", "package m\n\nimport (\n\t\"errors\"\n\t\"fmt\"\n\t\"io\"\n)\n\nvar errNeg = errors.New(\"neg\")\n\nfunc F(x int) (int, error) {\n\tif x < 0 {\n\t\treturn 0, errNeg\n\t}\n\treturn x, nil\n}\n\nfunc G(err error) error { return fmt.Errorf(\"g: %w\", err) }\n\nfunc H() func() error { return func() error { return io.EOF } }\n",
-			// fmt と io はその式でだけ使うので、式を参照として残さないと import が使われなくなる。
+			// fmt and io are used only in those expressions, so without keeping the expressions as references the imports would become unused.
 			[]string{"CONDITIONALS_BOUNDARY <-><= true", "CONDITIONALS_NEGATION <->>= true", "RETURN_ERROR_NIL errNeg->func() error { if false { return errNeg }; return nil }() true",
 				"RETURN_ERROR_NIL fmt.Errorf(\"g: %w\", err)->func() error { if false { return fmt.Errorf(\"g: %w\", err) }; return nil }() true", "ERRORF_WRAP \"g: %w\"->\"g: %v\" true",
 				"RETURN_ERROR_NIL io.EOF->func() error { if false { return io.EOF }; return nil }() true"}},
@@ -192,7 +192,7 @@ func TestEnumerate_Operators(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// CONDITIONS_CONSTANT と RETURN_ZERO はほとんどの条件と関数に現れるので、それを期待しない例では数えない。
+			// CONDITIONS_CONSTANT and RETURN_ZERO appear at most conditions and functions, so examples that do not expect them do not count them.
 			expected := func(typ mutant.Type) bool {
 				return slices.ContainsFunc(tt.want, func(w string) bool { return strings.HasPrefix(w, string(typ)+" ") })
 			}
@@ -215,7 +215,7 @@ func TestEnumerate_Operators(t *testing.T) {
 	}
 }
 
-// loadOne は、dir の 1 パッケージを読む。
+// loadOne loads the one package in dir.
 func loadOne(dir string) (*load.Package, error) {
 	pkgs, err := load.Load([]string{dir}, nil)
 	if err != nil {
@@ -226,10 +226,10 @@ func loadOne(dir string) (*load.Package, error) {
 
 func TestEnumerate_SiteKeysGroupMutantsOfOneSite(t *testing.T) {
 	before := enumerate(t, "package m\n\nfunc F(a, b int) bool { return a < b && b > 0 }\n")
-	after := enumerate(t, "package m\n\n// 行をずらす。\n\nfunc F(a, b int) bool {\n\treturn a < b && b > 0\n}\n")
+	after := enumerate(t, "package m\n\n// Shift the lines.\n\nfunc F(a, b int) bool {\n\treturn a < b && b > 0\n}\n")
 	sites := map[string][]string{}
 	for i, m := range before {
-		// 条件と関数の本体を包む箇所と、リテラルの箇所は、演算子の箇所と別に確かめる。
+		// Sites wrapping conditions and function bodies, and literal sites, are checked apart from operator sites.
 		if slices.Contains(everywhere, m.Type) {
 			continue
 		}
@@ -238,7 +238,7 @@ func TestEnumerate_SiteKeysGroupMutantsOfOneSite(t *testing.T) {
 			t.Errorf("%s: site key changed with the line: %s -> %s", m.ID, m.SiteKey, after[i].SiteKey)
 		}
 	}
-	// < と > の箇所がそれぞれ 2 体ずつ（BOUNDARY と NEGATION）、&& の箇所が 1 体（INVERT_LOGICAL）の変異体を持つ。
+	// The < and > sites have two mutants each (BOUNDARY and NEGATION), and the && site has one (INVERT_LOGICAL).
 	if len(sites) != 3 {
 		t.Fatalf("got %d site keys %v, want 3", len(sites), sites)
 	}
@@ -261,7 +261,7 @@ func TestMutant_IDAtReproducesTheIDUnderAnotherPath(t *testing.T) {
 	}
 	m := ms[i]
 	for _, other := range ms {
-		// 固定の文字列で識別子を作る変異体（RETURN_ZERO など）も、自分のパスでは同じ識別子を再現する。
+		// Mutants whose identifiers use a fixed string (such as RETURN_ZERO) also reproduce the same identifier at their own path.
 		if got := other.IDAt(other.File.Rel); got != other.ID {
 			t.Errorf("%s: IDAt(own path) = %s", other.ID, got)
 		}

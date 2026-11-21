@@ -1,4 +1,4 @@
-// Package run は、schemata のテストバイナリをビルドし、被覆を記録し、変異体を判定する。
+// Package run builds the schemata test binaries, records coverage, and judges mutants.
 package run
 
 import (
@@ -19,37 +19,37 @@ import (
 	"github.com/ambi/gamut/internal/schemata"
 )
 
-// Status は判定の状態である。内部と要約の名前で、報告では mutation-testing-elements の状態に写す（report.MTE）。
+// Status is a verdict's status. These are the internal and summary names; reports map them to mutation-testing-elements statuses (report.MTE).
 type Status string
 
-// 判定の状態。
+// The statuses of verdicts.
 const (
 	Killed     Status = "KILLED"
 	Lived      Status = "LIVED"
 	NotCovered Status = "NOT COVERED"
 	NotViable  Status = "NOT VIABLE"
 	TimedOut   Status = "TIMED OUT"
-	// Pending は、選択（差分や識別子の指定）の外にあり、判定しなかったことを表す。
+	// Pending means the mutant is outside the selection (a diff or identifiers) and was not judged.
 	Pending Status = "PENDING"
-	// Equivalent は、生き残った変異体のコンパイル結果が元と同じで、どのテストでも検出できないことを表す。
+	// Equivalent means the surviving mutant compiles to the same code as the original, so no test can detect it.
 	Equivalent Status = "EQUIVALENT"
 )
 
-// 生き残りの理由。
+// The reasons for survival.
 const (
 	ReasonNotInfected = "not infected"
 	ReasonNotDetected = "not detected"
-	// ReasonSameCode は、EQUIVALENT の理由である。
+	// ReasonSameCode is the reason for EQUIVALENT.
 	ReasonSameCode = "same machine code"
 )
 
-// 判定の方式。
+// The modes of judging.
 const (
 	ModeSchemata   = "schemata"
 	ModeStandalone = "standalone"
 )
 
-// Result は 1 体の変異体の判定である。
+// Result is the verdict of one mutant.
 type Result struct {
 	Mutant   *mutant.Mutant
 	Status   Status
@@ -57,95 +57,95 @@ type Result struct {
 	Mode     string
 	Tests    []string
 	KilledBy string
-	// Killer は、検出したトップレベルのテストの名前である。KilledBy はサブテストの名前を含みうる。
+	// Killer is the name of the detecting top-level test. KilledBy may include a subtest's name.
 	Killer  string
 	Elapsed time.Duration
-	// Cached は、判定を実行せずにキャッシュから再利用したかである。
+	// Cached reports whether the verdict was reused from the cache without running.
 	Cached bool
-	// Matrix は、感染したテストをすべて実行した判定（kill matrix）かである。真なら Killers が検出したテストのすべてである。
+	// Matrix reports whether the verdict ran every infected test (kill matrix). When true, Killers are all the detecting tests.
 	Matrix bool
-	// Killers は、Matrix が真のときの、検出したトップレベルのテストの名前で、名前の順に並ぶ。
+	// Killers are, when Matrix is true, the names of the detecting top-level tests, in name order.
 	Killers []string
-	// PreviouslyKilledBy は、前回この変異体を検出したテストが消えたので再検査し、今回は検出されなかったときの、前回の検出テストである。
+	// PreviouslyKilledBy is the previous detecting test, when that test is gone, the mutant was rechecked, and this time it was not detected.
 	PreviouslyKilledBy string
 }
 
-// Options は実行の設定である。
+// Options are the settings of a run.
 type Options struct {
 	Workers int
-	// TimeoutFactor は、選んだテストの基準の実行時間に掛ける係数である。
+	// TimeoutFactor is the factor applied to the baseline running time of the selected tests.
 	TimeoutFactor float64
-	// TimeoutMin は時間切れの上限に足す固定の時間である。
+	// TimeoutMin is the fixed time added to the timeout.
 	TimeoutMin time.Duration
-	// Log は進行状況の出力先である。nil なら出さない。
+	// Log is where progress goes, or nowhere when nil.
 	Log io.Writer
-	// module は対象のモジュールのパスで、深さを数える関数を見分けるために、All が入れる。
+	// module is the path of the target module, set by All to tell apart the functions whose depth is counted.
 	module string
-	// MaxDepth が正なら、被覆の記録で、テスト関数から変異箇所までのモジュール内の関数の呼び出しの深さがこれを超える到達を数えない。
+	// When MaxDepth is positive, coverage recording does not count reach whose depth of module function calls from the test function to the mutation site exceeds it.
 	MaxDepth int
-	// DepthExcluded は、パッケージごとに、深さの制限で到達から除いたテストの数と、除いた到達（テストと変異箇所の組）の数を受け取る。
-	// 被覆の記録の後に呼ぶ。
+	// DepthExcluded receives, per package, the number of tests the depth limit removed from reach and the number of removed reaches (pairs of a test and a mutation site).
+	// It is called after coverage recording.
 	DepthExcluded func(pkg string, tests, reaches int)
-	// Unrepeatable は、パッケージごとに、同じプロセスで 2 回目に失敗したテストの名前を受け取る。被覆の記録の後に呼ぶ。
-	// パッケージは並列に進むので、複数のゴルーチンから呼ばれうる。
+	// Unrepeatable receives, per package, the names of the tests that failed on their second run in the same process. It is called after coverage recording.
+	// Packages proceed in parallel, so it may be called from several goroutines.
 	Unrepeatable func(pkg string, tests []string)
-	// Warn は警告の出力先である。nil なら出さない。
+	// Warn is where warnings go, or nowhere when nil.
 	Warn io.Writer
-	// TestFlags は、テストバイナリのすべての実行に渡すフラグである。ParseTestFlags で作る。
+	// TestFlags are the flags passed to every run of a test binary. ParseTestFlags makes them.
 	TestFlags []string
-	// Cache は判定と被覆の記録の再利用に使うキャッシュである。nil なら再利用も記録もしない。
-	// 鍵を持たない Target（Keys が nil）の変異体も再利用しない。
+	// Cache is the cache for reusing verdicts and coverage records. When nil, nothing is reused or recorded.
+	// Mutants of a Target without keys (Keys nil) are not reused either.
 	Cache *cache.Store
-	// Select は判定する変異体を絞る。nil なら全変異体を判定する。
+	// Select narrows the mutants to judge. When nil, every mutant is judged.
 	Select *Selection
-	// Isolate は、変異体ごとに新しいテストプロセスで判定するかである。偽なら、gamut の実行の間だけ動くテストプロセスで、
-	// 複数の変異体を順に判定する（パッケージの初期化を変異体ごとに繰り返さない）。
+	// Isolate reports whether each mutant is judged in a new test process. When false, test processes that live only during the gamut run
+	// judge several mutants one after another (without repeating package initialization per mutant).
 	Isolate bool
-	// Shard は、判定する変異体を識別子のハッシュで分けたうちの 1 つに絞る。nil ならすべてを判定する。
+	// Shard narrows the mutants to judge to one of the groups split by a hash of their identifiers. When nil, all are judged.
 	Shard *Shard
-	// Deadline が零でなければ、この時刻を過ぎたら新しい変異体の実行を始めず、残りを PENDING にする。
+	// When Deadline is not zero, no new mutant starts after it, and the rest become PENDING.
 	Deadline time.Time
-	// KillMatrix は、変異体ごとに感染したテストをすべて実行し、検出したテストをすべて記録するかである（kill matrix）。
-	// 最初の失敗で止めず、プロセスは変異体ごとに新しく起動する。
+	// KillMatrix reports whether every infected test of each mutant is run and every detecting test recorded (kill matrix).
+	// It does not stop at the first failure, and starts a new process per mutant.
 	KillMatrix bool
 
-	// rewriteHelper はテスト専用の差し替え口で、補助ファイルの内容をビルドの前に書き換える。
+	// rewriteHelper is a hook for tests only that rewrites the helper file's contents before the build.
 	rewriteHelper func([]byte) []byte
-	// afterJob はテスト専用の差し替え口で、変異体の実行が 1 体終わるたびに呼ばれる。
+	// afterJob is a hook for tests only, called each time a mutant finishes running.
 	afterJob func()
-	// onExecute はテスト専用の差し替え口で、変異体を実行する前に、テストのプロセスごとのテストの並びを受け取る。
+	// onExecute is a hook for tests only that receives, before a mutant runs, the list of tests per test process.
 	onExecute func(m *mutant.Mutant, groups [][]string)
-	// noBatch はテスト専用の差し替え口で、被覆の記録をまとめずに 1 件ずつ行う。
+	// noBatch is a hook for tests only that records coverage one test at a time instead of in batches.
 	noBatch bool
-	// onCoverage はテスト専用の差し替え口で、被覆の記録のために実行したテストの名前を受け取る。
+	// onCoverage is a hook for tests only that receives the names of the tests run to record coverage.
 	onCoverage func(names []string)
 }
 
-// ErrBaseline は、変異を無効にした状態でテストが失敗し、判定の前提が崩れていることを表す。
+// ErrBaseline means tests fail with mutations disabled, which breaks the premise of judging.
 var ErrBaseline = errors.New("baseline tests fail without mutants")
 
-// ErrSelfCheck は、変異を有効にしてもテストが失敗せず、変異がテストに届いていないと分かったことを表す。
-// このまま判定すると、すべての変異体が生き残りになり、テストの弱さと見分けが付かない。
+// ErrSelfCheck means tests did not fail with a mutation enabled, showing that mutations do not reach the tests.
+// Judging anyway would make every mutant a survivor, indistinguishable from weak tests.
 var ErrSelfCheck = errors.New("forced-fail self-check failed")
 
-// Target は、判定する 1 つのパッケージとその変異体である。
+// Target is one package to judge and its mutants.
 type Target struct {
 	Pkg     *load.Package
 	Mutants []*mutant.Mutant
-	// Keys は判定と被覆の記録の再利用の鍵である。nil ならこのパッケージの記録を再利用しない。
+	// Keys are the keys for reusing verdicts and coverage records. When nil, this package's records are not reused.
 	Keys *cache.Keys
-	// RevDeps は、変異の検出を試す逆依存パッケージである（統合モード）。
+	// RevDeps are the reverse dependencies tried for detecting mutations (integration mode).
 	RevDeps []RevDep
 }
 
-// RevDep は、統合モードで変異の検出を試す逆依存パッケージである。
+// RevDep is a reverse dependency tried for detecting mutations in integration mode.
 type RevDep struct {
 	load.RevDep
-	// Key は、cache.RevDepKey によるテストの鍵である。空なら被覆の記録を再利用しない。
+	// Key is the test key from cache.RevDepKey. When empty, coverage records are not reused.
 	Key string
 }
 
-// Run は、1 つのパッケージの mutants を判定する。
+// Run judges the mutants of one package.
 func Run(ctx context.Context, pkg *load.Package, mutants []*mutant.Mutant, opts Options) ([]*Result, error) {
 	results, err := All(ctx, []Target{{Pkg: pkg, Mutants: mutants}}, opts)
 	if err != nil {
@@ -154,25 +154,25 @@ func Run(ctx context.Context, pkg *load.Package, mutants []*mutant.Mutant, opts 
 	return results[0], nil
 }
 
-// unit は、All の中での 1 つのパッケージの状態である。
+// unit is the state of one package within All.
 type unit struct {
 	Target
 	results []*Result
 	work    string
 	sch     *schemata.Result
-	// overlay は、schemata の書き換えを渡す overlay のファイルである。
+	// overlay is the overlay file passing the schemata rewrite.
 	overlay string
-	// bins は、変異箇所に到達しうるテストバイナリで、bins[0] がパッケージ自身のものである。
+	// bins are the test binaries that may reach mutation sites; bins[0] is the package's own.
 	bins []*binary
-	// tests は、すべてのテストバイナリのテストである。
+	// tests are the tests of every test binary.
 	tests []*testCase
-	// buildTime は、パッケージ自身のテストバイナリのビルドにかかった時間である。個別ビルドの見積もりに使う。
+	// buildTime is the time the build of the package's own test binary took. It feeds the estimates of standalone builds.
 	buildTime time.Duration
-	// served は、判定のテストから呼べる、パッケージ自身のテストの名前である。nil なら変異体ごとにプロセスを起動する。
+	// served are the names of the package's own tests the judging test can call. When nil, a process is started per mutant.
 	served map[string]bool
-	// batches は、逆依存パッケージのテストバイナリをまとめてビルドした回数である。出力先のディレクトリの名前に使う。
+	// batches is the number of times reverse dependency test binaries were built together. It names the output directories.
 	batches int
-	// changed は、差分が変えたテストの名前である（--since と --include-test-changes）。
+	// changed are the names of the tests the diff changed (--since and --include-test-changes).
 	changed map[string]bool
 }
 
@@ -180,21 +180,21 @@ type job struct {
 	unit  *unit
 	index int
 	run   func() *Result
-	// mode は判定の方式、reached は変異箇所に到達したテスト、ran は判定のために実行するテストである。
+	// mode is the judging mode, reached the tests that reached the mutation site, and ran the tests run for judging.
 	mode    string
 	reached []*testCase
 	ran     []*testCase
-	// forced は、識別子で指定したのでキャッシュを使わないことを表す。
+	// forced means the mutant was selected by identifier, so the cache is not used.
 	forced bool
-	// previousKiller は、前回の検出テストが消えたので再検査するときの、前回の検出テストである。
+	// previousKiller is the previous detecting test, when the mutant is rechecked because that test is gone.
 	previousKiller string
-	// estimate は実行時間の見積もりである。
+	// estimate is the estimated running time.
 	estimate time.Duration
 }
 
-// All は、targets の全変異体を判定し、targets と同じ順に判定の列を返す。
-// パッケージごとのビルドを並列に行い、被覆の記録と変異体の実行は全パッケージで 1 つの作業の列にまとめてワーカーを共有する。
-// どのパッケージかで基準のテストか自己検査が失敗したら、どのパッケージも判定しない。
+// All judges every mutant of targets and returns the lists of verdicts in the order of targets.
+// It builds the packages in parallel, and puts coverage recording and mutant runs of all packages in one work queue sharing the workers.
+// If the baseline tests or the self-check fail in any package, no package is judged.
 func All(ctx context.Context, targets []Target, opts Options) ([][]*Result, error) {
 	if opts.Workers < 1 {
 		opts.Workers = 1
@@ -202,7 +202,7 @@ func All(ctx context.Context, targets []Target, opts Options) ([][]*Result, erro
 	if len(targets) > 0 {
 		opts.module = targets[0].Pkg.ModulePath
 	}
-	// パッケージごとの準備と自己検査は並列に進むので、出力先への書き込みを直列にする。
+	// Preparation and self-checks of packages proceed in parallel, so writes to the outputs are serialized.
 	var outMu sync.Mutex
 	if opts.Log != nil {
 		opts.Log = &lockedWriter{mu: &outMu, w: opts.Log}
@@ -227,7 +227,7 @@ func All(ctx context.Context, targets []Target, opts Options) ([][]*Result, erro
 		u := &unit{Target: t, results: make([]*Result, len(t.Mutants)), work: filepath.Join(root, strconv.Itoa(i))}
 		units[i] = u
 		if !opts.Select.touches(u) {
-			// 選択に触れないパッケージは、ビルドせずにすべて PENDING にする。
+			// A package the selection does not touch is not built, and all its mutants become PENDING.
 			for k, m := range t.Mutants {
 				u.results[k] = &Result{Mutant: m, Status: Pending}
 			}
@@ -248,7 +248,7 @@ func All(ctx context.Context, targets []Target, opts Options) ([][]*Result, erro
 			default:
 				viable++
 				if !t.Pkg.HasTests && len(t.RevDeps) == 0 {
-					// テストファイルがなければどのテストも到達しないので、ビルドせずに判定する。
+					// Without test files no test reaches it, so it is judged without a build.
 					u.results[k] = &Result{Mutant: m, Status: NotCovered}
 					if !opts.Select.direct(u, m) {
 						u.results[k].Status = Pending
@@ -277,7 +277,7 @@ func All(ctx context.Context, targets []Target, opts Options) ([][]*Result, erro
 		srv = newPool(ctx, opts)
 		defer srv.close()
 	}
-	// 自己検査は被覆の記録の中で行う。記録を戻したテストで検査できるなら、測定と並行させる。
+	// The self-check happens within coverage recording. When a restored test can do the check, it runs alongside measurement.
 	if err := cover(ctx, active, opts, srv, logf); err != nil {
 		return nil, err
 	}
@@ -310,7 +310,7 @@ func All(ctx context.Context, targets []Target, opts Options) ([][]*Result, erro
 	parallel(len(jobs), opts.Workers, func(k int) {
 		j := jobs[k]
 		if !opts.Deadline.IsZero() && time.Now().After(opts.Deadline) {
-			// 予算を過ぎたら始めず、キャッシュにも書かない。次の実行がここから続ける。
+			// Past the budget, do not start and do not write to the cache. The next run continues from here.
 			mu.Lock()
 			j.unit.results[j.index] = &Result{Mutant: j.unit.Mutants[j.index], Status: Pending}
 			overBudget++
@@ -318,7 +318,7 @@ func All(ctx context.Context, targets []Target, opts Options) ([][]*Result, erro
 			return
 		}
 		r := j.run()
-		// 取り消しの後に終わった実行は、テストが失敗したのか止められたのか区別できないので、記録しない。
+		// A run that finished after cancellation cannot tell a failing test from a stopped one, so it is not recorded.
 		if ctx.Err() == nil {
 			j.record(opts.Cache, r)
 		}
@@ -348,13 +348,13 @@ func All(ctx context.Context, targets []Target, opts Options) ([][]*Result, erro
 	return out, ctx.Err()
 }
 
-// orderJobs は、変異体の実行を見積もり時間の長い順に並べる（LPT 規則）。
-// 長い変異体を先に始めると、並列実行の最後に長い変異体が 1 つだけ残って待つことが減る。測定は設計の「実行の順序」に書く。
+// orderJobs orders the mutant runs by estimated time, longest first (the LPT rule).
+// Starting long mutants first makes it less likely that one long mutant is left running alone at the end of the parallel run. The measurements are in the design's "Execution order".
 func orderJobs(jobs []job) {
 	slices.SortStableFunc(jobs, func(a, b job) int { return int(b.estimate - a.estimate) })
 }
 
-// lockedWriter は、mu を持って w へ書く。Log と Warn が同じ出力先でも行が混ざらないよう、mu を共有する。
+// lockedWriter writes to w holding mu. Log and Warn share mu so their lines do not mix even when they go to the same output.
 type lockedWriter struct {
 	mu *sync.Mutex
 	w  io.Writer
@@ -366,8 +366,8 @@ func (l *lockedWriter) Write(p []byte) (int, error) {
 	return l.w.Write(p)
 }
 
-// jobs は、被覆の記録から判定できる変異体の判定を書き、実行が要る変異体の作業を返す。
-// 選択の外の変異体は PENDING にする。
+// jobs writes the verdicts of the mutants the coverage records decide, and returns the jobs of the mutants that need running.
+// Mutants outside the selection become PENDING.
 func (u *unit) jobs(ctx context.Context, opts Options, srv *pool) []job {
 	var jobs []job
 	for i, m := range u.Mutants {
@@ -418,7 +418,7 @@ func (u *unit) jobs(ctx context.Context, opts Options, srv *pool) []job {
 				return r
 			}}
 		}
-		// 個別ビルドで全テストを実行する変異体は、実行するテストを到達したテストとみなして選ぶ。
+		// For mutants that run every test in a standalone build, the tests run count as the reaching tests for selection.
 		touching := reached
 		if j != nil && j.reached == nil {
 			touching = j.ran
@@ -432,7 +432,7 @@ func (u *unit) jobs(ctx context.Context, opts Options, srv *pool) []job {
 			j.forced = opts.Select != nil && opts.Select.Mutants != nil
 			jobs = append(jobs, *j)
 		default:
-			// 実行せずに決まる判定（到達しない、感染しない）は、どれも検出されていない。
+			// Verdicts decided without running (not reached, not infected) are all undetected.
 			res.PreviouslyKilledBy = previous
 			u.results[i] = res
 		}

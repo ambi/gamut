@@ -1,5 +1,5 @@
-// Package schemata は、構築可能な変異体をすべて埋め込んだソースを作る。
-// 変異を無効にした状態では元のソースと同じに振る舞い、環境変数 GAMUT_MUTANT で 1 体を有効にする。
+// Package schemata builds source with every viable mutant embedded.
+// With every mutation disabled it behaves like the original source, and the environment variable GAMUT_MUTANT enables one mutant.
 package schemata
 
 import (
@@ -18,35 +18,35 @@ import (
 	"github.com/ambi/gamut/internal/mutant"
 )
 
-// HelperFileName は、選択と被覆の記録を置く補助ファイルの名前である。
+// HelperFileName is the name of the helper file holding selection and coverage recording.
 const HelperFileName = "gamut_schemata.go"
 
-// TestStartName は、テストの関数の先頭から呼ぶ、記録の境目を書く補助関数の名前である。
+// TestStartName is the name of the helper function, called at the start of test functions, that writes a boundary in the record.
 const TestStartName = "GamutTestStart"
 
-// ForcedFail は、GAMUT_MUTANT に渡すと、到達した変異箇所で panic させる値である。
-// 変異の選択がテストに届くことを、判定の前に確かめるために使う。
+// ForcedFail is the value of GAMUT_MUTANT that makes every reached mutation site panic.
+// It checks, before judging, that the mutant selection reaches the tests.
 const ForcedFail = -1
 
-// helperNames は補助ファイルが宣言する名前である。対象パッケージと衝突してはならない。
+// helperNames are the names the helper file declares. They must not collide with the target package.
 var helperNames = []string{"gamutActive", "gamutCovering", "gamutHits", "gamutInfected", "gamutMu", "gamutOut", "gamutEnvInt", "gamutHit", "gamutInfect", "gamutRecord", "gamutMark", "gamutEntered", "gamutEnter", "gamutOpen", TestStartName, "GamutSetActive", "GamutCoverStop"}
 
-// Level は、変異箇所をどこまで書き換えるかである。
+// Level is how far a mutation site is rewritten.
 type Level int
 
 const (
-	// Wrapped は、変異体を埋め込み、到達と感染を記録する。
+	// Wrapped embeds the mutants and records reach and infection.
 	Wrapped Level = iota
-	// Marked は、変異体を埋め込めないが、値をそのまま返す gamutMark で包んで到達を記録する。
-	// 変異体は個別にビルドし、到達したテストだけで判定する。
+	// Marked cannot embed the mutants, but records reach by wrapping the site in gamutMark, which returns the value as is.
+	// The mutants are built standalone and judged only with the tests that reached them.
 	Marked
-	// Untouched は書き換えない。変異体は個別にビルドし、全テストで判定する。
+	// Untouched is not rewritten. The mutants are built standalone and judged with every test.
 	Untouched
 )
 
-// Site は 1 つの変異箇所（ノード）と、そこに埋め込む変異体である。
+// Site is one mutation site (a node) and the mutants embedded there.
 type Site struct {
-	// Index は被覆の記録で使う番号で、1 から始まる。Untouched なら 0 である。
+	// Index is the number used in coverage records, starting at 1. It is 0 for Untouched.
 	Index   int
 	Level   Level
 	Node    ast.Node
@@ -59,31 +59,31 @@ type Site struct {
 func (s *Site) next() Level {
 	switch s.Node.(type) {
 	case *ast.IncDecStmt, *ast.AssignStmt, *ast.BranchStmt, *ast.ExprStmt, *mutant.BodySite, *mutant.BranchSite:
-		// 文は値を返さないので gamutMark で包めない。
+		// A statement returns no value, so it cannot be wrapped in gamutMark.
 		return Untouched
 	case *ast.BasicLit:
-		// 型のない定数を gamutMark に渡すと既定の型（int など）になり、外側の式の型が合わなくなる。
+		// An untyped constant passed to gamutMark takes its default type (such as int), and the outer expression's types no longer match.
 		return Untouched
 	}
 	return s.Level + 1
 }
 
-// Result は書き換えの結果である。
+// Result is the result of the rewrite.
 type Result struct {
-	// Files は、元のファイルの絶対パスから書き換え後の内容への対応である。
+	// Files maps the absolute paths of the original files to their rewritten contents.
 	Files map[string][]byte
-	// HelperPath と Helper は、overlay で足す補助ファイルのパスと内容である。
+	// HelperPath and Helper are the path and contents of the helper file added with the overlay.
 	HelperPath string
 	Helper     []byte
-	// Sites は構築可能な変異体を持つすべての変異箇所である。
+	// Sites are all the mutation sites with viable mutants.
 	Sites []*Site
-	// SiteOf は、構築可能な変異体からその変異箇所への対応である。
+	// SiteOf maps each viable mutant to its mutation site.
 	SiteOf map[*mutant.Mutant]*Site
-	// Funcs は、被覆の記録で入ったことを記録する関数の宣言である。Funcs[i] の番号は i+1 である。
+	// Funcs are the function declarations whose entry coverage recording records. The number of Funcs[i] is i+1.
 	Funcs []*ast.FuncDecl
 }
 
-// Count は、Level ごとの変異体の数を返す。
+// Count returns the number of mutants at the given Level.
 func (r *Result) Count(level Level) int {
 	n := 0
 	for _, s := range r.Sites {
@@ -94,8 +94,8 @@ func (r *Result) Count(level Level) int {
 	return n
 }
 
-// Build は viable な変異体を埋め込んだソースを作る。
-// 書き換え後のパッケージが型検査を通らない箇所は、通るまで個別ビルドへ回す。
+// Build builds source with the viable mutants embedded.
+// Sites where the rewritten package fails type-checking are moved toward standalone builds until it passes.
 func Build(pkg *load.Package, mutants []*mutant.Mutant) (*Result, error) {
 	helperPath := filepath.Join(pkg.Dir, HelperFileName)
 	for _, f := range pkg.Files {
@@ -129,8 +129,8 @@ func Build(pkg *load.Package, mutants []*mutant.Mutant) (*Result, error) {
 		s.Mutants = append(s.Mutants, m)
 	}
 
-	// 定数が要る文脈の箇所は、呼び出しにすると定数でなくなる。その誤りは箇所の外（定数の式の先頭）に出て箇所を特定できないので、
-	// 書き換える前に個別ビルドへ回す。
+	// A site in a context that needs a constant stops being constant when turned into a call. That error appears outside the site (at the start of the constant expression), where the site cannot be identified,
+	// so such sites go to standalone builds before rewriting.
 	constant := constantContexts(pkg)
 	for _, s := range sites {
 		if slices.ContainsFunc(constant, func(n ast.Node) bool { return n.Pos() <= s.Node.Pos() && s.Node.End() <= n.End() }) {
@@ -140,7 +140,7 @@ func Build(pkg *load.Package, mutants []*mutant.Mutant) (*Result, error) {
 
 	funcs, entries := entryPoints(pkg)
 
-	// 各反復で 1 つ以上の箇所の Level が上がるので、反復は箇所の数の 2 倍で終わる。
+	// Each iteration raises the Level of at least one site, so the loop ends within twice the number of sites.
 	for range 2*len(sites) + 1 {
 		indexed := 0
 		for _, s := range sites {
@@ -164,7 +164,7 @@ func Build(pkg *load.Package, mutants []*mutant.Mutant) (*Result, error) {
 			}
 			files[f.Path] = r.renderFile(f, inFile)
 		}
-		// 描画中に書き換えられないと分かった箇所があれば、Level を上げて描き直す。
+		// If rendering found sites it cannot rewrite, raise their Level and render again.
 		if len(r.demotions) > 0 {
 			for s, level := range r.demotions {
 				s.Level = max(s.Level, level)
@@ -195,7 +195,7 @@ func Build(pkg *load.Package, mutants []*mutant.Mutant) (*Result, error) {
 	return nil, fmt.Errorf("schemata rewrite of %s did not converge", pkg.ImportPath)
 }
 
-// constantContexts は、定数の式が要る構文（const の宣言と配列の型の長さ）を返す。
+// constantContexts returns the syntax that needs constant expressions (const declarations and array type lengths).
 func constantContexts(pkg *load.Package) []ast.Node {
 	var out []ast.Node
 	for _, f := range pkg.Files {
@@ -217,15 +217,15 @@ func constantContexts(pkg *load.Package) []ast.Node {
 	return out
 }
 
-// entry は、関数の本文の { の直後に差し込む、入ったことの記録である。
+// entry is the record of entering a function, inserted right after the { of its body.
 type entry struct {
 	offset int
 	text   string
 }
 
-// entryPoints は、対象ファイルの本文を持つ関数の宣言に番号を振り、ファイルごとの差し込み位置を返す。
-// 被覆の記録は、変異箇所に到達しなくても、テストが入った関数を知るためにこれを使う。
-// //go:nosplit の関数は、呼び出しを足すとスタックの上限を超えうるので除く。
+// entryPoints numbers the function declarations with bodies in the target files and returns the insertion points per file.
+// Coverage recording uses them to know the functions a test entered, even without reaching a mutation site.
+// //go:nosplit functions are left out, because an added call may exceed their stack limit.
 func entryPoints(pkg *load.Package) ([]*ast.FuncDecl, map[string][]entry) {
 	var funcs []*ast.FuncDecl
 	entries := map[string][]entry{}
@@ -264,13 +264,13 @@ type outRange struct {
 
 type renderer struct {
 	pkg *load.Package
-	// entries は、ファイルごとの関数の入口の差し込みである。変異箇所の外の字句を写すときに差し込む。
+	// entries are the function entry insertions per file. They are inserted while copying the text outside mutation sites.
 	entries map[string][]entry
-	// demotions は、描画中に書き換えられないと分かった箇所と、次に試す Level である。
+	// demotions are the sites rendering found it cannot rewrite, with the Level to try next.
 	demotions map[*Site]Level
-	// ranges は、ファイルごとに各箇所が書き換え後の内容のどこを占めるかである。
+	// ranges are, per file, where each site lies in the rewritten contents.
 	ranges map[string][]outRange
-	// top は、次の renderRange がファイルの最上位の呼び出しであるかである。
+	// top reports whether the next renderRange is the top-level call for the file.
 	top bool
 }
 
@@ -289,7 +289,7 @@ func (r *renderer) renderFile(f *load.File, sites []*Site) []byte {
 		if a.end != b.end {
 			return b.end - a.end
 		}
-		// 条件と分岐の本体を包む箇所は、包まれる式や文の箇所と範囲が同じでありうるので先にする。包まれる側はその中で書き換える。
+		// Sites wrapping conditions and branch bodies may have the same range as the wrapped expression or statement, so they come first. The wrapped site is rewritten inside them.
 		ca, cb := wraps(a.Node), wraps(b.Node)
 		switch {
 		case ca && !cb:
@@ -309,7 +309,7 @@ func (r *renderer) renderFile(f *load.File, sites []*Site) []byte {
 	return buf.Bytes()
 }
 
-// wraps は、箇所 n が範囲の中の箇所を自分の書き換えの中で書き換えるかを返す。
+// wraps reports whether the site n rewrites the sites within its range inside its own rewrite.
 func wraps(n ast.Node) bool {
 	switch n.(type) {
 	case *mutant.ConditionSite, *mutant.BranchSite, *mutant.ErrorSite:
@@ -318,8 +318,8 @@ func wraps(n ast.Node) bool {
 	return false
 }
 
-// copySrc は、元のソースの [lo, hi) を buf へ写す。ファイルの最上位の字句なら、関数の入口の記録を差し込む。
-// 関数の宣言の本文の { は変異箇所の式の中に現れないので、最上位で写す字句だけを見ればよい。
+// copySrc copies [lo, hi) of the original source to buf. For the file's top-level text, it inserts the function entry records.
+// The { of a function declaration's body never appears inside a mutation site's expression, so looking at the text copied at the top level is enough.
 func (r *renderer) copySrc(buf *bytes.Buffer, f *load.File, lo, hi int, top bool) {
 	if top {
 		for _, e := range r.entries[f.Path] {
@@ -333,7 +333,7 @@ func (r *renderer) copySrc(buf *bytes.Buffer, f *load.File, lo, hi int, top bool
 	buf.Write(f.Src[lo:hi])
 }
 
-// renderRange は元のソースの [lo, hi) を buf へ書き、その中の変異箇所を書き換える。
+// renderRange writes [lo, hi) of the original source to buf, rewriting the mutation sites in it.
 func (r *renderer) renderRange(buf *bytes.Buffer, f *load.File, sites []*Site, lo, hi int) {
 	top := r.top
 	r.top = false
@@ -368,7 +368,7 @@ func without(sites []*Site, s *Site) []*Site {
 	return out
 }
 
-// demoteWithin は、[lo, hi) の中の箇所を書き換えない。本文へそのまま写す字句の中の箇所が対象である。
+// demoteWithin leaves the sites within [lo, hi) unrewritten. It applies to sites inside text copied into a body as is.
 func (r *renderer) demoteWithin(sites []*Site, lo, hi int) {
 	for _, s := range sites {
 		if s.start >= lo && s.end <= hi {
@@ -383,20 +383,20 @@ func (r *renderer) text(f *load.File, n ast.Node) string {
 	return string(f.Src[r.offset(n.Pos()):r.offset(n.End())])
 }
 
-// operand は、関数リテラルの引数として渡すか、本文へ直接写す被演算子である。
+// operand is an operand passed as an argument of a function literal, or copied directly into its body.
 type operand struct {
 	expr   ast.Expr
 	inline bool
-	// ref は本文での参照（引数名または写した字句）である。
+	// ref is the reference in the body (a parameter name or the copied text).
 	ref string
-	// typ は引数として渡すときの型の字句である。
+	// typ is the text of the type when passed as an argument.
 	typ string
 }
 
 func (r *renderer) operand(f *load.File, sites []*Site, e ast.Expr, param string) (operand, bool) {
 	tv := r.pkg.Info.Types[e]
 	if tv.Value != nil || tv.IsNil() || pure(e) {
-		// 定数、nil、副作用のない参照は本文へ写す。型を書かずに済み、何度評価しても結果は同じである。
+		// Constants, nil, and references without side effects are copied into the body. No type needs writing, and evaluating them again gives the same result.
 		r.demoteWithin(sites, r.offset(e.Pos()), r.offset(e.End()))
 		return operand{expr: e, inline: true, ref: "(" + r.text(f, e) + ")"}, true
 	}
@@ -407,8 +407,8 @@ func (r *renderer) operand(f *load.File, sites []*Site, e ast.Expr, param string
 	return operand{expr: e, ref: param, typ: typ}, true
 }
 
-// pure は、e が関数呼び出しも変異箇所も含まない参照であるかを返す。
-// そのような式は何度評価しても同じ値になり、panic するなら元の式も同じ所で panic する。
+// pure reports whether e is a reference containing no function call and no mutation site.
+// Such an expression gives the same value however often it is evaluated, and if it panics, the original panics at the same place.
 func pure(e ast.Expr) bool {
 	switch x := e.(type) {
 	case *ast.Ident, *ast.BasicLit:
@@ -454,7 +454,7 @@ func (r *renderer) renderSite(buf *bytes.Buffer, f *load.File, sites []*Site, s 
 		for _, m := range s.Mutants {
 			cond := fmt.Sprintf("(%s) != (%s)", expr(m.Replacement), expr(n.Op))
 			if m.Replacement == token.QUO && integer {
-				// 整数の 0 除算は panic するので、比べずに値が変わったとみなす。
+				// Integer division by zero panics, so count the value as changed without comparing.
 				cond = fmt.Sprintf("%s == 0 || %s", y.ref, cond)
 			}
 			fmt.Fprintf(&body, "if %s { gamutInfect(%d) }; ", cond, m.Index)
@@ -495,7 +495,7 @@ func (r *renderer) renderSite(buf *bytes.Buffer, f *load.File, sites []*Site, s 
 		}
 		body.WriteString("}; switch gamutActive { ")
 		for _, m := range s.Mutants {
-			// REMOVE_LOGICAL_NOT の置き換え後の文字列は空なので、被演算子だけを返す。
+			// The replacement text of REMOVE_LOGICAL_NOT is empty, so only the operand is returned.
 			fmt.Fprintf(&body, "case %d: return %s%s; ", m.Index, m.ReplacementText, x.ref)
 		}
 		fmt.Fprintf(&body, "}; return %s%s ", n.Op, x.ref)
@@ -508,7 +508,7 @@ func (r *renderer) renderSite(buf *bytes.Buffer, f *load.File, sites []*Site, s 
 		buf.WriteString(")")
 
 	case *ast.IncDecStmt:
-		// 対象の式は本文に 2 回写すので、その中の箇所は個別ビルドへ回す。
+		// The target expression is copied into the body twice, so the sites inside it go to standalone builds.
 		r.demoteWithin(sites, r.offset(n.X.Pos()), r.offset(n.X.End()))
 		target := r.text(f, n.X)
 		m := s.Mutants[0]
@@ -516,8 +516,8 @@ func (r *renderer) renderSite(buf *bytes.Buffer, f *load.File, sites []*Site, s 
 			s.Index, m.Index, m.Index, target, m.Replacement, target, n.Tok)
 
 	case *mutant.BodySite:
-		// RETURN_ZERO：本体の { の直後で、有効な変異体ならゼロ値を返す。関数に入るたびに到達し、返す値は変わるので感染したとする。
-		// 関数の入口の記録も { の直後に差し込むが、この箇所が { を書き換えるので、ここで書く。
+		// RETURN_ZERO: right after the body's {, return the zero values when the mutant is active. Every entry into the function reaches it, and the returned values change, so it counts as infected.
+		// The function entry record is also inserted right after {, but this site rewrites {, so it is written here.
 		m := s.Mutants[0]
 		zeros := strings.TrimSuffix(strings.TrimPrefix(m.ReplacementText, "{ return "), ";")
 		buf.WriteString("{")
@@ -529,33 +529,33 @@ func (r *renderer) renderSite(buf *bytes.Buffer, f *load.File, sites []*Site, s 
 		fmt.Fprintf(buf, " if gamutCovering { gamutHit(%d); gamutInfect(%d) }; if gamutActive == %d { return %s };", s.Index, m.Index, m.Index, zeros)
 
 	case *ast.ExprStmt:
-		// STATEMENT_REMOVE：有効な変異体なら呼び出しの文を実行しない。引数の中の変異箇所は、実行する側の中で書き換える。
-		// 文を 2 つの文にするので、for の後処理のような単純な文しか書けない所では、書き換え後の型検査で個別ビルドに回る。
+		// STATEMENT_REMOVE: skip the call statement when the mutant is active. Mutation sites in the arguments are rewritten inside the branch that runs it.
+		// The statement becomes two statements, so where only a simple statement is allowed (such as a for's post statement), type-checking after the rewrite sends it to a standalone build.
 		m := s.Mutants[0]
 		fmt.Fprintf(buf, "if gamutCovering { gamutHit(%d); gamutInfect(%d) }; if gamutActive != %d { ", s.Index, m.Index, m.Index)
 		r.renderRange(buf, f, without(sites, s), s.start, s.end)
 		buf.WriteString(" }")
 
 	case *mutant.BranchSite:
-		// BRANCH_*：有効な変異体なら分岐の本体を実行しない。本体に入ったら到達し、本体を実行しないことで振る舞いが変わりうるので感染したとする。
-		// 本体の中の変異箇所は、実行する側の中で書き換える。本体を包むことで関数の終端性が変わる変異体は、構築不能の判定で除かれている。
+		// BRANCH_*: skip the branch body when the mutant is active. Entering the body reaches it, and skipping the body may change behavior, so it counts as infected.
+		// Mutation sites in the body are rewritten inside the branch that runs it. Mutants whose wrapping changes whether the function terminates are already excluded by the viability checks.
 		m := s.Mutants[0]
 		fmt.Fprintf(buf, " if gamutCovering { gamutHit(%d); gamutInfect(%d) }; if gamutActive != %d {", s.Index, m.Index, m.Index)
 		r.renderRange(buf, f, without(sites, s), s.start, s.end)
 		buf.WriteString("}")
 
 	case *mutant.ErrorSite:
-		// RETURN_ERROR_NIL：有効な変異体なら式を評価せずに nil を返し、そうでなければ式を error として受けて返す。
-		// error として受けるので、型付きの nil のポインタも元の return と同じく nil でない error になる。元が nil でなければ感染したとする。
-		// 式の中の変異箇所は、評価する側の中でそのまま書き換える。
+		// RETURN_ERROR_NIL: when the mutant is active, return nil without evaluating the expression; otherwise receive the expression as an error and return it.
+		// Receiving it as an error makes a typed nil pointer a non-nil error, as in the original return. It counts as infected when the original is not nil.
+		// Mutation sites in the expression are rewritten as is inside the branch that evaluates it.
 		m := s.Mutants[0]
 		fmt.Fprintf(buf, "func() error { switch gamutActive { case %d: return nil }; var gamutC error = ", m.Index)
 		r.renderRange(buf, f, without(sites, s), s.start, s.end)
 		fmt.Fprintf(buf, "; if gamutCovering { gamutHit(%d); if gamutC != nil { gamutInfect(%d) } }; return gamutC }()", s.Index, m.Index)
 
 	case *mutant.ConditionSite:
-		// CONDITIONS_CONSTANT：有効な変異体なら条件を評価せずに定数を返し、そうでなければ条件を評価する。
-		// 条件の中の変異箇所は、評価する側の中でそのまま書き換える。
+		// CONDITIONS_CONSTANT: when the mutant is active, return the constant without evaluating the condition; otherwise evaluate the condition.
+		// Mutation sites in the condition are rewritten as is inside the branch that evaluates it.
 		resultType, ok := r.resultType(f, n.X)
 		if !ok {
 			fallback()
@@ -574,8 +574,8 @@ func (r *renderer) renderSite(buf *bytes.Buffer, f *load.File, sites []*Site, s 
 		buf.WriteString("}; return gamutC }()")
 
 	case *ast.Ident:
-		// BOOLEAN_LITERAL：true か false を、その場の型を返す関数呼び出しにする。値は必ず変わるので、到達したら感染したとする。
-		// const の宣言の中など、呼び出しを書けない文脈は、書き換え後の型検査で個別ビルドへ回る。
+		// BOOLEAN_LITERAL: turn true or false into a call returning the type in place. The value always changes, so reaching it counts as infection.
+		// Contexts where a call cannot be written, such as inside a const declaration, go to standalone builds through type-checking after the rewrite.
 		resultType, ok := r.resultType(f, n)
 		if !ok {
 			fallback()
@@ -586,8 +586,8 @@ func (r *renderer) renderSite(buf *bytes.Buffer, f *load.File, sites []*Site, s 
 			resultType, s.Index, m.Index, m.Index, m.ReplacementText, n.Name)
 
 	case *ast.BasicLit:
-		// INTEGER_*、FLOAT_*、ERRORF_WRAP：リテラルを、その場の型を返す関数呼び出しにする。値は必ず変わるので、到達したら感染したとする。
-		// const の宣言や配列の長さのように定数が要る文脈は、書き換え後の型検査で個別ビルドへ回る。
+		// INTEGER_*, FLOAT_*, ERRORF_WRAP: turn the literal into a call returning the type in place. The value always changes, so reaching it counts as infection.
+		// Contexts that need a constant, such as const declarations and array lengths, go to standalone builds through type-checking after the rewrite.
 		resultType, ok := r.resultType(f, n)
 		if !ok {
 			fallback()
@@ -604,8 +604,8 @@ func (r *renderer) renderSite(buf *bytes.Buffer, f *load.File, sites []*Site, s 
 		fmt.Fprintf(buf, "}; return %s }()", n.Value)
 
 	case *ast.BranchStmt:
-		// break と continue は同じ関数の中のループに作用するので、関数リテラルで包めない。文を 2 つの分岐にする。
-		// 分岐にしたことでループの終端性が変わり、missing return になれば、書き換え後の型検査で個別ビルドへ回る。
+		// break and continue act on a loop in the same function, so they cannot be wrapped in a function literal. The statement becomes two branches.
+		// If the branches change whether the loop terminates and cause a missing return, type-checking after the rewrite sends it to a standalone build.
 		label := ""
 		if n.Label != nil {
 			label = " " + n.Label.Name
@@ -615,8 +615,8 @@ func (r *renderer) renderSite(buf *bytes.Buffer, f *load.File, sites []*Site, s 
 			s.Index, m.Index, m.Index, m.Replacement, label, n.Tok, label)
 
 	case *ast.AssignStmt:
-		// x op= v。v は 1 回だけ評価して引数で渡す。対象の式は本文に写すので、その中の箇所は個別ビルドへ回す。
-		// 変異で値が変わるかは対象の値にもよる（x *= 1 と x /= 1 など）ので、到達したら感染したとみなす（実行して確かめる側に倒す）。
+		// x op= v. v is evaluated once and passed as an argument. The target expression is copied into the body, so the sites inside it go to standalone builds.
+		// Whether the mutation changes the value also depends on the target's value (as with x *= 1 and x /= 1), so reaching it counts as infection (erring on the side of running to check).
 		if len(n.Lhs) != 1 || len(n.Rhs) != 1 {
 			fallback()
 			return
@@ -651,11 +651,11 @@ func (r *renderer) renderSite(buf *bytes.Buffer, f *load.File, sites []*Site, s 
 	}
 }
 
-// renderLogical は、&& と || の箇所を書き換える。右辺は短絡評価で評価されないことがあるので、先に評価して引数に渡せない。
-// 左辺だけを引数で渡し、右辺は関数リテラル gamutR の本文に 1 回だけ書いて、元の形と変異後の形のどちらでも必要なときだけ呼ぶ。
-// 右辺の中の変異箇所は、その本文の中でそのまま埋め込む。
-// 変異で値が変わるか（左辺と右辺が違うか）を知るには右辺を評価する必要があり、元のプログラムにない副作用を起こしうるので、
-// 到達したら感染したとみなす。
+// renderLogical rewrites a site of && or ||. Short-circuit evaluation may leave the right side unevaluated, so it cannot be evaluated first and passed as an argument.
+// Only the left side is passed as an argument; the right side is written once in the body of the function literal gamutR, called only when needed by the original or the mutated form.
+// Mutation sites in the right side are embedded as is in that body.
+// Knowing whether the mutation changes the value (whether the left and right sides differ) would require evaluating the right side, which may cause side effects the original program does not,
+// so reaching it counts as infection.
 func (r *renderer) renderLogical(buf *bytes.Buffer, f *load.File, sites []*Site, s *Site, n *ast.BinaryExpr, fallback func()) {
 	resultType, ok := r.resultType(f, n)
 	if !ok {
@@ -684,7 +684,7 @@ func (r *renderer) renderLogical(buf *bytes.Buffer, f *load.File, sites []*Site,
 	buf.WriteString(")")
 }
 
-// params は、引数で渡す被演算子の仮引数の宣言を返す。本文へ写す被演算子は引数にしない。
+// params returns the parameter declaration of an operand passed as an argument. Operands copied into the body are not parameters.
 func params(o operand) []string {
 	if o.inline {
 		return nil
@@ -709,7 +709,7 @@ func (r *renderer) resultType(f *load.File, e ast.Expr) (string, bool) {
 	return r.typeString(f, types.Default(t))
 }
 
-// typeString は、ファイル f の中で t を書く字句を返す。書けなければ false を返す。
+// typeString returns the text that writes t within the file f, or false when it cannot be written.
 func (r *renderer) typeString(f *load.File, t types.Type) (string, bool) {
 	if t == nil {
 		return "", false
@@ -733,7 +733,7 @@ func (r *renderer) typeString(f *load.File, t types.Type) (string, bool) {
 	return s, ok
 }
 
-// importNames は、ファイル f が import するパッケージのパスから、ファイルの中での名前への対応を返す。
+// importNames maps the paths of the packages the file f imports to their names within the file.
 func importNames(pkg *load.Package, f *load.File) map[string]string {
 	byPath := map[string]string{}
 	for _, imp := range pkg.Types.Imports() {
@@ -767,7 +767,7 @@ func isInteger(t types.Type) bool {
 	return ok && b.Info()&types.IsInteger != 0
 }
 
-// typeErrors は書き換え後のパッケージを型検査し、エラーの位置を含む最も内側の箇所を返す。
+// typeErrors type-checks the rewritten package and returns the innermost sites containing the error positions.
 func typeErrors(pkg *load.Package, files map[string][]byte, helperPath string, helper []byte, ranges map[string][]outRange) ([]*Site, error) {
 	fset := token.NewFileSet()
 	var asts []*ast.File
@@ -833,7 +833,7 @@ var gamutActive = gamutEnvInt("GAMUT_MUTANT")
 
 var gamutCovering = os.Getenv("GAMUT_COVER") != ""
 
-// gamutMaxDepth が正なら、被覆の記録で、テスト関数から gamutModule の関数のフレームを数えてこの深さを超える到達と感染を記録しない。
+// When gamutMaxDepth is positive, coverage recording skips reach and infection deeper than this, counting the frames of gamutModule functions from the test function.
 var (
 	gamutMaxDepth = gamutEnvInt("GAMUT_MAX_DEPTH")
 	gamutModule   = os.Getenv("GAMUT_MODULE")
@@ -853,8 +853,8 @@ func gamutEnvInt(name string) int {
 	return v
 }
 
-// gamutHit は到達を記録する。GAMUT_MUTANT が %[5]d なら、選択の変数が読まれたことを示すために panic する。
-// 深さの制限を超える到達は、到達ではなく「d」として記録する。
+// gamutHit records reach. When GAMUT_MUTANT is %[5]d, it panics to show that the selection variable was read.
+// Reach beyond the depth limit is recorded as "d" instead of as reach.
 func gamutHit(i int) {
 	if gamutActive == %[5]d {
 		panic("gamut: forced fail")
@@ -876,10 +876,10 @@ func gamutInfect(i int) {
 	gamutRecord(&gamutInfected[i], 'i', i)
 }
 
-// gamutTooDeep は、呼び出し元の変異箇所が、テスト関数（testing.tRunner が呼ぶ関数）から gamutModule の関数のフレームを数えて
-// gamutMaxDepth より深いかを返す。変異箇所を含む関数を 1 と数え、テスト関数自身は数えない。gamut の補助の関数は数えない。
-// 同じ宣言の関数のフレームが続けば（関数リテラル、schemata が包む関数、再帰）、1 つと数える。
-// テスト関数の下にない呼び出し（パッケージの初期化、テストが起動したゴルーチン）は制限しない。
+// gamutTooDeep reports whether the calling mutation site is deeper than gamutMaxDepth, counting the frames of gamutModule functions
+// from the test function (the function testing.tRunner calls). The function containing the site counts as 1, and neither the test function itself nor gamut's helper functions count.
+// Consecutive frames of functions of the same declaration (function literals, functions schemata wraps, recursion) count as one.
+// Calls not under a test function (package initialization, goroutines a test started) are not limited.
 func gamutTooDeep() bool {
 	var pcs [256]uintptr
 	n := gamutRuntime.Callers(3, pcs[:])
@@ -895,16 +895,16 @@ func gamutTooDeep() bool {
 			last = decl
 		}
 		if !more {
-			// 記録しきれないほど深いなら、制限を超えるとみなす。
+			// A stack too deep to record counts as beyond the limit.
 			return n == len(pcs)
 		}
 	}
 }
 
-// GamutSetActive は、有効にする変異体を i に切り替える。1 つのテストプロセスで変異体を順に判定するときに、テストの合間に呼ばれる。
+// GamutSetActive switches the active mutant to i. It is called between tests when one test process judges mutants one after another.
 func GamutSetActive(i int) { gamutActive = i }
 
-// GamutCoverStop は、被覆の記録を止めて記録のファイルを閉じる。被覆を測ったテストプロセスを、そのまま変異体の判定に使い回すときに呼ばれる。
+// GamutCoverStop stops coverage recording and closes the record file. It is called when the test process that measured coverage is reused to judge mutants.
 func GamutCoverStop() {
 	gamutMu.Lock()
 	defer gamutMu.Unlock()
@@ -915,8 +915,8 @@ func GamutCoverStop() {
 	}
 }
 
-// GamutTestStart は、トップレベルのテスト name が始まったことを記録の境目として書き、以後の到達と感染と入った関数を記録し直す。
-// 1 つのプロセスで複数のテストの被覆を記録するときに、テストの関数の先頭から呼ばれる。外部テストからも呼べるよう公開する。
+// GamutTestStart writes the start of the top-level test name as a boundary in the record, and records reach, infection, and entered functions afresh from there.
+// It is called at the start of test functions when one process records the coverage of several tests. It is exported so external tests can call it.
 func GamutTestStart(name string) {
 	if !gamutCovering {
 		return
@@ -938,8 +938,8 @@ func GamutTestStart(name string) {
 	}
 }
 
-// gamutDecl は、関数名 fn（<import パス>.<名前>[型引数]）が gamutModule の関数なら、それを囲む宣言の名前を返す。
-// 関数リテラル（<宣言>.funcN、<宣言>.funcN.M）は囲む宣言の名前にする。gamut の補助の関数とモジュールの外の関数は空を返す。
+// gamutDecl returns, when the function name fn (<import path>.<name>[type arguments]) is a function of gamutModule, the name of its enclosing declaration.
+// A function literal (<decl>.funcN, <decl>.funcN.M) maps to its enclosing declaration. gamut's helper functions and functions outside the module return empty.
 func gamutDecl(fn string) string {
 	fn, _, _ = gamutStrings.Cut(fn, "[")
 	if !gamutStrings.HasPrefix(fn, gamutModule+"/") && !gamutStrings.HasPrefix(fn, gamutModule+".") {
@@ -957,7 +957,7 @@ func gamutDecl(fn string) string {
 	return fn
 }
 
-// gamutOpen は、記録のファイルを開く。gamutMu を持って呼ぶ。
+// gamutOpen opens the record file. Call it holding gamutMu.
 func gamutOpen() bool {
 	if !gamutCovering {
 		return false
@@ -972,10 +972,10 @@ func gamutOpen() bool {
 	return true
 }
 
-// gamutEnter は、関数に入ったことを記録する。
+// gamutEnter records entering a function.
 func gamutEnter(i int) { gamutRecord(&gamutEntered[i], 'e', i) }
 
-// gamutMark は、到達だけを記録して v をそのまま返す。
+// gamutMark records only reach and returns v as is.
 func gamutMark[T any](i int, v T) T {
 	if gamutCovering {
 		gamutHit(i)
@@ -983,8 +983,8 @@ func gamutMark[T any](i int, v T) T {
 	return v
 }
 
-// gamutRecord は、到達と感染を初回だけファイルへ追記する。
-// テストバイナリは os.Exit で終わるので、終了時ではなく記録のたびに書き出す。
+// gamutRecord appends reach and infection to the file, only the first time.
+// The test binary ends with os.Exit, so it writes at every record rather than at exit.
 func gamutRecord(flag *atomic.Bool, kind byte, i int) {
 	if flag.Load() {
 		return

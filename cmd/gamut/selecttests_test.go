@@ -8,8 +8,8 @@ import (
 	"testing"
 )
 
-// TestSelectTests は、gamut select-tests が、変わった宣言の変異体を検出したテスト、そこに到達したテスト、変わったテストの順に、
-// 何も実行せずにテストを選ぶことを確かめる。キャッシュがなければ終了コード 1 で止まる。
+// TestSelectTests checks that gamut select-tests selects, without running anything, tests that detected mutants of changed declarations, then tests that reached them,
+// then changed tests. Without a cache it stops with exit code 1.
 func TestSelectTests(t *testing.T) {
 	dir := copyModule(t, "../../testdata/selecttests")
 	gitRepo(t, dir)
@@ -18,7 +18,7 @@ func TestSelectTests(t *testing.T) {
 	if code := realMain([]string{"-q", "-kill-matrix", "-cache", cachePath, dir}, &stdout, &stderr); code != 0 {
 		t.Fatalf("gamut: exit %d:\n%s", code, stderr.String())
 	}
-	// Add を書き換え、TestMul が使う補助の check も書き換える。Mul は変えない。
+	// Rewrite Add, and the helper check that TestMul uses. Mul stays unchanged.
 	edit(t, filepath.Join(dir, "calc.go"), "return a + b", "return b + a")
 	edit(t, filepath.Join(dir, "calc_test.go"), "t.Fatalf(\"got %d, want %d\", got, want)", "t.Fatalf(\"got %d; want %d\", got, want)")
 
@@ -76,7 +76,7 @@ func TestSelectTests(t *testing.T) {
 	}
 }
 
-// edit は、path の from を to に置き換える。
+// edit replaces from with to in path.
 func edit(t *testing.T, path, from, to string) {
 	t.Helper()
 	data, err := os.ReadFile(path)

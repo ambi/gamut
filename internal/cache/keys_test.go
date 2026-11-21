@@ -47,7 +47,7 @@ func TestF(t *testing.T) { _ = F(helper(1)) }
 func TestG(t *testing.T) { _ = G(1) }
 `
 
-// snapshot は、宣言ごとの Decl、Deps、Reach、テストごとの鍵、初期化の鍵である。
+// snapshot holds Decl, Deps, and Reach per declaration, the key per test, and the initialization key.
 type snapshot struct {
 	decl, deps, reach map[string]string
 	tests             map[string]string
@@ -60,19 +60,19 @@ func TestKeys_ChangeOnlyWithTheSourcesTheyCover(t *testing.T) {
 		name       string
 		file       string
 		old, new   string
-		declDiffs  []string // Decl が変わる宣言
-		depsDiffs  []string // Deps が変わる宣言
-		reachDiffs []string // Reach が変わる宣言
-		testDiffs  []string // 鍵が変わるテスト
-		initDiff   bool     // Init が変わるか
-		changed    []string // 変わった区間から ChangedTests が返すテスト
+		declDiffs  []string // declarations whose Decl changes
+		depsDiffs  []string // declarations whose Deps changes
+		reachDiffs []string // declarations whose Reach changes
+		testDiffs  []string // tests whose key changes
+		initDiff   bool     // whether Init changes
+		changed    []string // tests ChangedTests returns for the changed ranges
 	}{
-		{name: "comments and blank lines", file: "k.go", old: "func F(", new: "// F の注釈。\n\n\nfunc F("},
+		{name: "comments and blank lines", file: "k.go", old: "func F(", new: "// A note on F.\n\n\nfunc F("},
 		{name: "new unrelated declaration", file: "k.go", old: "func G(", new: "func Unused() int { return 0 }\n\nfunc G("},
 		{name: "reordered declarations", file: "k.go",
 			old: "func F(v int) int { return H(v) * 2 }\n\nfunc G(v int) int { return v - step }\n",
 			new: "func G(v int) int { return v - step }\n\nfunc F(v int) int { return H(v) * 2 }\n"},
-		// 被覆の記録は入った関数をすべて記録するので、Reach は呼ぶ関数を含めない。
+		// Coverage recording records every entered function, so Reach does not include called functions.
 		{name: "helper body", file: "k.go", old: "return v + 1", new: "return v + 2",
 			declDiffs: []string{"H"}, depsDiffs: []string{"F"}, reachDiffs: []string{"H"}},
 		{name: "method reached through an interface", file: "k.go", old: "return q.s * q.s", new: "return q.s * 2",
@@ -112,7 +112,7 @@ func TestKeys_ChangeOnlyWithTheSourcesTheyCover(t *testing.T) {
 			if got := before.init != after.init; got != c.initDiff {
 				t.Errorf("Init changed = %t, want %t", got, c.initDiff)
 			}
-			// 書き換えた字句の区間を差分とみなす。
+			// The range of the rewritten text counts as the diff.
 			start := strings.Index(edited, c.new)
 			changed := after.keys.ChangedTests(func(p string, s, e int) bool {
 				return p == path && s < start+len(c.new) && start < e
@@ -193,7 +193,7 @@ func TestStore_KeepsOtherPackagesAndDropsVanishedMutants(t *testing.T) {
 	if s.Reset != "" || s.Len() != 3 {
 		t.Fatalf("reopened with Reset %q and %d entries, want 3 entries", s.Reset, s.Len())
 	}
-	// a2 は消えた変異体である。m/b は今回判定しないので残す。
+	// a2 is a removed mutant. m/b is not judged this time, so it stays.
 	s.Prune([]string{"m/a"}, func(id string) bool { return id == "a1" })
 	if s.Get("a1") == nil || s.Get("a2") != nil || s.Get("b1") == nil {
 		t.Errorf("after Prune: a1 %v, a2 %v, b1 %v; want a1 and b1 only", s.Get("a1"), s.Get("a2"), s.Get("b1"))

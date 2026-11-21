@@ -1,7 +1,7 @@
-// Package slow は、変異体ごとの判定に時間のかかるテストを持つ。実行の途中でプロセスを止める端から端までのテストが使う。
+// Package slow has tests that take long per mutant. The end-to-end test that stops the process midway uses it.
 package slow
 
-// Score は、変異箇所を多く持つ。
+// Score has many mutation sites.
 func Score(a, b, c, d int) int {
 	s := 0
 	if a > b {

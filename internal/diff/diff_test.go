@@ -10,7 +10,7 @@ import (
 	"github.com/ambi/gamut/internal/diff"
 )
 
-// repo は、files を 1 回コミットした一時的な Git リポジトリを作る。
+// repo creates a temporary Git repository with files committed once.
 func repo(t *testing.T, files map[string]string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -47,7 +47,7 @@ func write(t *testing.T, dir, name, src string) {
 	}
 }
 
-// at は、src の中の needle の区間を返す。
+// at returns the range of needle in src.
 func at(t *testing.T, src, needle string) (int, int) {
 	t.Helper()
 	i := strings.Index(src, needle)
@@ -72,7 +72,7 @@ func TestSince_MarksChangedTokensNotWholeLines(t *testing.T) {
 		want   bool
 	}{
 		{"c * d", true},
-		// 同じ行でも、変わっていない字句の区間は交わらない。
+		// Unchanged tokens do not intersect, even on the same line.
 		{"a < b", false},
 		{"return 0", false},
 	}
@@ -82,7 +82,7 @@ func TestSince_MarksChangedTokensNotWholeLines(t *testing.T) {
 			t.Errorf("Intersects(%q) = %t, want %t", tc.needle, got, tc.want)
 		}
 	}
-	// ソースだけの変更は、テストファイルに触れない。
+	// A source-only change does not touch test files.
 	if c.TouchesTestFile(dir) {
 		t.Errorf("TouchesTestFile(%s) = true for a source-only change", dir)
 	}
@@ -90,7 +90,7 @@ func TestSince_MarksChangedTokensNotWholeLines(t *testing.T) {
 
 func TestSince_IgnoresCommentsAndWhitespace(t *testing.T) {
 	const before = "package p\n\nfunc F(a int) int {\n\treturn a + 1\n}\n"
-	const after = "package p\n\n// F は a に 1 を足す。\nfunc F(a int) int {\n\t// 足す。\n\treturn a +\n\t\t1\n}\n"
+	const after = "package p\n\n// F adds 1 to a.\nfunc F(a int) int {\n\t// Add.\n\treturn a +\n\t\t1\n}\n"
 	dir := repo(t, map[string]string{"p.go": before})
 	write(t, dir, "p.go", after)
 	c, err := diff.Since(dir, "HEAD")
@@ -136,7 +136,7 @@ func TestSince_UntrackedFilesAndRenames(t *testing.T) {
 	if got := c.Renames[resolve(t, renamed)]; filepath.Base(got) != "old.go" {
 		t.Errorf("Renames[renamed.go] = %q, want .../old.go (all: %v)", got, c.Renames)
 	}
-	// 中身の変わらない名前の変更は、区間を作らない。
+	// A rename without content changes makes no ranges.
 	if c.Intersects(renamed, 0, len(src)) {
 		t.Errorf("a pure rename produced a changed span")
 	}

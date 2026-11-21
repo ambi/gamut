@@ -5,46 +5,17 @@ depends_on: [004]
 created_at: 2026-11-20
 ---
 
-# 等価な変異体をソースの外に受理として記録する
+# Record equivalent mutants as accepted, outside the source
 
-## 動機
+## Motivation
 
-どの入力でも観測できない変異体（等価な変異体）は、テストを足しても検出できない。
-無効化コメントはソースを汚し、理由が散らばる。
-ソースの外に、位置に依存しない識別子と理由で受理を記録できれば、ソースを汚さずに理由を一か所にまとめられる。
+Equivalent mutants cannot be detected by any test, and disable comments clutter the source and scatter the reasons.
 
-## 対象範囲
+## Summary
 
-- `gamut accept <id>... --reason <text>` で、モジュールのルートの `gamut.accepted.json` に記録する。
-- 受理した変異体は引き続き実行し、判定を保つが、`IGNORED`（`reason: accepted: <text>`）として報告し、数えない。
-- 受理した変異体が検出されるようになった、または存在しなくなった場合は、要約で一覧にする。
-- `gamut accept --prune` で、そのような項目を消す。
-
-## 対象外
-
-- 型による等価の自動判定（[013](013-equivalence-detection.md)）。
-
-## 設計
-
-識別子は位置に依存しないので、関係ない編集では受理が外れない。
-囲む宣言を書き換えると識別子の経路が変わることがある。そのときは「存在しなくなった」として報告し、受理し直してもらう。
-
-## 完了の条件
-
-- 受理した生き残りが、数えられず、理由とともに報告される。
-- テストを足して検出されるようになると、要約で消してよい項目として挙がる。
-
-## 検証
-
-- 端から端までのテスト。
-
-## 要約
-
-- `internal/accept` が `gamut.accepted.json`（版、識別子から理由への対応）を読み書きする。未知の項目は誤りにし、書くときは識別子の順に項目ごとに行を分け、一時ファイルから改名する。
-- `gamut accept -reason <理由> [-dir <ディレクトリ>] <識別子>...` で記録する。理由のない受理と、識別子の形（`file::TYPE::scope::hash`）でない引数は、引数の誤り（014 からは終了コード 1）にした。
-- 対象範囲の「`IGNORED` として報告」は、011 と同じく状態を足さない形に変えた。受理した変異体は `files[].mutations` に本当の状態のまま `accepted`（理由）を付け、`mutants_total` と効率から外して `mutants_accepted` に数える。
-- 要らなくなった受理は、テストが検出するようになったもの（`detected`）と、変異体がなくなったもの（`missing`）に分けて、`stale_accepted` と要約に並べる。「なくなった」は、判定したパッケージのディレクトリのファイルを指す受理だけで判定し、`-mutant` で選んだ実行では判定しない。
-- `--prune` は、判定しないと「検出されるようになった」が分からないので、`gamut accept -prune [判定のフラグ] <パターン>...` で判定してから消す形にした。判定のフラグと区別するため、`-prune` は先頭でだけ受け付ける。
-- 判定の実行はソースツリーへ書き込まないという不変条件に、利用者が明示する `gamut accept` だけが受理の記録を書く、という例外を AGENTS.md と設計に書いた。
-- 受理の記録は、変更のない再実行の入力の指紋に入れた。
-- `TestAccept_RecordsSurvivorsAndPrunesStaleOnes` で、受理した生き残りが数えられず理由とともに報告されること、テストを強めると「検出されるようになった」に、存在しない識別子が「なくなった」に挙がること、`-prune` で両方が消えることを表明した。
+- `internal/accept` reads and writes `gamut.accepted.json` (version and a map from identifier to reason), rejecting unknown keys and writing sorted, one field per line, via a temporary file.
+- `gamut accept -reason <reason> [-dir <dir>] <id>...` records acceptances; a missing reason or a malformed identifier is an argument error.
+- Accepted mutants keep their real status, get the reason, and are left out of the counts and efficacy.
+- Acceptances no longer needed are listed as `detected` (a test now detects it) or `missing` (the mutant is gone). `missing` is judged only for files in the judged packages, and not under `-mutant`.
+- `gamut accept -prune [flags] <patterns>...` judges first, then removes them; `-prune` must come first.
+- `gamut accept`, run explicitly by the user, is the one exception to "judging never writes to the source tree", recorded in AGENTS.md and the design. The record is part of the unchanged-rerun fingerprint.

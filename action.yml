@@ -31,7 +31,7 @@ runs:
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ inputs.working-directory }}/.gamut
-        # 同じ参照の最新のキャッシュを先に、なければ Pull Request の基準のブランチのものを使う。
+        # Prefer the latest cache of the same ref, and fall back to the pull request's base branch.
         key: gamut-${{ runner.os }}-${{ github.ref }}-${{ github.sha }}
         restore-keys: |
           gamut-${{ runner.os }}-${{ github.ref }}-
@@ -59,7 +59,7 @@ runs:
         fi
         flags=(-annotations github)
         if [ -n "$since" ] && [ "$since" != none ]; then
-          # 浅いチェックアウトでは、基準のコミットと merge-base までの履歴を取得する。
+          # In a shallow checkout, fetch the base commit and the history down to the merge-base.
           if [ "$(git rev-parse --is-shallow-repository)" = true ]; then
             git fetch --no-tags --depth=1 origin "$since" || true
             for _ in 1 2 3 4 5 6 7 8 9 10; do
@@ -71,14 +71,14 @@ runs:
           flags+=(-since "$since")
         fi
         set +e
-        # shellcheck disable=SC2086 # args は空白で区切った引数の並びとして渡す。
+        # shellcheck disable=SC2086 # args is passed as a list of space-separated arguments.
         gamut "${flags[@]}" $GAMUT_ARGS
         code=$?
         set -e
         echo "exit-code=$code" >> "$GITHUB_OUTPUT"
 
     - name: Save the gamut cache
-      # 品質の条件で失敗しても、判定は有効なので保存する。
+      # Save even when the quality gate fails, because the verdicts are still valid.
       if: always() && inputs.cache == 'true'
       uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:

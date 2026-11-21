@@ -66,7 +66,7 @@ func TestRun_PassesBuildTagsToTheTestBinary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// タグ付きのテストがビルドに入らなければ、Double の変異体はどのテストも到達しない。
+	// If the tagged test were left out of the build, no test would reach the mutant of Double.
 	if got := statusByFunc(results)["Double "+string(mutant.ArithmeticBase)]; got != run.Killed {
 		t.Errorf("Double ARITHMETIC_BASE = %s, want KILLED", got)
 	}
@@ -109,9 +109,9 @@ func TestParseTestFlags(t *testing.T) {
 		{"-short -v", []string{"-test.short", "-test.v"}, false},
 		{"-test.short -timeout=30s", []string{"-test.short", "-test.timeout=30s"}, false},
 		{"--short", []string{"-test.short"}, false},
-		// テストが自分で定義したフラグはそのまま渡す。
+		// Flags a test defines itself are passed as is.
 		{"-update -short", []string{"-update", "-test.short"}, false},
-		// gamut が実行ごとに決めるフラグは受け付けない。
+		// Flags gamut sets per run are rejected.
 		{"-run TestX", nil, true},
 		{"-test.failfast", nil, true},
 		{"-count=2", nil, true},
@@ -149,7 +149,7 @@ func TestRun_TimeoutKillsChildProcesses(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 子プロセスはグループごと SIGKILL を受け、init に回収されるまで少し待つ。
+	// The child process gets SIGKILL with its group; wait a little for init to reap it.
 	deadline := time.Now().Add(5 * time.Second)
 	for syscall.Kill(pid, 0) == nil {
 		if time.Now().After(deadline) {

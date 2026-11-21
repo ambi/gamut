@@ -1,15 +1,15 @@
-// Package lib は、呼び出し元のパッケージのテストでだけ検出できる変異体を持つ。
+// Package lib has mutants that only the tests of calling packages can detect.
 package lib
 
-// Add は a と b の和を返す。
+// Add returns the sum of a and b.
 func Add(a, b int) int {
 	return a + b
 }
 
-// Triple は v の 3 倍を返す。lib のテストは呼ばない。
+// Triple returns three times v. lib's tests do not call it.
 func Triple(v int) int {
 	return v * 3
 }
 
-// Unit は、unrelated が参照するだけの定数である。
+// Unit is a constant that unrelated only refers to.
 const Unit = "m"

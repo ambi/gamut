@@ -31,7 +31,7 @@ func TestWriteGitHubAnnotations(t *testing.T) {
 	if len(lines) != 3 {
 		t.Fatalf("want 3 annotations (critical, not detected, no longer detected), got %d:\n%s", len(lines), b.String())
 	}
-	// 重要領域の生き残りは品質の条件を満たさないので error にする。属性のカンマはエスケープする。
+	// A survivor in a critical region fails the quality gate, so it is an error. Commas in properties are escaped.
 	if want := "::error file=svc/a%2Cb.go,line=3,col=9,title=gamut%3A critical survivor%2C not covered (CONDITIONALS_BOUNDARY)::"; !strings.HasPrefix(lines[0], want) {
 		t.Errorf("critical annotation:\n%s\nwant prefix\n%s", lines[0], want)
 	}
@@ -41,7 +41,7 @@ func TestWriteGitHubAnnotations(t *testing.T) {
 	if !strings.Contains(lines[2], "title=gamut%3A no longer detected") || !strings.Contains(lines[2], "TestOld") {
 		t.Errorf("no longer detected annotation: %s", lines[2])
 	}
-	// 本文の改行は %0A にし、受理の命令を添える。
+	// Newlines in the message become %0A, and the accept command is attached.
 	for _, l := range lines {
 		msg := l[strings.Index(l, "::")+2:]
 		msg = msg[strings.Index(msg, "::")+2:]

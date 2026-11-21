@@ -5,44 +5,16 @@ depends_on: [030]
 created_at: 2026-11-21
 ---
 
-# 繰り返し実行できないテストを見つけ、テストプロセスを使い回さずに判定する
+# Find tests that cannot be repeated and judge without reusing processes
 
-## 動機
+## Motivation
 
-変異体の判定は、gamut の 1 回の実行の間テストプロセスを使い回す（[030](030-reuse-test-processes.md)）。
-汚れの確認は「検出した」判定の側にしかないので、前の実行の状態が残ってテストが通ってしまう場合は、誤った `LIVED` になる。
-018 の固定モジュールで、パッケージ変数に記録をためて件数を確かめるテストが、呼び出しを消した変異体でも通り、判定が実行ごとに `KILLED` と `LIVED` で揺れた。
-このテストは、素の `go test -count=2` でも 2 回目に失敗する。
+Test processes are reused across mutants ([030](030-reuse-test-processes.md)), and the dirty-state check sits only on the detection side, so state left from earlier runs can make a test pass and give a false `LIVED`. In [018](018-more-mutators.md)'s fixed module, a test counting records in a package variable passed even with the call removed, so verdicts flipped between `KILLED` and `LIVED`. It also fails on the second run of plain `go test -count=2`.
 
-## 対象範囲
+## Summary
 
-- 被覆の記録で、各テストを変異なしで 2 回続けて実行し、2 回目に失敗するテストを「繰り返し実行できない」とする。
-- 繰り返し実行できないテストを含む変異体は、使い回さずに変異体ごとのプロセスで判定する。
-- そのようなテストを要約とエージェント向けの報告の警告に出す。
-
-## 対象外
-
-- 2 回とも通るが、状態によって結果が変わりうるテストの検出。
-
-## 設計
-
-2 回目の実行は、判定のテストのプロセスで被覆を測るときに、同じ命令の中で行う。
-被覆の記録の時間は、テストの実行の分だけ延びる。延びが大きければ、変更のない再実行で記録を戻したテストは確かめ直さない。
-
-## 完了の条件
-
-- 状態をためるテストを持つ固定モジュールで、判定が `-isolate` と同じになり、実行ごとに揺れない。
-- 警告に、そのテストの名前が出る。
-
-## 検証
-
-- 端から端までのテスト。
-- idmagic の `usecases` で、被覆の記録の時間の延びを測る。
-
-## 要約
-
-- 判定のテストの `cover` 命令で、各テストを記録の後に同じプロセスでもう一度実行し、失敗すれば `u <名前>` を返すようにした。gamut はそれをテストの印にし、印のあるテストを含む変異体はプロセスを使い回さずに判定する。
-- 印は被覆の記録（`cache.TestRecord.Unrepeatable`）に残すので、記録を戻した実行でも同じに判定する。
-- 報告の `unrepeatable_tests`、要約の「unrepeatable tests」の節、エージェント向けの報告の警告に名前を出す。
-- 固定モジュール `testdata/unrepeatable` は、パッケージ変数を戻さずに切り替えるテストを持つ。018 のような件数を確かめるテストは、検出の後の汚れの確認で判定し直されるので誤らない。切り替えるテストは、誤った `LIVED` と誤った `KILLED` の両方を出し、確認の再実行も通ってしまう。端から端までのテストは、被覆を測る実行、記録を戻す実行、キャッシュなしの実行のどれでも判定が `-isolate` と同じになることを表明する。使い回しを止める条件を外すと、3 つとも失敗することを確かめた。
-- idmagic の `usecases` では、被覆の記録の時間の延びは測定の揺れに収まり、繰り返し実行できないテストはなかった。延びが小さいので、記録を戻したテストを確かめ直さない工夫は入れていない。
+- The judging test's `cover` command runs each test again in the same process after recording, returning `u <name>` if it fails. Mutants involving such tests are judged without reusing processes.
+- The mark is kept in the coverage record (`cache.TestRecord.Unrepeatable`), so runs restoring records judge the same way.
+- The names appear in the report's unrepeatable tests, the summary, and the warnings of the agent report.
+- `testdata/unrepeatable` toggles a package variable without resetting it; it gives both false `LIVED` and false `KILLED`, and the recheck passes too. The end-to-end test asserts verdicts equal to `-isolate` when measuring, when restoring, and without a cache; removing the condition fails all three.
+- On idmagic's `usecases`, the extra time was within measurement noise and no test was unrepeatable, so restored tests are not rechecked.

@@ -5,45 +5,16 @@ depends_on: []
 created_at: 2026-11-20
 ---
 
-# 等価な変異体をコンパイル結果の比較で自動検出する
+# Detect equivalent mutants by comparing compiled code
 
-## 動機
+## Motivation
 
-C の研究（Trivial Compiler Equivalence、ICSE 2015）では、最適化後のコンパイル結果が元と同じになる変異体が等価な変異体の約 7%、重複が約 21% を占めた。
-Go のコンパイラは定数の畳み込みと不要な分岐の除去を行うので、この方法がよく効く見込みがある。
+Research on C (Trivial Compiler Equivalence, ICSE 2015) found that mutants compiling to the original's code make up about 7% of equivalent mutants. Go's compiler folds constants and removes dead branches, so the method should work well.
 
-## 対象範囲
+## Summary
 
-- `--detect-equivalent` で、生き残りの変異体を個別にコンパイルし、囲む関数のアセンブリを元と比べる。
-- 一致すれば `IGNORED`（`reason: equivalent: same machine code`）として報告する。
-- 比べるのは囲む関数だけにし、関数の位置情報（行番号の注記）を取り除いてから比べる。
-- 結果はキャッシュする（[004](004-result-cache.md) の鍵で）。
-
-## 対象外
-
-- 重複する変異体（互いに同じコンパイル結果になる変異体）の統合。測ってから判断する。
-
-## 設計
-
-コンパイルは `go build -gcflags=<pkg>=-S` を overlay 付きで呼ぶ。
-個別のコンパイルはビルドキャッシュを汚すので、生き残りにだけ行い、既定では無効にする。
-キャッシュの汚れを避けるため、一時的な `GOCACHE` を使う案と比べて決める（wi-49807 の測定では、一時キャッシュは依存の再ビルドで遅くなった）。
-
-## 完了の条件
-
-- `x * 1` を `x / 1` にする変異体のような、コンパイル結果が同じになる変異体を持つ固定モジュールで、その変異体が等価として除かれる。
-- idmagic の代表パッケージで、生き残りのうち等価と判定された割合を測る。
-
-## 検証
-
-- 端から端までのテストと測定。
-
-## 要約
-
-- `-detect-equivalent` で、`LIVED` の変異体ごとにパッケージを `go tool compile -S -dwarf=false` でコンパイルし、位置の注記を除いたアセンブリが元と同じなら `EQUIVALENT`（`reason: same machine code`）にする。
-- 設計の `go build -gcflags=<pkg>=-S` と一時的な `GOCACHE` の案は、どちらも採らなかった。前者は生き残りごとのコンパイル結果がビルドキャッシュにたまり、後者は依存をすべてビルドし直す。読み込みで得た依存のエクスポートデータから `-importcfg` を作り、`go tool compile` を直接呼べば、どちらも避けられる。埋め込みファイルとアセンブリのファイルを持つパッケージは、追加の設定が要るので比べず、警告する。
-- 対象範囲の「囲む関数だけを比べる」は、パッケージ全体を比べる形にした。変異は字句 1 つの置き換えなのでほかの関数は変わらず、インライン化で呼び出し元に変異が現れる場合も捉えられる。
-- 対象範囲の「`IGNORED` として報告」は、gomutants と同じ状態の名前 `EQUIVALENT` にした。`mutants_total` と効率から外し、`mutants_equivalent` に数える。
-- 比較の結果は、構築可能性と同じ鍵でキャッシュに記録する。判定の記録は `LIVED` のまま残る。
-- 単体テストで `x * 1`→`x / 1` と `x + 0`→`x - 0` が等価に、`x + 2`→`x - 2` が等価でないと判定されること、埋め込みファイルを持つパッケージを比べないことを、端から端までのテスト（`testdata/equiv`）で、等価な生き残りだけが `EQUIVALENT` になり、次の実行でキャッシュの比較を使うことを表明した。
-- idmagic の `backend/oauth2/internal/token/usecases` では、生き残り 29 体の比較に 2.2 秒かかり、共有ビルドキャッシュは増えず、等価と判定された変異体は 0 体だった。生き残りは境界の比較や否定のように、コードとして違いが残る変異だった。
+- `-detect-equivalent` compiles the package per `LIVED` mutant with `go tool compile -S -dwarf=false` and marks it `EQUIVALENT` when the assembly without position notes matches the original's.
+- Neither `go build -gcflags=-S` (fills the build cache) nor a temporary `GOCACHE` (rebuilds every dependency) was used; an `-importcfg` built from the loaded export data lets `go tool compile` run directly. Packages with embedded or assembly files are skipped with a warning.
+- The whole package is compared rather than the enclosing function, which also catches mutations inlined into callers.
+- The status name is `EQUIVALENT`, as in gomutants; such mutants are left out of the counts and efficacy. Comparisons are cached under the viability keys.
+- Unit tests cover `x * 1`→`x / 1` and `x + 0`→`x - 0` (equivalent) and `x + 2`→`x - 2` (not); `testdata/equiv` covers the end-to-end flow. On idmagic's `usecases`, comparing 29 survivors took 2.2 s, did not grow the build cache, and found none equivalent.

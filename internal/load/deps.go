@@ -32,16 +32,16 @@ type depPackage struct {
 	}
 }
 
-// local は、パッケージのソースが利用者の手元で変わりうるか、つまりメインモジュール（ワークスペースを含む）か、
-// 版を持たないディレクトリへの replace の先にあるかを返す。
-// それ以外のモジュールの中身は go.mod と go.sum が決め、標準ライブラリは Go の版が決める。
+// local reports whether the package's source may change locally: it is in the main module (workspaces included)
+// or behind a replace to a directory without a version.
+// go.mod and go.sum fix the contents of other modules, and the Go version fixes the standard library.
 func (p *depPackage) local() bool {
 	return p.Module != nil && (p.Module.Main || p.Module.Replace != nil && p.Module.Replace.Version == "")
 }
 
-// SourceDeps は、対象パッケージごとに、その判定に影響しうるファイルのうち、パッケージ自身の Go ファイルとテストファイルを除いたものの絶対パスを返す。
-// 中身は、テストバイナリが依存する手元のモジュールのパッケージの Go ファイルと埋め込みファイル、対象自身の埋め込みファイル、対象の testdata ディレクトリのファイルである。
-// テストだけが import するパッケージも含めるため、go list -deps -test を実行する。エクスポートデータは作らない。
+// SourceDeps returns, per target package, the absolute paths of the files that may affect its verdicts, except the package's own Go and test files:
+// the Go and embedded files of local packages the test binary depends on, the target's embedded files, and the files in its testdata directory.
+// It runs go list -deps -test to include packages only tests import. It builds no export data.
 func SourceDeps(pkgs []*Package) (map[string][]string, error) {
 	if len(pkgs) == 0 {
 		return map[string][]string{}, nil
@@ -57,13 +57,13 @@ func SourceDeps(pkgs []*Package) (map[string][]string, error) {
 	return deps.Sources(pkgs)
 }
 
-// Deps は、go list -deps -test の結果である。
+// Deps is the result of go list -deps -test.
 type Deps struct {
 	listed map[string]*depPackage
 }
 
-// ListDeps は、モジュールのディレクトリ dir で、patterns に go list -deps -test を実行する。
-// Package を取らないので、Load と並行して実行できる。patterns は Load に渡すものと同じパッケージを指せばよい。
+// ListDeps runs go list -deps -test on patterns in the module directory dir.
+// It takes no Package, so it can run alongside Load. patterns should name the same packages as those given to Load.
 func ListDeps(dir string, tags, patterns []string) (*Deps, error) {
 	listed, err := listTestDeps(dir, tags, patterns)
 	if err != nil {
@@ -72,7 +72,7 @@ func ListDeps(dir string, tags, patterns []string) (*Deps, error) {
 	return &Deps{listed: listed}, nil
 }
 
-// Sources は、SourceDeps と同じものを、一覧 d から求める。d は pkgs をすべて含めて列挙したものでなければならない。
+// Sources computes the same as SourceDeps from the list d, which must include every package of pkgs.
 func (d *Deps) Sources(pkgs []*Package) (map[string][]string, error) {
 	listed := d.listed
 	result := map[string][]string{}
@@ -89,14 +89,14 @@ func (d *Deps) Sources(pkgs []*Package) (map[string][]string, error) {
 		if self := listed[pkg.ImportPath]; self != nil {
 			add(self.Dir, self.EmbedFiles, self.TestEmbedFiles, self.XTestEmbedFiles)
 		}
-		// テストバイナリの依存は p.test が持つ。テストファイルがなければ p 自身の依存を使う。
+		// p.test holds the test binary's dependencies. Without test files, p's own are used.
 		root := listed[pkg.ImportPath+".test"]
 		if root == nil {
 			root = listed[pkg.ImportPath]
 		}
 		if root != nil {
 			for _, d := range root.Deps {
-				// テスト用に再コンパイルされた依存は "q [p.test]" と書かれる。ファイルは q と同じである。
+				// A dependency recompiled for tests reads "q [p.test]"; its files are those of q.
 				base, _, _ := strings.Cut(d, " ")
 				if base == pkg.ImportPath || base == pkg.ImportPath+"_test" {
 					continue
@@ -118,7 +118,7 @@ func (d *Deps) Sources(pkgs []*Package) (map[string][]string, error) {
 	return result, nil
 }
 
-// listTestDeps は、dir で go list -deps -test を patterns に実行し、import パスからパッケージを引く表を返す。
+// listTestDeps runs go list -deps -test on patterns in dir and returns a table from import path to package.
 func listTestDeps(dir string, tags, patterns []string) (map[string]*depPackage, error) {
 	args := []string{"list", "-e", "-deps", "-test",
 		"-json=ImportPath,Dir,GoFiles,CgoFiles,TestGoFiles,XTestGoFiles,EmbedFiles,TestEmbedFiles,XTestEmbedFiles,Deps,Module"}
@@ -147,22 +147,22 @@ func listTestDeps(dir string, tags, patterns []string) (map[string]*depPackage, 
 	return listed, nil
 }
 
-// RevDep は、対象パッケージを推移的に import する、モジュール内のテストを持つパッケージである。
+// RevDep is a package in the module, with tests, that imports a target package transitively.
 type RevDep struct {
 	ImportPath string
-	// Dir はパッケージディレクトリの絶対パスである。
+	// Dir is the absolute path of the package directory.
 	Dir string
-	// TestFiles は、テストファイル（外部テストを含む）の絶対パスである。
+	// TestFiles are the absolute paths of the test files (external tests included).
 	TestFiles []string
-	// Files は、テストの鍵に含めるファイルの絶対パスである。
-	// パッケージ自身の Go ファイル、テストファイル、埋め込みファイル、testdata の下のファイルと、
-	// テストバイナリが依存する手元のパッケージ（対象パッケージを除く）の Go ファイルと埋め込みファイルである。
+	// Files are the absolute paths of the files in the test key:
+	// the package's own Go, test, and embedded files and the files under testdata, and
+	// the Go and embedded files of local packages the test binary depends on (except the target).
 	Files []string
 }
 
-// ReverseDeps は、対象パッケージごとに、そのテストバイナリにリンクされるモジュール内のパッケージのうちテストを持つものを返す。
-// go list -deps -test をメインモジュールの全パッケージに実行し、テストバイナリの依存を逆にたどる。
-// 対象パッケージ自身は含めない。返すパッケージは import パスの順に並ぶ。
+// ReverseDeps returns, per target package, the packages in the module with tests whose test binaries link it.
+// It runs go list -deps -test on every package of the main module and walks the test binaries' dependencies backwards.
+// The target itself is not included. The result is in import path order.
 func ReverseDeps(pkgs []*Package) (map[string][]RevDep, error) {
 	result := map[string][]RevDep{}
 	if len(pkgs) == 0 {
@@ -224,7 +224,7 @@ func ReverseDeps(pkgs []*Package) (map[string][]RevDep, error) {
 	return result, nil
 }
 
-// regularFiles は、dir の下の通常のファイルを返す。dir がなければ何も返さない。
+// regularFiles returns the regular files under dir, or nothing when dir does not exist.
 func regularFiles(dir string) ([]string, error) {
 	if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
 		return nil, nil

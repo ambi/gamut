@@ -1,12 +1,12 @@
-// Package rerun は、生き残りを埋めるテストを足してから、その変異体だけを再実行することを確かめる固定モジュールである。
+// Package rerun is a fixed module for checking that, after adding a test for a survivor, only that mutant is rerun.
 package rerun
 
-// IsAdult は、age が 18 以上かを返す。
+// IsAdult reports whether age is 18 or more.
 func IsAdult(age int) bool {
 	return age >= 18
 }
 
-// Half は v の半分を返す。
+// Half returns half of v.
 func Half(v int) int {
 	return v / 2
 }

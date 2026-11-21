@@ -18,7 +18,7 @@ func TestCritical_GlobsAndFunctionComments(t *testing.T) {
 
 func Plain(a, b int) int { return a + b }
 
-// Fee は金額を計算する。
+// Fee computes an amount of money.
 //
 //gamut:critical
 func Fee(a, b int) int { return a * b }
@@ -70,7 +70,7 @@ var _ = 1
 			if got := scopes(set); !slices.Equal(got, tc.want) {
 				t.Errorf("critical scopes %v, want %v", got, tc.want)
 			}
-			// 関数の Doc の外の //gamut:critical は警告する。
+			// //gamut:critical outside a function's Doc gets a warning.
 			if len(warnings) != 1 {
 				t.Errorf("warnings %q, want one for the comment on a var", warnings)
 			}

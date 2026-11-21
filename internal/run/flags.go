@@ -5,8 +5,8 @@ import (
 	"strings"
 )
 
-// testFlagNames は、testing パッケージが -test. の接頭辞付きで定義するフラグの名前である。
-// 利用者が go test と同じく接頭辞なしで書いたものに、接頭辞を補う。
+// testFlagNames are the names of the flags the testing package defines with the -test. prefix.
+// The prefix is added to those the user writes without it, as with go test.
 var testFlagNames = map[string]bool{
 	"bench": true, "benchmem": true, "benchtime": true, "blockprofile": true, "blockprofilerate": true,
 	"coverprofile": true, "cpu": true, "cpuprofile": true, "fullpath": true,
@@ -16,17 +16,17 @@ var testFlagNames = map[string]bool{
 	"timeout": true, "trace": true, "v": true,
 }
 
-// reservedTestFlags は、gamut が実行ごとに決めるので、利用者が渡せないフラグである。
+// reservedTestFlags are the flags the user cannot pass, because gamut sets them per run.
 var reservedTestFlags = map[string]bool{"run": true, "count": true, "failfast": true, "list": true, "paniconexit0": true}
 
-// ParseTestFlags は、空白で区切ったテストのフラグを、テストバイナリへ渡す形にする。
-// go test と同じく -short のように書け、testing のフラグには -test. を補う。
-// テストが自分で定義したフラグ（-update など）はそのまま渡す。引用符には対応しない。
+// ParseTestFlags turns space-separated test flags into the form passed to a test binary.
+// They can be written like -short, as with go test, and -test. is added to the flags of testing.
+// Flags a test defines itself (such as -update) are passed as is. Quoting is not supported.
 func ParseTestFlags(s string) ([]string, error) {
 	var out []string
 	for f := range strings.FieldsSeq(s) {
 		if !strings.HasPrefix(f, "-") {
-			// 直前のフラグの値である。
+			// The value of the preceding flag.
 			out = append(out, f)
 			continue
 		}

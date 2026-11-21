@@ -17,7 +17,7 @@ import (
 	"github.com/ambi/gamut/internal/run"
 )
 
-// verdict は、行と列と演算子で変異体を指し、期待する判定を並べる。
+// verdict names a mutant by line, column, and mutator, and lists the expected verdict.
 type verdict struct {
 	status run.Status
 	reason string
@@ -38,7 +38,7 @@ func TestRun_ClassifiesEveryVerdictOnFixture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// forced fail の検査は、到達のあるテスト 1 件を 1 回のプロセス起動で実行して終わる。
+	// The forced fail check runs one reaching test in one process start, and is done.
 	if got := regexp.MustCompile(`(?m)^self-check: fixture: forced fail failed Test\w+ in `).FindAllString(log.String(), -1); len(got) != 1 {
 		t.Errorf("want exactly one forced-fail run naming one test, got log:\n%s", log.String())
 	}
@@ -52,10 +52,10 @@ func TestRun_ClassifiesEveryVerdictOnFixture(t *testing.T) {
 		"20:17 ARITHMETIC_BASE":       {run.Killed, "", run.ModeSchemata},
 		"26:33 INVERT_NEGATIVES":      {run.Killed, "", run.ModeSchemata},
 		"30:14 CONDITIONALS_NEGATION": {run.Killed, "", run.ModeSchemata},
-		// 短絡評価で右辺が評価されないので、同じ行でも到達しない。
+		// Short-circuit evaluation leaves the right side unevaluated, so it is not reached despite being on the same line.
 		"30:26 CONDITIONALS_NEGATION": {run.NotCovered, "", run.ModeSchemata},
 		"34:38 ARITHMETIC_BASE":       {run.NotCovered, "", run.ModeSchemata},
-		// 定数の文脈は schemata に埋め込めず、個別ビルドで全テストを実行する。
+		// A constant context cannot be embedded in the schemata, so a standalone build runs every test.
 		"37:19 ARITHMETIC_BASE":       {run.Lived, run.ReasonNotDetected, run.ModeStandalone},
 		"48:16 CONDITIONALS_BOUNDARY": {run.Killed, "", run.ModeSchemata},
 		"48:16 CONDITIONALS_NEGATION": {run.Killed, "", run.ModeSchemata},
@@ -156,7 +156,7 @@ func TestRun_WarnsWhenNoTestReachesAnySite(t *testing.T) {
 	}
 }
 
-// loadOne は、dir の 1 パッケージを読む。
+// loadOne loads the one package in dir.
 func loadOne(dir string, tags []string) (*load.Package, error) {
 	pkgs, err := load.Load([]string{dir}, tags)
 	if err != nil {

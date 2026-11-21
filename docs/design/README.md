@@ -1,95 +1,94 @@
-# gamut の設計
+# gamut design
 
-gamut は Go のパッケージに機械的な変異を加え、そのパッケージのテストが変異を検出できるかを調べるミューテーションテストツールである。
-この文書は、目的、設計の文書の構成、目標とロードマップを定める。
+gamut is a mutation testing tool: it makes mechanical changes to a Go package and checks whether the package's tests detect them.
+This document sets out the purpose, how the design documents are organized, and the goals and roadmap.
 
-## 目的
+## Purpose
 
-- **速い**：変異体ごとにパッケージをコンパイルし直さない。全変異体を 1 回のビルドに埋め込み、どれを有効にするかを実行時に選ぶ（mutant schemata）。
-- **ビルドキャッシュを汚さない**：変異体ごとのビルド結果を共有の Go ビルドキャッシュへ書き込まない。
-- **生き残りを仕分けやすくする**：生き残った変異体を、テストが到達しなかったもの、到達したが値が変わらなかったもの、値は変わったが表明が見ていないものに分ける。
-- **単純である**：Go の標準ライブラリと `go` コマンドだけに依存する。
+- **Fast**: never recompile the package per mutant. Embed every mutant in one build and pick the active one at run time (mutant schemata).
+- **Leave the build cache alone**: never write per-mutant build results to the shared Go build cache.
+- **Make survivors easy to sort**: split surviving mutants into those no test reached, those reached without changing a value, and those that changed a value no assertion looks at.
+- **Simple**: depend only on the Go standard library and the `go` command.
 
-## 文書
+## Documents
 
-設計は主題ごとに分ける。実装やレビューの前に、触れる主題の文書を読む。
+The design is split by topic. Before an implementation or review, read the documents of the topics you touch.
 
-| 文書 | 定めること |
+| Document | What it defines |
 | --- | --- |
-| [実行](execution.md) | 実行の流れ、パッケージの読み込み、ビルドのフラグ、テストバイナリの起動と使い回し、時間切れ、schemata の書き換え、変異の届き方の自己検査、cgo |
-| [変異体](mutants.md) | 変異演算子と既定の集合、変異体の識別子、arid のコード、無効化コメント、等価な変異体の受理と自動検出 |
-| [再利用](reuse.md) | 判定の再利用の鍵と規則、被覆の記録の再利用、変更のない再実行 |
-| [選択と順序](selection.md) | 差分（`-since`）と識別子（`-mutant`）による選択、テストと変異体の実行の順序、統合モード、保存のたびの判定、シャードと時間予算、呼び出しの深さの制限 |
-| [判定と報告](reporting.md) | 判定の状態、報告の形式、エージェント向けの報告、GitHub の注釈と Action、終了コード、品質の条件、設定ファイル、変更が壊しうるテストの選択、kill matrix |
+| [Execution](execution.md) | The flow of a run, loading packages, build flags, starting and reusing test binaries, timeouts, the schemata rewrite, the self-check that mutations reach the tests, cgo |
+| [Mutants](mutants.md) | Mutators and the default set, mutant identifiers, arid code, disable comments, accepting and detecting equivalent mutants |
+| [Reuse](reuse.md) | Keys and rules for reusing verdicts, reusing coverage records, unchanged reruns |
+| [Selection and order](selection.md) | Selecting by diff (`-since`) and by identifier (`-mutant`), the order of tests and mutants, integration mode, judging on every save, shards and time budgets, limiting the call depth |
+| [Verdicts and reports](reporting.md) | Statuses, report formats, the report for agents, GitHub annotations and the Action, exit codes, the quality gate, the config file, selecting the tests a change may break, the kill matrix |
 
-各文書の末尾に、その主題で採らなかった案と理由を置く。
+Each document ends with the ideas rejected for its topic and why.
 
-## 目標とロードマップ
+## Goals and roadmap
 
-目標は、Go のパッケージのミューテーションテストを、日々の開発と CI で繰り返し回せる速さと、生き残りを直しやすい仕分けで提供することである。
-次の表は、機能と実装の段階を並べる。
+The goal is mutation testing of Go packages fast enough to run again and again in daily development and CI, with survivors sorted so they are easy to fix.
+The table lists the features and their state.
 
-| 機能 | 状態 |
+| Feature | State |
 | --- | --- |
-| 全変異体を 1 回のビルドに埋め込む | 済み |
-| 変異体ごとにテストを選ぶ（式単位の被覆。短絡評価の右辺を区別する） | 済み |
-| 感染の判定（weak mutation） | 済み |
-| 生き残りの 3 分類 | 済み |
-| `go/types` による構築不能の事前判定 | 済み |
-| ログ出力などを変異しない（arid） | 済み |
-| 位置に依存しない識別子 | 済み |
-| 変異の届き方の自己検査（forced fail） | 済み |
-| 定数の文脈の変異 | 済み（個別ビルド） |
-| 複数のパッケージを 1 回で判定する | 済み |
-| 結果の再利用 | 済み |
-| 被覆の記録の再利用 | 済み |
-| 差分だけの実行（`-since`） | 済み |
-| 変異体の再実行（`-mutant`） | 済み |
-| 前回の検出テストを先に実行 | 済み |
-| 逆依存パッケージのテストで検出（`-integration`） | 済み |
-| 等価な変異体の受理（ソースの外に記録） | 済み |
-| 等価な変異体の自動検出（コンパイル結果の比較） | 済み |
-| 設定ファイル（`gamut.json`） | 済み |
-| 無効化コメント | 済み |
-| 重要領域（全変異体の検出を要求） | 済み |
-| 閾値と終了コード | 済み |
-| mutation-testing-elements の JSON と HTML | 済み |
-| GitHub の注釈と Action | 一部（公開リポジトリの Pull Request での確認が残る） |
-| エージェント向けの報告と skills | 済み |
-| 変異演算子の拡張（戻り値、呼び出し文の削除、論理演算子、条件の真偽） | 済み |
-| 変異演算子の拡張（数値のリテラル、分岐の本体、エラーの包み） | 済み |
-| 変更が壊しうるテストの選択（`select-tests`） | 済み |
-| kill matrix（何も検出しないテスト、包含されるテスト） | 済み（`-kill-matrix`） |
-| 不要かもしれないコードの報告（`simplify`） | 済み |
-| 呼び出しの深さで被覆を絞る | 済み（`-max-depth`） |
-| CI のシャードと時間予算 | 済み（`-shard`、`gamut merge`、`-time-budget`） |
-| 保存のたびの再実行（`-watch`） | 済み |
-| cgo を使うパッケージ | 済み（`import "C"` を持たないファイル） |
-| Windows での動作の確認 | 公開の前 |
-| 版の公開（`go install`、`-version`、変更履歴、CI） | 済み（タグの公開は利用者が行う） |
+| Embed every mutant in one build | Done |
+| Select tests per mutant (coverage per expression, telling apart the right side of short-circuit operators) | Done |
+| Infection checks (weak mutation) | Done |
+| Three kinds of survivors | Done |
+| Up-front viability checks with `go/types` | Done |
+| Leave logging and similar code unmutated (arid) | Done |
+| Identifiers independent of position | Done |
+| Self-check that mutations reach the tests (forced fail) | Done |
+| Mutating constant contexts | Done (standalone builds) |
+| Judge several packages in one run | Done |
+| Reuse verdicts | Done |
+| Reuse coverage records | Done |
+| Judge only the diff (`-since`) | Done |
+| Rerun a mutant (`-mutant`) | Done |
+| Run the previous killing test first | Done |
+| Detect with the tests of reverse dependencies (`-integration`) | Done |
+| Accept equivalent mutants (recorded outside the source) | Done |
+| Detect equivalent mutants (by comparing compiled code) | Done |
+| Config file (`gamut.json`) | Done |
+| Disable comments | Done |
+| Critical regions (every mutant must be detected) | Done |
+| Thresholds and exit codes | Done |
+| mutation-testing-elements JSON and HTML | Done |
+| GitHub annotations and the Action | Partly (still to verify on a pull request of a public repository) |
+| Report for agents and skills | Done |
+| More mutators (return values, removing call statements, logical operators, constant conditions) | Done |
+| More mutators (numeric literals, branch bodies, error wrapping) | Done |
+| Select the tests a change may break (`select-tests`) | Done |
+| Kill matrix (tests that detect nothing, subsumed tests) | Done (`-kill-matrix`) |
+| Report possibly unneeded code (`simplify`) | Done |
+| Limit coverage by call depth | Done (`-max-depth`) |
+| CI shards and time budgets | Done (`-shard`, `gamut merge`, `-time-budget`) |
+| Rerun on every save (`-watch`) | Done |
+| Packages using cgo | Done (files without `import "C"`) |
+| Verifying Windows | Before release |
+| Releases (`go install`, `-version`, changelog, CI) | Done |
 
-[機能の比較](../evaluation/comparison.md)は、主要なミューテーションテストツールの機能を、各ツールの公式の文書か `--help` で確かめたことだけで並べる。
-確かめられないセルは「不明」と書き、推測で埋めない。
-gamut の「一部」「ない」には、まだ確かめていないことか、採らない理由を書く。作業項目は終われば役目を終えるので、比較表からは参照しない。
-gamut の機能を足したら、表の gamut の列も更新する。
+The [feature comparison](../evaluation/comparison.md) lists the features of major mutation testing tools using only what each tool's official documentation or `--help` confirms.
+Cells that cannot be confirmed say "unknown"; they are never filled by guessing.
+gamut's "partly" and "no" cells say what is not verified yet or why gamut does not do it. Work items are done once their work is, so the comparison never refers to them.
+When gamut gains a feature, update gamut's column too.
 
-版は Semantic Versioning に従い、最初の版を 0.1.0 とする。1.0.0 までは、マイナー版で報告の形と変異体の識別子の計算を変えうる。
-`gamut -version` は、ビルド情報（`debug.ReadBuildInfo`）のモジュールの版を出す。`go install ...@vX.Y.Z` で入れればその版、手元のビルドでは Go がコミットから作る擬似版になる。
-キャッシュの環境の鍵は、版の文字列ではなく実行ファイルの中身で区別するので、同じ版の文字列の開発中のビルドでも古い判定を引き継がない。
-利用者の記録に影響する変更（識別子、報告の形、設定の項目、既定の変異演算子の集合）は [CHANGELOG.md](../../CHANGELOG.md) に書く。
+Versions follow Semantic Versioning, starting at 0.1.0. Until 1.0.0, a minor version may change the report's shape and how mutant identifiers are computed.
+`gamut -version` prints the module version from the build info (`debug.ReadBuildInfo`): the version itself when installed with `go install ...@vX.Y.Z`, and the pseudo-version Go derives from the commit for a local build.
+The cache's environment key tells builds apart by the executable's contents rather than the version string, so a development build with the same version string never inherits stale verdicts.
+Changes that affect users' records (identifiers, the report's shape, config keys, the default set of mutators) are recorded in [CHANGELOG.md](../../CHANGELOG.md).
 
-### 段階
+### Stages
 
-- **段階 1（済み）**：schemata、`go/types` による構築不能の判定、式単位の被覆と感染、生き残りの 3 分類、位置に依存しない識別子、JSON の報告。
-- **段階 2（済み）**：再実行を速くする。結果の再利用、差分の実行、変異体の再実行、自己検査、複数パッケージ、統合モード。
-- **段階 3**：仕分けと CI。受理、無効化コメント、等価の自動検出、重要領域、報告の形式、注釈、エージェント向けの報告、変異演算子と arid の拡張。
-- **段階 4**：テストの質を測る。`select-tests`、kill matrix、`simplify`、呼び出しの深さ、シャード、`--watch`。
+- **Stage 1 (done)**: schemata, viability checks with `go/types`, coverage and infection per expression, three kinds of survivors, identifiers independent of position, the JSON report.
+- **Stage 2 (done)**: faster reruns. Reusing results, judging the diff, rerunning a mutant, the self-check, several packages, integration mode.
+- **Stage 3**: sorting and CI. Acceptance, disable comments, detecting equivalence, critical regions, report formats, annotations, the report for agents, more mutators and arid rules.
+- **Stage 4**: measuring test quality. `select-tests`, the kill matrix, `simplify`, call depth, shards, `-watch`.
 
-### Go ならではの強み
+### Strengths particular to Go
 
-Go の性質を使う方向を挙げる。
+Directions that use Go's properties:
 
-- **型による確実な構築可能性**：`go/types` は Go のコンパイラと同じ規則で検査するので、構築不能の判定に漏れがほぼない。
-- **静的な被覆の補助**：Go の呼び出しは静的に解決しやすいので、`golang.org/x/tools` を使わずとも、`go/types` の参照から変更の影響を受けるテストを絞れる。
-- **テストバイナリが単一の実行ファイルである**：判定のテストを overlay で足すだけで、1 つのプロセスの中で変異体を切り替えられる。プロセスを捨てて起動し直すのも容易なので、汚れたときだけ隔離に戻せる。
-
+- **Reliable viability from types**: `go/types` checks by the same rules as the Go compiler, so viability checks miss almost nothing.
+- **Static help for coverage**: Go calls are easy to resolve statically, so even without `golang.org/x/tools`, references from `go/types` narrow down the tests a change affects.
+- **A test binary is a single executable**: adding the judging test with an overlay is enough to switch mutants inside one process. Throwing a process away and starting another is cheap, so isolation can be used only when a process gets dirty.

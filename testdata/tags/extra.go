@@ -2,5 +2,5 @@
 
 package tags
 
-// Double は extra タグを渡したときだけ列挙される。
+// Double is enumerated only with the extra tag.
 func Double(x int) int { return x * 2 }

@@ -1,61 +1,62 @@
 # gamut
 
-gamut は Go 向けのミューテーションテストツールである。
-パッケージのソースに機械的な変異（`<` を `<=` にするなど）を加え、テストがその変異を検出できるかを調べる。
+English | [日本語](README.ja.md)
 
-- **速い**：全変異体を 1 回のビルドに埋め込み（mutant schemata）、どれを有効にするかを実行時に選ぶ。2 回目からは、変わった箇所の変異体だけを判定する。
-- **ビルドキャッシュを汚さない**：変異体ごとのビルド結果を共有の Go ビルドキャッシュへ書かない。
-- **生き残りを仕分ける**：テストが到達しなかった（`NOT COVERED`）、到達したが値が変わらなかった（`not infected`）、値は変わったが失敗しなかった（`not detected`）に分ける。直し方がそれぞれ違うためである。
-- **依存がない**：Go の標準ライブラリと `go` コマンドだけを使う。
+gamut is a mutation testing tool for Go.
+It makes mechanical changes (mutations) to a package's source, such as turning `<` into `<=`, and checks whether the tests detect them.
 
-## 導入
+- **Fast**: it embeds every mutant in one build (mutant schemata) and picks the active one at run time. From the second run on, it judges only the mutants at changed code.
+- **Leaves the build cache alone**: it never writes per-mutant build results to the shared Go build cache.
+- **Sorts the survivors**: no test reached the mutant (`NOT COVERED`), tests reached it but the value did not change (`not infected`), or the value changed but no test failed (`not detected`). Each calls for a different fix.
+- **No dependencies**: it uses only the Go standard library and the `go` command.
 
-Go 1.27 以降が要る。macOS と Linux で動作を確かめている。Windows はまだ確かめていない。
+## Install
+
+It needs Go 1.27 or later. It is tested on macOS and Linux; Windows is not verified yet.
 
 ```console
 go install github.com/ambi/gamut/cmd/gamut@v0.1.0
 ```
 
-1.0.0 までは、マイナー版で報告の形と変異体の識別子の計算を変えうる。変更は [CHANGELOG.md](CHANGELOG.md) に記録する。
+Until 1.0.0, a minor version may change the report's shape and how mutant identifiers are computed. [CHANGELOG.md](CHANGELOG.md) records the changes.
 
-## 使い方
+## Usage
 
 ```console
-# モジュール全体を判定し、生き残りを理由ごとに並べる。
+# Judge the whole module and list the survivors by reason.
 gamut ./...
-# main から変えた箇所の変異体だけを判定する。
+# Judge only the mutants at code changed since main.
 gamut -since main ./...
-# 生き残りを埋めるテストを書いたら、その変異体だけを確かめ直す。
-gamut -mutant '<報告の id>' ./path/to/pkg
-# mutation-testing-elements の JSON と、それを表示する HTML を書く。
+# After writing a test for a survivor, check just that mutant again.
+gamut -mutant '<id from the report>' ./path/to/pkg
+# Write the mutation-testing-elements JSON and the HTML that shows it.
 gamut -o report.json -reporter text -reporter html ./...
 ```
 
-判定と被覆の記録は `.gamut/` に保存し、次の実行では変わった箇所だけをやり直す。`.gamut/` はリポジトリに入れない。
+Verdicts and coverage records are saved in `.gamut/`, and the next run redoes only what changed. Keep `.gamut/` out of the repository.
 
-## 文書
+## Documents
 
-| 文書 | 内容 |
+| Document | Contents |
 | --- | --- |
-| [手引き：実行](docs/guide/running.md) | 対象の指定、フラグの一覧、テストプロセス、重要領域と品質の条件、終了コード |
-| [手引き：設定と変異演算子](docs/guide/configuration.md) | 設定ファイル `gamut.json`、変異演算子、無効化コメント、等価な変異体の受理と自動検出 |
-| [手引き：繰り返しの実行](docs/guide/incremental.md) | 判定の再利用、`-since`、`-mutant`、統合モード、`gamut select-tests` |
-| [手引き：報告](docs/guide/reports.md) | JSON と HTML の報告、エージェント向けの報告、不要かもしれないコードの報告 |
-| [手引き：CI](docs/guide/ci.md) | GitHub Actions、シャードと `gamut merge` |
-| [設計](docs/design/README.md) | gamut の動き方と、その判断の理由 |
-| [機能の比較](docs/evaluation/comparison.md) | 主要なミューテーションテストツールとの機能の比較 |
-| [測定](docs/evaluation/benchmarks.md) | 実在のパッケージでの実行時間とビルドキャッシュの増加 |
+| [Guide: running](docs/guide/running.md) | Choosing targets, the flags, test processes, critical regions and the quality gate, exit codes |
+| [Guide: configuration and mutators](docs/guide/configuration.md) | The config file `gamut.json`, mutators, disable comments, accepting and detecting equivalent mutants |
+| [Guide: incremental runs](docs/guide/incremental.md) | Reusing verdicts, `-since`, `-mutant`, integration mode, `gamut select-tests` |
+| [Guide: reports](docs/guide/reports.md) | JSON and HTML reports, the report for agents, the report of possibly unneeded code |
+| [Guide: CI](docs/guide/ci.md) | GitHub Actions, shards and `gamut merge` |
+| [Design](docs/design/README.md) | How gamut works and why |
+| [Feature comparison](docs/evaluation/comparison.md) | Features compared with major mutation testing tools |
 
-コーディングエージェント向けの skill を [skills/](skills/) に置く。導入と CI は `gamut`、生き残りを 1 体ずつ埋める手順は `mutation-test-loop` が定める。
+Skills for coding agents live in [skills/](skills/): `gamut` covers setup and CI, and `mutation-test-loop` the steps to fill survivors one at a time.
 
-## 開発
+## Development
 
-コマンドは `mise run <task>` で実行する（[AGENTS.md](AGENTS.md)）。
+Run commands with `mise run <task>` (see [AGENTS.md](AGENTS.md)).
 
 ```console
 mise run verify
 ```
 
-## 使用許諾
+## License
 
 [MIT](LICENSE)

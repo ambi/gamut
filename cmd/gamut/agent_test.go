@@ -7,8 +7,8 @@ import (
 	"testing"
 )
 
-// TestReporter_AgentWritesOneJSONDocument は、-reporter agent が標準出力に JSON を 1 つだけ書き、
-// 生き残りごとに分類、位置、変異の前後、囲む宣言、テスト、指針を持つことを確かめる。
+// TestReporter_AgentWritesOneJSONDocument checks that -reporter agent writes exactly one JSON document to stdout,
+// with, per survivor, the class, position, before and after, enclosing declaration, tests, and hint.
 func TestReporter_AgentWritesOneJSONDocument(t *testing.T) {
 	var stdout, stderr strings.Builder
 	if code := realMain([]string{"-no-cache", "-workers", "2", "-reporter", "agent", "../../testdata/fixture"}, &stdout, &stderr); code != 0 {
@@ -34,7 +34,7 @@ func TestReporter_AgentWritesOneJSONDocument(t *testing.T) {
 			}
 		}
 	}
-	// 進行状況は標準エラーに出る。
+	// Progress goes to stderr.
 	if !strings.Contains(stderr.String(), "execute:") {
 		t.Errorf("want progress on stderr, got:\n%s", stderr.String())
 	}

@@ -15,11 +15,11 @@ import (
 	"github.com/ambi/gamut/internal/run"
 )
 
-// agentTests は、生き残りごとに並べる到達したテストの数の上限である。
+// agentTests caps the number of reaching tests listed per survivor.
 const agentTests = 10
 
-// AgentReport は、コーディングエージェントが生き残りを埋めるための報告である。
-// 生き残りごとに、分類、変異の前後の行、囲む宣言のソース、到達したテスト、直し方の指針を持つ。
+// AgentReport is the report for coding agents filling survivors.
+// Per survivor it has the class, the line before and after the mutation, the source of the enclosing declaration, the reaching tests, and a hint for fixing it.
 type AgentReport struct {
 	Package   string          `json:"package"`
 	Summary   AgentSummary    `json:"summary"`
@@ -27,7 +27,7 @@ type AgentReport struct {
 	Warnings  []string        `json:"warnings,omitempty"`
 }
 
-// AgentSummary は判定の数と点数である。
+// AgentSummary are the counts and the score.
 type AgentSummary struct {
 	Killed        int     `json:"killed"`
 	Lived         int     `json:"lived"`
@@ -37,35 +37,35 @@ type AgentSummary struct {
 	MutationScore float64 `json:"mutation_score"`
 }
 
-// AgentSurvivor は 1 体の直すべき生き残りである。
+// AgentSurvivor is one survivor to fix.
 type AgentSurvivor struct {
 	ID string `json:"id"`
-	// Class は、not detected、not infected、not covered、no longer detected のどれかである。
+	// Class is one of not detected, not infected, not covered, and no longer detected.
 	Class   string    `json:"class"`
 	File    string    `json:"file"`
 	Line    int       `json:"line"`
 	Column  int       `json:"column"`
 	Mutator string    `json:"mutator"`
 	Diff    AgentDiff `json:"diff"`
-	// Declaration は、変異箇所を囲む最上位の宣言のソースで、Doc コメントを含む。
+	// Declaration is the source of the top-level declaration enclosing the mutation site, Doc comment included.
 	Declaration string `json:"declaration"`
-	// Tests は、変異箇所に到達したテストで、宣言の名前を含むものを先に最大 10 件並べる。TestsTotal はその総数である。
+	// Tests are the tests that reached the mutation site, up to 10, those containing the declaration's name first. TestsTotal is their total.
 	Tests      []string `json:"tests"`
 	TestsTotal int      `json:"tests_total"`
 	Hint       string   `json:"hint"`
 	Critical   bool     `json:"critical,omitempty"`
-	// PreviouslyKilledBy は、前回この変異体を検出し、今は消えたテストである。
+	// PreviouslyKilledBy is the test that detected this mutant last time and is now gone.
 	PreviouslyKilledBy string `json:"previously_killed_by,omitempty"`
 }
 
-// AgentDiff は、変異箇所の行の、変異の前と後である。
+// AgentDiff is the line of the mutation site before and after the mutation.
 type AgentDiff struct {
 	Before string `json:"before"`
 	After  string `json:"after"`
 }
 
-// Agent は、報告をエージェント向けの形にする。ソースとテストファイルは moduleDir から読む。
-// 直すべき生き残りは、受理していない LIVED と NOT COVERED である。
+// Agent turns the report into the shape for agents, reading sources and test files from moduleDir.
+// The survivors to fix are the unaccepted LIVED and NOT COVERED.
 func (r *Report) Agent(moduleDir string) (*AgentReport, error) {
 	out := &AgentReport{Package: r.Package, Survivors: []AgentSurvivor{}, Summary: AgentSummary{
 		Killed: r.MutantsKilled + r.MutantsTimedOut, Lived: r.MutantsLived, NotCovered: r.MutantsNotCovered,
@@ -105,7 +105,7 @@ func (r *Report) Agent(moduleDir string) (*AgentReport, error) {
 	return out, nil
 }
 
-// sourceFile は、読んだソースと構文木である。
+// sourceFile is a source read and its syntax tree.
 type sourceFile struct {
 	src   []byte
 	fset  *token.FileSet
@@ -126,7 +126,7 @@ func readSource(p string) (*sourceFile, error) {
 	return &sourceFile{src: src, fset: fset, file: f, lines: strings.Split(string(src), "\n")}, nil
 }
 
-// diff は、変異箇所の行の、変異の前と後を返す。列はバイト単位である。
+// diff returns the line of the mutation site before and after the mutation. Columns are in bytes.
 func (s *sourceFile) diff(m Mutation) AgentDiff {
 	if m.Line < 1 || m.Line > len(s.lines) {
 		return AgentDiff{}
@@ -140,7 +140,7 @@ func (s *sourceFile) diff(m Mutation) AgentDiff {
 	return AgentDiff{Before: before, After: before[:at] + m.Replacement + before[at+len(original):]}
 }
 
-// declaration は、line を含む最上位の宣言のソースを、Doc コメントを含めて返す。
+// declaration returns the source of the top-level declaration containing line, Doc comment included.
 func (s *sourceFile) declaration(line int) string {
 	for _, d := range s.file.Decls {
 		start, end := d.Pos(), d.End()
@@ -162,7 +162,7 @@ func (s *sourceFile) declaration(line int) string {
 	return ""
 }
 
-// scopeOf は、識別子（file::TYPE::scope::hash）から囲む宣言の名前を返す。メソッド（T.M）なら M を返す。
+// scopeOf returns the name of the enclosing declaration from an identifier (file::TYPE::scope::hash); M for a method T.M.
 func scopeOf(id string) string {
 	parts := strings.Split(id, "::")
 	if len(parts) < 4 {
@@ -172,7 +172,7 @@ func scopeOf(id string) string {
 	return scope[strings.LastIndex(scope, ".")+1:]
 }
 
-// rankTests は、名前に scope を含むテストを先にして、最大 agentTests 件を返す。
+// rankTests returns up to agentTests tests, those whose name contains scope first.
 func rankTests(tests []string, scope string) []string {
 	out := slices.Clone(tests)
 	slices.SortStableFunc(out, func(a, b string) int {
@@ -191,7 +191,7 @@ func rankTests(tests []string, scope string) []string {
 	return out[:min(len(out), agentTests)]
 }
 
-// agentHint は、Go のテストの書き方に合わせた直し方の指針を返す。
+// agentHint returns a hint for fixing, in line with how Go tests are written.
 func agentHint(m Mutation, scope string) string {
 	change := fmt.Sprintf("%#q -> %#q", strings.TrimSpace(m.Original), m.Replacement)
 	switch {
@@ -211,9 +211,9 @@ func agentHint(m Mutation, scope string) string {
 	return fmt.Sprintf("Tests run this code and the value changes with %s, but no assertion checks it. Assert the value this expression produces, for example by comparing the whole result in a table-driven case.", change)
 }
 
-// testWarnings は、モジュール相対のディレクトリ dir のテストファイルから、判定を誤らせうるテストを探す。
-//   - t.Skip を呼びうるテスト：飛ばすと、そのテストだけが検出する変異体が生き残りに見える。
-//   - テストバイナリ自身を子プロセスで起動するテスト：子プロセスの中での到達と失敗は、記録と判定に現れないことがある。
+// testWarnings finds, in the test files of the module-relative directory dir, tests that may mislead verdicts:
+//   - Tests that may call t.Skip: when skipped, mutants only they detect look like survivors.
+//   - Tests that start the test binary itself as a child process: reach and failures inside the child may not show in the records and verdicts.
 func testWarnings(moduleDir, dir string) []string {
 	matches, _ := filepath.Glob(filepath.Join(moduleDir, filepath.FromSlash(dir), "*_test.go"))
 	var out []string

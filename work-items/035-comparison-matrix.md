@@ -5,44 +5,17 @@ depends_on: []
 created_at: 2026-11-21
 ---
 
-# README に、主要なミューテーションテストツールとの機能の比較表を置く
+# Compare features with major mutation testing tools
 
-## 動機
+## Motivation
 
-利用者が gamut を選ぶかを決めるには、ほかのツールで当たり前の機能が gamut にあるか、ないなら予定があるかが要る。
-README の測定表は速さとビルドキャッシュだけを比べ、機能の有無を比べていない。
+To decide whether to use gamut, users need to know whether it has the features common in other tools, and if not, whether they are planned.
 
-## 対象範囲
+## Summary
 
-- 比べるツール：Go の gomutants、Gremlins、go-mutesting、TypeScript の mutator と StrykerJS、Java の PIT、Rust の cargo-mutants、Python の mutmut。
-- 比べる観点：変異の埋め込み方（schemata か変異体ごとのビルドか）、被覆によるテストの選択とその粒度、生き残りの分類、構築不能の事前判定、結果の再利用、差分の実行、変異体の再実行、逆依存のテスト、変異演算子の数と種類、無効化コメントと受理、等価な変異体の検出、設定ファイル、閾値と終了コード、報告の形式（mutation-testing-elements、HTML、CI の注釈、エージェント向け）、CI のシャード、保存のたびの再実行、対応する環境（OS、cgo など）。
-- 各セルは「ある」「一部」「ない」と、gamut の「ない」には作業項目の番号を書く。
-- 表の下に、調べた日付と各ツールの版を書く。
-
-## 対象外
-
-- 速さの比較。README の測定表と [025](025-benchmark-on-public-projects.md) が扱う。
-- 言語の違いで比べられない観点（テストランナーの対応の数など）。
-
-## 設計
-
-各セルは、各ツールの公式の文書か `--help` の出力で確かめ、出典の URL を表の下に並べる。
-確かめられないセルは「不明」と書き、推測で埋めない。
-比べた結果、gamut にない機能で、作業項目もないものは、起票するか、採らない理由を設計の「採らなかった案」に書く。
-
-## 完了の条件
-
-- README に比較表があり、全セルに出典がある。
-- gamut にない機能はすべて、作業項目の番号か、採らない理由への参照を持つ。
-
-## 検証
-
-- 表の各セルと出典を突き合わせて読む。
-
-## 要約
-
-- 版の公開（[024](024-release-and-distribution.md)）の前に行うことにし、段階を 4 に、依存を空にした。gamut の版は「未公開（コミット e1fd6fd の後）」と書いた。
-- 2026-11-21 に、gomutants は手元の v0.7.3 の README と `--help`、ほかは公式の文書とリリースの頁で確かめた。各セルを出典へのリンクにし、表の下に版と出典の URL を並べた。
-- 判断の規則：文書に書かれていないものは「不明」、フラグや設定の一覧が載った文書にないものは「ない」、cgo のように言語に固有の観点は「—」とした。PIT は有償の拡張 Arcmutate を含めず、Arcmutate にある機能はセルに注記した。go-mutesting は、機能の多い avito-tech の fork を比べた。
-- 観点には、対象範囲の一覧に加えて、戻り値の置き換えと文の削除、数値と文字列のリテラル、時間予算の行を足した。
-- gamut の「ない」と「一部」：数値のリテラル、分岐の本体、エラーの包みの演算子は [039](039-literal-and-branch-mutators.md) を起票した（文字列のリテラルは [018](018-more-mutators.md) の対象外の理由で採らない）。CI の注釈は [016](016-github-annotations-and-action.md)、Windows は [033](033-windows-support.md) に紐づけた。
+- Done before the release ([024](024-release-and-distribution.md)), so the stage is 4 with no dependencies.
+- On 2026-11-21, gomutants was checked against its local v0.7.3 README and `--help`, the others against their official documentation and release pages. Each cell links to its source, with versions and source URLs below the table.
+- Rules: what the documentation does not mention is "unknown", a feature missing from a document listing the flags or settings is "no", and language-specific aspects such as cgo are "—". PIT excludes the paid Arcmutate, noted in the cells; go-mutesting is the richer avito-tech fork.
+- Rows for replacing return values and removing statements, numeric and string literals, and time budgets were added.
+- gamut's gaps led to [039](039-literal-and-branch-mutators.md) (string literals stay rejected for the reasons in [018](018-more-mutators.md)); CI annotations point to [016](016-github-annotations-and-action.md) and Windows to [033](033-windows-support.md).
+- The table now lives in `docs/evaluation/comparison.md`.

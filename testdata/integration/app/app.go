@@ -1,14 +1,14 @@
-// Package app は lib を呼ぶ。
+// Package app calls lib.
 package app
 
 import "integration/lib"
 
-// Sum3 は 3 つの値の和を返す。
+// Sum3 returns the sum of three values.
 func Sum3(a, b, c int) int {
 	return lib.Add(lib.Add(a, b), c)
 }
 
-// Nine は 3 の 3 倍を返す。
+// Nine returns three times 3.
 func Nine() int {
 	return lib.Triple(3)
 }

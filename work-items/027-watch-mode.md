@@ -5,40 +5,15 @@ depends_on: [007]
 created_at: 2026-11-20
 ---
 
-# 保存のたびに差分を判定する
+# Judge the diff on every save
 
-## 動機
+## Motivation
 
-編集しながら検出能力を確かめたい。
-今は保存のたびに手で gamut を起動し直す必要がある。
+Checking detection power while editing meant starting gamut by hand after every save.
 
-## 対象範囲
+## Summary
 
-- `--watch` で、モジュール内の `.go` ファイルの変更を監視し、1 秒の間隔でまとめて判定する。
-- 既定の範囲は `--since HEAD` とテストの変更の取り込み。
-- 実行中の保存は 1 回分だけ待ち行列に入れる。
-- 基準のテストの失敗や品質の条件の失敗では止まらず、次の保存を待つ。
-
-## 対象外
-
-- 監視のための外部ライブラリ。標準ライブラリだけで、一定間隔のファイルの更新時刻の比較で実装する。
-
-## 設計
-
-Go の標準ライブラリにはファイル監視がないので、`.go` ファイルの更新時刻と大きさを 500 ミリ秒ごとに比べる。
-変更の検出の遅れは 1 秒のまとめの間隔に吸収される。
-
-## 完了の条件
-
-- 監視中にファイルを書き換えると、その関数の変異体だけが判定される。
-
-## 検証
-
-- 一時ディレクトリでファイルを書き換える端から端までのテスト。
-
-## 要約
-
-- `-watch`（作業項目の `--watch` を、ほかのフラグに合わせて 1 つのハイフンで書く）は、`-watch` を除いた引数で判定を繰り返す（`cmd/gamut/watch.go`）。`-since` がなければ `-since HEAD -include-test-changes` を足す。
-- `.go` ファイルの更新時刻と大きさを 500 ミリ秒ごとに比べ、変更を見つけたら 1 秒待って判定する。状態を判定の前に取り、判定の後に比べるので、判定の間の保存は次の 1 回にまとまる。
-- 判定の終了コードによらず続け、`SIGINT` か `SIGTERM` で終わる。
-- 端から端までのテスト（`TestWatch_JudgesTheChangedFunction`）で、1 回目は差分がないのですべて `PENDING` になり、監視中に `Mul` を書き換えると、2 回目は `Mul` の変異体だけを判定することを表明した。判定の区切りはテスト専用の差し替え口 `watchHook` で待つ。
+- `-watch` (`cmd/gamut/watch.go`) repeats judging with the other arguments, adding `-since HEAD -include-test-changes` when `-since` is absent.
+- The standard library has no file watching, so it compares modification times and sizes of `.go` files every 500 ms and judges 1 s after a change. The state is taken before judging and compared after, so saves during a judgment make one next judgment.
+- It continues regardless of exit codes and ends on `SIGINT` or `SIGTERM`.
+- `TestWatch_JudgesTheChangedFunction` asserts that the first round judges nothing and that rewriting `Mul` judges only its mutants, waiting through the test-only hook `watchHook`.

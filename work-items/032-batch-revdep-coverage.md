@@ -5,38 +5,17 @@ depends_on: [009, 029]
 created_at: 2026-11-21
 ---
 
-# 統合モードで、逆依存パッケージのテストの被覆をまとめて測る
+# Measure the coverage of reverse dependency tests in batches in integration mode
 
-## 動機
+## Motivation
 
-統合モードの被覆の記録は、変異箇所に到達する逆依存パッケージのテストを 1 件ずつ別のプロセスで測る。
-idmagic の `backend/signinpolicy/domain`（逆依存パッケージ 110 個、テスト 2,773 件）では、到達のある 9 個のパッケージのテスト 893 件を 1 件ずつ測り、`-no-cache` の 130 秒のうち 82 秒を占める。
-かかるのは、そのパッケージを初めて判定するときと、対象パッケージを変えたときだけで、変更のない再実行は 0.04 秒である。
+In integration mode, reverse dependency tests that reach mutation sites are measured one process each. On idmagic's `signinpolicy/domain`, 893 such tests took 82 s of a 130 s `-no-cache` run.
 
-## 対象範囲
+## Summary
 
-- 逆依存パッケージのテストファイルにも記録の境目を差し込み、パッケージ自身のテストと同じく、組ごとに 1 つのプロセスで測る。
+Implemented, measured slower, cancelled, and reverted.
 
-## 設計
-
-境目の呼び出しは対象パッケージの公開した `GamutTestStart` なので、逆依存パッケージのテストファイルに対象パッケージの import を足す。
-package 句と同じ行に足せば行は変わらない。
-逆依存パッケージは対象パッケージを推移的に import するので循環しないが、internal の規則で import できない場合と、対象パッケージが main パッケージの場合は、1 件ずつの測定に残す。
-
-## 完了の条件
-
-- 固定モジュール `testdata/integration` で、まとめた記録が 1 件ずつの記録と同じ判定を生む。
-- idmagic の `backend/signinpolicy/domain` で、被覆の記録が 1 件ずつの測定より短い。
-
-## 検証
-
-- 端から端までのテストと、idmagic での測定。
-
-## 要約
-
-実装して測ったところ、遅くなったので取りやめ、変更を戻した。
-
-- 逆依存パッケージのテストファイルの package 句と同じ行に対象パッケージの import を足し、境目を差し込んで、組ごとに 1 つのプロセスで測った。対象パッケージが逆依存パッケージを import する場合は、内部テストのファイルから import すると循環するので書き換えないようにした。
-- idmagic の `backend/signinpolicy/domain`（`-no-cache`）で、1 件ずつ測るテストは 893 件から 14 件に減ったが、被覆の記録は 82 秒から 126 秒に、全体は 130 秒から 174 秒に延びた。判定は一致した。
-- まとめた記録は境目を正しく振り分けるため `-test.parallel=1` で実行するので、並列のサブテストを多く持つテストが直列になる。1 件ずつの測定では、テストごとのプロセスの中でサブテストが並列に走る。プロセスの起動を減らす効果より、直列化の損が大きかった。
-- 逆依存パッケージのテストファイルを書き換えると、そのテストのパッケージを一度すべてコンパイルし直すので、初回の共有ビルドキャッシュも増える。
+- An import of the target was added on the package clause line of reverse dependency test files (keeping lines), boundaries were inserted, and tests were measured per chunk.
+- Tests measured one by one dropped from 893 to 14, but recording grew from 82 s to 126 s and the run from 130 s to 174 s, with matching verdicts.
+- Batched recording runs with `-test.parallel=1`, serializing tests with many parallel subtests, which run in parallel when measured one per process. The serialization cost more than the saved process starts.
+- Rewriting reverse dependency test files also recompiles their test packages, growing the build cache on the first run.

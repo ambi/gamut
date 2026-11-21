@@ -1,5 +1,5 @@
-// Package cache は、変異体の判定を、行と列に依存しない鍵とともにファイルへ保存し、次の実行で再利用できるようにする。
-// どの判定を再利用してよいかの規則は run が持つ。このパッケージは鍵の計算と保存だけを受け持つ。
+// Package cache saves mutant verdicts to a file with keys independent of lines and columns, so the next run can reuse them.
+// The rules for which verdicts may be reused belong to run. This package only computes the keys and stores them.
 package cache
 
 import (
@@ -16,70 +16,70 @@ import (
 	"sync"
 )
 
-// formatVersion はキャッシュファイルの形式の版である。形式を変えたら上げ、古いファイルを読み捨てる。
+// formatVersion is the version of the cache file format. Raise it when the format changes; old files are discarded.
 const formatVersion = 3
 
-// Entry は、1 体の変異体の判定と、判定したときの鍵である。
+// Entry is one mutant's verdict and the keys at the time of judging.
 type Entry struct {
-	// Package は変異体を含むパッケージの import パスである。
+	// Package is the import path of the package containing the mutant.
 	Package  string `json:"package"`
 	Status   string `json:"status"`
 	Reason   string `json:"reason,omitempty"`
 	Mode     string `json:"mode,omitempty"`
 	KilledBy string `json:"killed_by,omitempty"`
-	// Killer は、検出したトップレベルのテストの名前である。逆依存パッケージのテストは import パスを前に付ける。
+	// Killer is the name of the detecting top-level test. Tests of reverse dependencies are prefixed with their import path.
 	Killer string `json:"killer,omitempty"`
-	// Matrix は、感染したテストをすべて実行した判定（kill matrix）かである。真なら Killers が検出したテストのすべてである。
+	// Matrix reports whether the verdict ran every infected test (kill matrix). When true, Killers are all the detecting tests.
 	Matrix  bool     `json:"matrix,omitempty"`
 	Killers []string `json:"killers,omitempty"`
-	// Decl、Deps、Imports は Keys の同名のメソッドの値である。
+	// Decl, Deps, and Imports are the values of the Keys methods of the same names.
 	Decl    string `json:"decl"`
 	Deps    string `json:"deps"`
 	Imports string `json:"imports"`
-	// Reached は変異箇所に到達したテスト、Ran は判定のために実行したテストである。どちらも名前の順に並ぶ。
+	// Reached are the tests that reached the mutation site and Ran the tests run for judging, both in name order.
 	Reached []string `json:"reached,omitempty"`
 	Ran     []string `json:"ran,omitempty"`
-	// TestKeys は、Reached と Ran のテストの Keys.Test の値である。
+	// TestKeys are the Keys.Test values of the tests in Reached and Ran.
 	TestKeys map[string]string `json:"test_keys,omitempty"`
 }
 
-// Coverage は、1 つのテストバイナリのテストが、1 つの対象パッケージの変異箇所に到達し感染した記録である。
-// 箇所と変異体は、書き換えのたびに変わる番号ではなく、行と列に依存しない鍵で書く。
+// Coverage records the tests of one test binary reaching and infecting the mutation sites of one target package.
+// Sites and mutants are written with keys independent of lines and columns, not with the numbers that change with every rewrite.
 type Coverage struct {
-	// Imports と Init は、記録したときの対象パッケージの Keys.Imports と Keys.Init である。
+	// Imports and Init are the target package's Keys.Imports and Keys.Init at recording time.
 	Imports string `json:"imports"`
 	Init    string `json:"init"`
-	// Levels は、記録したときの全変異箇所の書き換えの段階（schemata.Level）である。
+	// Levels are the rewrite levels (schemata.Level) of all mutation sites at recording time.
 	Levels map[string]int `json:"levels"`
-	// Tests は、トップレベルのテストの名前から記録を引く。
+	// Tests maps the names of top-level tests to their records.
 	Tests map[string]*TestRecord `json:"tests"`
 }
 
-// TestRecord は、1 件のテストの被覆の記録と、それを測ったときの鍵である。
+// TestRecord is one test's coverage record and the key at the time of measuring.
 type TestRecord struct {
-	// Key はテストの鍵（Keys.Test か RevDepKey）である。
+	// Key is the test's key (Keys.Test or RevDepKey).
 	Key string `json:"key"`
-	// Reach は、テストが入った関数の宣言と、到達した変異箇所を囲む宣言の Keys.ReachOf の値である。
+	// Reach are the Keys.ReachOf values of the declarations of functions the test entered and of those enclosing reached mutation sites.
 	Reach []string `json:"reach,omitempty"`
-	// Hits は到達した変異箇所の鍵、Infected は感染した変異体の鍵（mutant.Mutant.Key）である。
+	// Hits are the keys of the reached mutation sites, and Infected the keys of the infected mutants (mutant.Mutant.Key).
 	Hits     []string `json:"hits,omitempty"`
 	Infected []string `json:"infected,omitempty"`
-	// Duration は、被覆の記録の実行時間（ナノ秒）である。
+	// Duration is the running time of coverage recording, in nanoseconds.
 	Duration int64 `json:"duration"`
-	// Deep は、深さの制限を超えてだけ到達した変異箇所の鍵である。到達には数えない。
+	// Deep are the keys of mutation sites reached only beyond the depth limit. They do not count as reached.
 	Deep []string `json:"deep,omitempty"`
-	// Unrepeatable は、同じプロセスで 2 回目に失敗したかである。
+	// Unrepeatable reports whether the test failed on its second run in the same process.
 	Unrepeatable bool `json:"unrepeatable,omitempty"`
 }
 
-// Viability は、1 体の変異体の構築可能性の判定と、判定したときの鍵（Keys.Viability）である。
+// Viability is one mutant's viability verdict and the key at the time (Keys.Viability).
 type Viability struct {
 	Package string `json:"package"`
 	Key     string `json:"key"`
 	Viable  bool   `json:"viable"`
 }
 
-// Equivalence は、1 体の生き残りの変異体のコンパイル結果が元と同じかと、比べたときの鍵（Keys.Viability）である。
+// Equivalence records whether one survivor compiles to the same code as the original, and the key at the time of comparing (Keys.Viability).
 type Equivalence struct {
 	Package string `json:"package"`
 	Key     string `json:"key"`
@@ -95,37 +95,37 @@ type fileFormat struct {
 	Equivalence map[string]*Equivalence `json:"equivalence,omitempty"`
 	Quick       map[string]*Quick       `json:"quick,omitempty"`
 	LoadHints   map[string][]string     `json:"load_hints,omitempty"`
-	// Last は、このキャッシュで最後に実行した判定の報告（report.Report の JSON）である。gamut merge がシャードの判定をまとめるのに読む。
+	// Last is the report (report.Report JSON) of the last run with this cache. gamut merge reads it to combine shards.
 	Last json.RawMessage `json:"last,omitempty"`
 }
 
-// Store は、キャッシュファイルの内容を持つ。並行に使える。
+// Store holds the contents of a cache file. It is safe for concurrent use.
 type Store struct {
 	path string
 	env  string
-	// Reset は、前のファイルの記録を読み捨てた理由である。読み捨てなければ空である。
+	// Reset is why the previous file's records were discarded, or empty when they were not.
 	Reset string
 
 	mu      sync.Mutex
 	entries map[string]*Entry
-	// coverage は、対象パッケージとテストバイナリのパッケージの組（pairKey）から引く。
+	// coverage is keyed by the pair of the target package and the test binary's package (pairKey).
 	coverage map[string]*Coverage
-	// viability は、変異体の識別子から構築可能性の判定を引く。
+	// viability maps mutant identifiers to viability verdicts.
 	viability map[string]*Viability
-	// equivalence は、変異体の識別子から、コンパイル結果の比較を引く。
+	// equivalence maps mutant identifiers to compile comparisons.
 	equivalence map[string]*Equivalence
-	// quick は、実行の引数と設定の鍵から、前回の実行の入力の指紋と報告を引く。
+	// quick maps keys of run arguments and settings to the previous run's input fingerprint and report.
 	quick map[string]*Quick
-	// loadHints は、読み込みのパターンと設定の鍵から、前回の読み込みでエクスポートデータを求めたパッケージを引く。
+	// loadHints maps keys of load patterns and settings to the packages whose export data the previous load requested.
 	loadHints map[string][]string
-	// last は、最後に実行した判定の報告である。
+	// last is the report of the last run.
 	last json.RawMessage
 }
 
 func pairKey(target, binary string) string { return target + " " + binary }
 
-// Open は path のキャッシュを読む。env が記録と違えば、記録をすべて捨てた空の Store を返す。
-// ファイルがないか、壊れているか、形式の版が違うときも空の Store を返す。
+// Open reads the cache at path. When env differs from the record, it returns an empty Store with every record discarded.
+// It also returns an empty Store when the file is missing, corrupt, or of another format version.
 func Open(path, env string) (*Store, error) {
 	s := &Store{path: path, env: env, entries: map[string]*Entry{}, coverage: map[string]*Coverage{}, viability: map[string]*Viability{},
 		equivalence: map[string]*Equivalence{}, quick: map[string]*Quick{}, loadHints: map[string][]string{}}
@@ -176,7 +176,7 @@ func Open(path, env string) (*Store, error) {
 	return s, nil
 }
 
-// Each は、すべての判定の記録を f に渡す。順は決まらない。渡した記録を書き換えてはならない。f の中で Store を使ってはならない。
+// Each passes every verdict record to f in no particular order. f must neither modify the records nor use the Store.
 func (s *Store) Each(f func(id string, e *Entry)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -185,36 +185,36 @@ func (s *Store) Each(f func(id string, e *Entry)) {
 	}
 }
 
-// Get は id の記録を返す。なければ nil を返す。返した記録を書き換えてはならない。
+// Get returns the record of id, or nil. The returned record must not be modified.
 func (s *Store) Get(id string) *Entry {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.entries[id]
 }
 
-// Put は id の記録を置き換える。
+// Put replaces the record of id.
 func (s *Store) Put(id string, e *Entry) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.entries[id] = e
 }
 
-// Coverage は、対象パッケージ target の変異箇所について、パッケージ binary のテストの被覆の記録を返す。なければ nil を返す。
-// 返した記録を書き換えてはならない。
+// Coverage returns the coverage record of the tests of package binary for the mutation sites of target, or nil.
+// The returned record must not be modified.
 func (s *Store) Coverage(target, binary string) *Coverage {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.coverage[pairKey(target, binary)]
 }
 
-// PutCoverage は、target と binary の組の被覆の記録を置き換える。
+// PutCoverage replaces the coverage record of the pair target and binary.
 func (s *Store) PutCoverage(target, binary string, c *Coverage) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.coverage[pairKey(target, binary)] = c
 }
 
-// Viable は、識別子 id の変異体の構築可能性の記録が鍵 key のものなら、その判定を返す。2 つ目の戻り値は記録を使えたかである。
+// Viable returns the viability verdict of mutant id when its record has key key. The second result reports whether the record could be used.
 func (s *Store) Viable(id, key string) (bool, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -225,14 +225,14 @@ func (s *Store) Viable(id, key string) (bool, bool) {
 	return v.Viable, true
 }
 
-// PutViable は、識別子 id の変異体の構築可能性の判定を記録する。
+// PutViable records the viability verdict of mutant id.
 func (s *Store) PutViable(id string, v *Viability) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.viability[id] = v
 }
 
-// Equivalent は、識別子 id の変異体のコンパイル結果の比較が鍵 key のものなら、その結果を返す。2 つ目の戻り値は記録を使えたかである。
+// Equivalent returns the compile comparison of mutant id when its record has key key. The second result reports whether the record could be used.
 func (s *Store) Equivalent(id, key string) (bool, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -243,14 +243,14 @@ func (s *Store) Equivalent(id, key string) (bool, bool) {
 	return v.Equal, true
 }
 
-// PutEquivalent は、識別子 id の変異体のコンパイル結果の比較を記録する。
+// PutEquivalent records the compile comparison of mutant id.
 func (s *Store) PutEquivalent(id string, v *Equivalence) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.equivalence[id] = v
 }
 
-// Inherit は、from の記録を to へ写す。to に記録があれば何もしない。ファイルの名前を変えたときに前の判定を引き継ぐ。
+// Inherit copies the records of from to to, unless to already has a record. It carries verdicts over a file rename.
 func (s *Store) Inherit(from, to string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -262,16 +262,16 @@ func (s *Store) Inherit(from, to string) bool {
 	return true
 }
 
-// Len は記録の数を返す。
+// Len returns the number of records.
 func (s *Store) Len() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return len(s.entries)
 }
 
-// Prune は、packages に含まれるパッケージの記録のうち、live が偽を返す識別子の記録を捨てる。
-// 消えた変異体の記録がたまらないようにする。ほかのパッケージの記録は残す。
-// 被覆の記録は、判定のたびにパッケージごとに置き換わるので、ここでは捨てない。
+// Prune discards, among the records of the packages in packages, those whose identifiers live reports false,
+// so records of removed mutants do not pile up. Records of other packages stay.
+// Coverage records are replaced per package on every run, so they are not discarded here.
 func (s *Store) Prune(packages []string, live func(id string) bool) {
 	in := map[string]bool{}
 	for _, p := range packages {
@@ -296,19 +296,19 @@ func (s *Store) Prune(packages []string, live func(id string) bool) {
 	}
 }
 
-// Save は記録をファイルへ書く。同じディレクトリの一時ファイルに書いてから改名するので、途中で止まっても前のファイルは壊れない。
+// Save writes the records to the file. It writes a temporary file in the same directory and renames it, so an interruption never corrupts the previous file.
 func (s *Store) Save() (err error) {
 	return s.save()
 }
 
-// PutLast は、最後に実行した判定の報告を記録する。
+// PutLast records the report of the last run.
 func (s *Store) PutLast(report json.RawMessage) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.last = report
 }
 
-// ReadLast は、path のキャッシュの、最後に実行した判定の報告を返す。
+// ReadLast returns the report of the last run in the cache at path.
 func ReadLast(path string) (json.RawMessage, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -327,9 +327,9 @@ func ReadLast(path string) (json.RawMessage, error) {
 	return f.Last, nil
 }
 
-// Merge は、inputs のキャッシュファイル（シャードごとのもの）の記録を合わせて out に書く。
-// どの入力も同じ形式の版と環境でなければならない。同じ変異体の判定が複数あれば、kill matrix の判定を、なければ後の入力のものを採る。
-// 変更のない再実行の記録（quick）はシャードの指定を鍵に含むので、合わせた後には当たらないため書かない。
+// Merge combines the records of the cache files inputs (one per shard) and writes them to out.
+// Every input must have the same format version and environment. For a mutant judged more than once, the kill matrix verdict wins, otherwise the later input.
+// Unchanged-rerun records (quick) include the shard in their key and would never match after merging, so they are not written.
 func Merge(inputs []string, out string) error {
 	merged := &Store{path: out, entries: map[string]*Entry{}, coverage: map[string]*Coverage{}, viability: map[string]*Viability{},
 		equivalence: map[string]*Equivalence{}, quick: map[string]*Quick{}, loadHints: map[string][]string{}}
@@ -393,8 +393,8 @@ func (s *Store) save() (err error) {
 	return os.Rename(tmp.Name(), s.path)
 }
 
-// Environment は、すべての判定に影響する環境のハッシュを返す。
-// Go の版と対象の環境、gamut の実行ファイル、モジュールの go.mod と go.sum、ワークスペースのファイル、settings（変異演算子、ビルドタグ、テストのフラグなど）を含める。
+// Environment returns the hash of the environment that affects every verdict:
+// the Go version and target platform, the gamut executable, the module's go.mod and go.sum, workspace files, and settings (mutators, build tags, test flags, and so on).
 func Environment(moduleDir string, settings ...string) (string, error) {
 	cmd := exec.Command("go", "env", "GOVERSION", "GOOS", "GOARCH", "GOFLAGS", "GOEXPERIMENT", "CGO_ENABLED", "GOWORK")
 	cmd.Dir = moduleDir
@@ -406,7 +406,7 @@ func Environment(moduleDir string, settings ...string) (string, error) {
 	}
 	h := sha256.New()
 	writeString(h, string(goEnv))
-	// 開発中の gamut は版の文字列が変わらないので、実行ファイルの中身で区別する。
+	// A development build of gamut keeps the same version string, so builds are told apart by the executable's contents.
 	exe, err := os.Executable()
 	if err != nil {
 		return "", err

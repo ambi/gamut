@@ -5,46 +5,17 @@ depends_on: []
 created_at: 2026-11-20
 ---
 
-# テストの実行を堅牢にする
+# Harden test execution
 
-## 動機
+## Motivation
 
-実在のプロジェクトでは、ビルドタグ付きのテスト、`-short` などのテストのフラグ、子プロセスを起動するテスト、`TestMain` を持つパッケージがある。
-今の gamut はビルドタグもテストのフラグも渡せず、時間切れのときに子プロセスを残しうる。
+Real projects have tests behind build tags, test flags such as `-short`, tests that start child processes, and packages with `TestMain`. gamut could pass neither tags nor test flags, and could leave child processes behind on a timeout.
 
-## 対象範囲
+## Summary
 
-- `-tags` をビルド、`go list`、型検査（`go/build` の条件）へ渡す。
-- `-test-flags` をテストバイナリの全実行（被覆の記録、変異体の実行）へ渡す。
-- テストバイナリを新しいプロセスグループで起動し、時間切れではグループごと止める（Unix）。Windows ではプロセスだけを止める。
-- 基準のテストが失敗したときの終了コードを 4 に固定し、失敗したテストの出力を見せる。
-- 時間切れの上限の既定値を、テストの実行時間の分布（短いテストでの起動時間の揺らぎ）に対して見直す。
-- テストが変異箇所を並行に通るとき（`t.Parallel`、ゴルーチン）に、到達と感染の記録が欠けないことを確かめる。
-
-## 対象外
-
-- cgo を使うパッケージ。読み込みで明示的に拒否しているので、対応は別に判断する。
-
-## 設計
-
-`exec.Cmd.SysProcAttr` の `Setpgid` で新しいグループを作り、`Cancel` で `syscall.Kill(-pid, SIGKILL)` を送る。
-ビルドタグは `go list -tags` と `go test -c -tags` に渡し、型検査の対象ファイルは `go list` の `GoFiles` に従うので、`go/build` を自前で評価しない。
-
-## 完了の条件
-
-- ビルドタグでだけ有効になるファイルを持つ固定モジュールで、タグを渡したときだけその変異体が列挙される。
-- 子プロセスを起動して眠るテストを持つ固定モジュールで、時間切れの後に子プロセスが残らない。
-
-## 検証
-
-- 上の 2 つの固定モジュールに対する端から端までのテスト。
-- `mise run verify`。
-
-## 要約
-
-- `-tags` は `load.Load` が受け取り、`Package.Tags` として `go list` と `go test -c`（個別ビルドを含む）へ渡す。型検査の対象は `go list` の `GoFiles` に従う。
-- `-test-flags` は `run.ParseTestFlags` で、接頭辞なしの testing のフラグに `-test.` を補う。gamut が実行ごとに決める `run`、`count`、`failfast`、`list`、`paniconexit0` は拒否する。テストバイナリの起動は `testCommand` の 1 か所にまとめた。
-- Unix ではテストバイナリを新しいプロセスグループで起動し、時間切れと取り消しでグループ全体へ `SIGKILL` を送る。固定モジュール `testdata/orphan` で、グループがなければ子プロセスが残ることを確かめた。
-- 基準のテストの失敗と、`-test.list` の失敗は `run.ErrBaseline` として、出力を添えて終了コード 4 にする。
-- 時間切れの既定値（係数 5、下限 2 秒）は、起動時間の測定（中央値 3 ms、最大 264 ms）から変えない。根拠は設計に書いた。
-- 並行な記録は既存の `atomic.Bool` と mutex で足りた。`testdata/concurrent` で、`t.Parallel` と多数のゴルーチンの下でも全変異体が `KILLED` になることを確かめた。
+- `-tags` goes through `load.Load` into `Package.Tags`, and from there to `go list` and `go test -c` (standalone builds included). Type-checking follows `go list`'s `GoFiles`.
+- `-test-flags` is parsed by `run.ParseTestFlags`, which adds `-test.` to unprefixed testing flags and rejects `run`, `count`, `failfast`, `list`, and `paniconexit0`, which gamut sets per run. Every test binary start goes through `testCommand`.
+- On Unix, test binaries start in a new process group, and timeouts and cancellation send `SIGKILL` to the whole group. `testdata/orphan` shows that without the group a child process stays behind.
+- Failing baseline tests and a failing `-test.list` are `run.ErrBaseline`, exit code 4, with the output shown.
+- The timeout defaults (factor 5, minimum 2 s) stay, based on measured start-up times (median 3 ms, maximum 264 ms).
+- Concurrent recording was already safe with `atomic.Bool` and a mutex; `testdata/concurrent` shows every mutant `KILLED` under `t.Parallel` and many goroutines.

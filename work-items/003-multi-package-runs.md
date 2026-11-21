@@ -5,50 +5,18 @@ depends_on: []
 created_at: 2026-11-20
 ---
 
-# 複数のパッケージを 1 回の実行で判定する
+# Judge several packages in one run
 
-## 動機
+## Motivation
 
-今の gamut はパッケージディレクトリを 1 つしか受け付けない。
-リポジトリ全体やモジュール全体を調べるには、パッケージごとに gamut を起動し直し、`go list` と依存のエクスポートデータの準備を繰り返すことになる。
+gamut accepted only one package directory. Checking a whole module meant starting gamut per package and repeating `go list` and the preparation of export data.
 
-## 対象範囲
+## Summary
 
-- `./...` などの `go list` のパターンを受け付ける。
-- `go list -deps -export` を 1 回だけ実行し、全対象パッケージの型検査で importer を共有する。
-- パッケージごとの schemata のビルドを並列にする。
-- 変異体の実行は、全パッケージの変異体を 1 つの作業の列にまとめ、ワーカーを共有する。
-- 報告は 1 つにまとめ、`files[].path` をモジュール相対にする。
-- テストファイルを持たないパッケージの変異体は、ビルドせずに `NOT COVERED` にする。
-
-## 対象外
-
-- 逆依存パッケージのテストでの検出（[009](009-integration-mode.md)）。
-
-## 設計
-
-`load.Load` を、パターンを受けて `[]*Package` を返す形に変える。
-importer はエクスポートデータのパスの表を共有し、`types.Package` のキャッシュもパッケージ間で共有する。
-対象パッケージ A が対象パッケージ B を import する場合、A の型検査は B の書き換え前のエクスポートデータを使う。
-A のテストバイナリは B の書き換え前の版にリンクされるので、B の変異は A のテストには現れない。これは [009](009-integration-mode.md) で扱う。
-
-## 完了の条件
-
-- 2 パッケージの固定モジュールで `./...` を指定すると、両方の変異体が 1 つの報告に入る。
-- 同じ判定を、パッケージごとに分けて実行した結果と比べて一致する。
-
-## 検証
-
-- 上の固定モジュールに対する端から端までのテスト。
-- idmagic の `backend/oauth2/internal/token/...` で、パッケージごとの実行との時間の差を測る。
-
-## 要約
-
-- `load.Load` はパターン（パッケージディレクトリか `<ディレクトリ>/...`）の列を受け、`[]*load.Package` を import パスの順に返す。パターンを絶対パスにして最初のパターンのディレクトリで `go list -deps -export` を 1 回だけ実行し、`DepOnly` でなくテスト以外の Go ファイルを持つパッケージを対象にする。対象は同じモジュールに限る。
-- 全パッケージで `token.FileSet` と gc の importer を共有する。importer は並行に使えないので mutex で守る。`-race` で、パッケージごとの schemata の書き換えを並列にしても競合がないことを確かめた。
-- `run.All` は、schemata の書き換え、ビルド、テストの一覧をパッケージごとにワーカー数まで並列に行い、被覆の記録と変異体の実行を全パッケージで 1 つの作業の列にまとめる。`run.Run` は 1 パッケージの `run.All` である。
-- テストファイルを持たないパッケージと、構築可能な変異体のないパッケージはビルドしない。前者の構築可能な変異体は `NOT COVERED` にする（`mode` は空）。
-- どれかのパッケージで基準のテストか自己検査が失敗したら、全体を判定せずに止める。
-- 報告の `package` は、1 パッケージなら import パス、複数なら引数のパターンにした。判定したパッケージは、足したフィールド `packages` に並べる。`files[].path` はもともとモジュール相対だった。
-- `testdata/multi`（a、a を import する b、テストのない c、テストだけの d）の端から端までのテストで、変異体ごとの状態と、パッケージごとの実行との一致を表明した。
-- idmagic の `backend/oauth2/internal/token/...`（6 パッケージ、644 体、ワーカー数 2）では、1 回の実行が 47.4 秒、パッケージごとの実行が合計 49 秒で、判定は 644 体すべて一致した。時間の大半は `usecases`（562 体、36 秒）が占め、節約は読み込みとビルドの重なりの分にとどまる。
+- `load.Load` takes patterns (package directories or `<directory>/...`) and returns `[]*load.Package` in import path order, running `go list -deps -export` once. Targets must be in the same module.
+- All packages share one `token.FileSet` and the gc importer, guarded by a mutex; `-race` showed no races with parallel rewrites.
+- `run.All` rewrites, builds, and lists tests per package in parallel, and puts coverage recording and mutant runs of all packages in one work queue. `run.Run` is `run.All` for one package.
+- Packages without test files or viable mutants are not built; the former's mutants are `NOT COVERED`.
+- A failing baseline or self-check in any package stops the whole run.
+- The report's `package` is the import path for one package and the patterns for several; `packages` lists the judged packages.
+- `testdata/multi` asserts the statuses and that they match per-package runs. On idmagic's `backend/oauth2/internal/token/...` (6 packages, 644 mutants) one run took 47.4 s against 49 s for separate runs, with identical verdicts.

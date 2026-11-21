@@ -8,7 +8,7 @@ func TestTop(t *testing.T) {
 	}
 }
 
-// TestLeaf は leaf を直接呼ぶ。leaf の変異箇所までの深さは 1 である。
+// TestLeaf calls leaf directly. The depth to leaf's mutation site is 1.
 func TestLeaf(t *testing.T) {
 	t.Run("one", func(t *testing.T) {
 		if leaf(1) != 2 {

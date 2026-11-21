@@ -15,8 +15,8 @@ import (
 	"time"
 )
 
-// TestCheckpoint_SurvivesSIGKILL は、実行の途中で SIGKILL を受けても、書き出しの間隔までに終わった判定が次の実行で再利用されることを確かめる。
-// 書き出しを止めると、何も残らないことも確かめる。
+// TestCheckpoint_SurvivesSIGKILL checks that after a SIGKILL midway, verdicts finished up to the last checkpoint are reused by the next run.
+// It also checks that with checkpointing off nothing remains.
 func TestCheckpoint_SurvivesSIGKILL(t *testing.T) {
 	bin := filepath.Join(t.TempDir(), "gamut")
 	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
@@ -34,7 +34,7 @@ func TestCheckpoint_SurvivesSIGKILL(t *testing.T) {
 			if err := cmd.Start(); err != nil {
 				t.Fatal(err)
 			}
-			// 判定が 2 体以上記録されるか、時間が過ぎたら止める。書き出しを止めたときは、判定が進むのを待ってから止める。
+			// Stop once two or more verdicts are recorded or time runs out. With checkpointing off, wait for judging to progress before stopping.
 			deadline := time.Now().Add(20 * time.Second)
 			for time.Now().Before(deadline) {
 				if tc.reused && recorded(cachePath) >= 2 {
@@ -48,7 +48,7 @@ func TestCheckpoint_SurvivesSIGKILL(t *testing.T) {
 			_ = cmd.Process.Signal(syscall.SIGKILL)
 			_ = cmd.Wait()
 
-			// キャッシュの環境の鍵は gamut の実行ファイルの中身を含むので、同じ実行ファイルで実行し直す。
+			// The cache's environment key includes the contents of the gamut executable, so rerun with the same executable.
 			var stderr strings.Builder
 			rerun := exec.Command(bin, "-workers", "1", "-only", "ARITHMETIC_BASE", "-cache", cachePath, dir)
 			rerun.Stdout, rerun.Stderr = io.Discard, &stderr
@@ -67,7 +67,7 @@ func TestCheckpoint_SurvivesSIGKILL(t *testing.T) {
 	}
 }
 
-// TestCheckpoint_KeepsVerdicts は、書き出しの有無で判定が変わらないことを確かめる。
+// TestCheckpoint_KeepsVerdicts checks that checkpointing does not change verdicts.
 func TestCheckpoint_KeepsVerdicts(t *testing.T) {
 	verdicts := func(interval string) map[string]string {
 		ms, _ := mustGamut(t, "-cache", filepath.Join(t.TempDir(), "cache.json"), "-checkpoint-interval", interval, "../../testdata/fixture")
@@ -83,7 +83,7 @@ func TestCheckpoint_KeepsVerdicts(t *testing.T) {
 	}
 }
 
-// recorded は、キャッシュファイルに記録された判定の数を返す。ファイルがないか読めなければ 0 を返す。
+// recorded returns the number of verdicts recorded in the cache file, or 0 when the file is missing or unreadable.
 func recorded(path string) int {
 	data, err := os.ReadFile(path)
 	if err != nil {

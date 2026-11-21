@@ -5,44 +5,15 @@ depends_on: [005]
 created_at: 2026-11-21
 ---
 
-# 変更のない再実行を 1 秒未満にする
+# Make unchanged reruns take under a second
 
-## 動機
+## Motivation
 
-idmagic の `backend/oauth2/internal/token/usecases`（562 体、テスト 135 件）で、変更のない再実行に 2.9 秒かかる。
-内訳は、構築可能性の判定 1.47 秒（変異体ごとにパッケージを型検査し直す）、テストバイナリのビルド 0.52 秒、テストの一覧 0.36 秒、schemata の書き換え 0.12 秒である。
-どれも、ソースが変わらなければ前回と同じ結果になる。
+On idmagic's `usecases` (562 mutants, 135 tests), an unchanged rerun took 2.9 s: viability checks 1.47 s, building 0.52 s, listing tests 0.36 s, the rewrite 0.12 s, all giving the same results as last time.
 
-## 対象範囲
+## Summary
 
-- 構築可能性の判定を、変異体の識別子と、囲む宣言、依存、外の依存の鍵でキャッシュし、鍵の変わった変異体だけを検査する。
-- キャッシュにない変異体の検査を、CPU の数まで並列にする。
-- 被覆の記録をすべて戻せ、実行する変異体がなければ、パッケージ自身のテストバイナリをビルドせず、テストの一覧と自己検査も省く。テストの一覧は記録から取る。
-
-## 対象外
-
-- schemata の書き換え自体のキャッシュ。番号と段階を被覆の記録の復元に使うため、毎回行う。
-
-## 設計
-
-テストの一覧を記録から取るのは、記録のテストの集合が、テストファイルのトップレベルの `Test`、`Fuzz`、`Example` の関数の集合と一致し、どのテストの鍵も記録と同じときに限る。
-自己検査は、テストバイナリをビルドしたときだけ行う。ビルドしないときは、判定はすべて、同じ環境（gamut の実行ファイルを含む）で自己検査を通った実行の記録から来ている。
-
-## 完了の条件
-
-- 変更のない再実行で、テストバイナリのビルドとテストの実行が 0 回である。
-- idmagic の `backend/oauth2/internal/token/usecases`（562 体）で、変更のない再実行が 0.15 秒以下である。
-- キャッシュの有無で判定が一致する。
-
-## 検証
-
-- 端から端までのテストで、変更のない再実行のログにビルドがないことと、判定の一致を表明する。
-- idmagic での測定。
-
-## 要約
-
-- 構築可能性の判定は、変異体の識別子と鍵（囲む宣言、依存、外の依存。定数宣言の変異体はパッケージ全体の鍵）で記録し、鍵の変わった変異体だけを、CPU の数まで並列に検査する。
-- 被覆の記録をすべて戻せ、実行する変異体がなければ、パッケージ自身のテストバイナリをビルドしない。テストの一覧は記録から取り、自己検査も省く。
-- さらに、選択のない実行では、入力の指紋（引数が指すファイルの大きさ、更新時刻、ディレクトリの中身の一覧、外の依存のファイル）と、引数と設定の鍵が前回と同じなら、`go list` も実行せずに前回の報告を返す（`cache.Quick`）。指紋は中身を読まないので、更新時刻を変えずに中身だけを変えた場合は捉えない。疑わしいときは `-no-cache` で実行する。
-- idmagic の `usecases`（562 体）で、変更のない再実行は 2.9 秒から 0.05 秒になった。判定はキャッシュなしの実行と一致した。
-- 端から端までのテスト `TestCache_ReportsUnchangedInputsWithoutLoading` で、変更のない再実行が読み込みもビルドもしないことと、テストデータのディレクトリを足すと指紋が変わることを表明した。
+- Viability is recorded per identifier and key (enclosing declaration, dependencies, external dependencies; the whole package's key for constant declarations), and only mutants with changed keys are checked, in parallel up to the number of CPUs.
+- When every coverage record can be restored and no mutant needs running, the package's own test binary is not built, and the test list comes from the records without a self-check.
+- A run without selection returns the previous report without even running `go list` when the input fingerprint (sizes, modification times, and directory listings of the files the arguments point at, plus external dependency files) and the key of arguments and settings match (`cache.Quick`). The fingerprint does not read contents, so a content change that keeps the modification time is missed; `-no-cache` is the fallback.
+- On `usecases`, the unchanged rerun went from 2.9 s to 0.05 s with matching verdicts. `TestCache_ReportsUnchangedInputsWithoutLoading` asserts the behavior.

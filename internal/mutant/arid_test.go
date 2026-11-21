@@ -9,7 +9,7 @@ import (
 	"github.com/ambi/gamut/internal/mutant"
 )
 
-// aridModule は、src をパッケージ m の m.go に、logger をパッケージ m/zlog に置く。zlog はロガーの型のメソッドを持つ。
+// aridModule puts src in m.go of package m and a logger in package m/zlog. zlog has the methods of a logger type.
 func aridModule(t *testing.T, src string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -36,14 +36,14 @@ func TestArid_Rules(t *testing.T) {
 		name string
 		src  string
 		arid *mutant.Arid
-		// kept は残る変異体の「囲む宣言 演算子 元の文字列」、skipped は除いた数である。
+		// kept lists "enclosing declaration, mutator, original text" of the remaining mutants, and skipped is the number excluded.
 		kept    []string
 		skipped int
 	}{
 		{name: "logger methods and their arguments",
 			src:     "package m\n\nimport \"m/zlog\"\n\nfunc F(l zlog.Logger, n int) int {\n\tl.Infof(\"n=%d\", n+1)\n\tl.Debug(n - 1)\n\treturn n * 2\n}\n",
 			kept:    []string{"F ARITHMETIC_BASE *", "F RETURN_ZERO {"},
-			skipped: 4}, // 2 つの引数の算術と、2 つの文の削除
+			skipped: 4}, // arithmetic in two arguments, and two statement removals
 		{name: "a method named Info on a non-logger type is kept",
 			src:  "package m\n\nimport \"m/zlog\"\n\nfunc F(s zlog.Store, n int) {\n\ts.Info(n + 1)\n}\n",
 			kept: []string{"F ARITHMETIC_BASE +", "F STATEMENT_REMOVE s.Info(n + 1)"}},
@@ -66,7 +66,7 @@ func TestArid_Rules(t *testing.T) {
 		{name: "an if that only logs is arid as a whole, condition included",
 			src:     "package m\n\nimport \"log\"\n\nfunc F(n int) int {\n\tif n > 10 {\n\t\tlog.Println(\"big\")\n\t}\n\treturn n + 1\n}\n",
 			kept:    []string{"F ARITHMETIC_BASE +", "F RETURN_ZERO {"},
-			skipped: 3}, // 条件の境界と否定、ログの文の削除
+			skipped: 3}, // the condition's boundary and negation, and removing the logging statement
 		{name: "configured calls and packages",
 			src:     "package m\n\nimport \"m/zlog\"\n\nfunc F(n int) {\n\tzlog.Emit(n + 1)\n}\n",
 			arid:    &mutant.Arid{Calls: []string{"m/zlog.Emit"}},

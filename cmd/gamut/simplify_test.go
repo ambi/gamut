@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// TestSimplifyReporter は、削除の変異の生き残りを、囲む関数ごとに候補として挙げ、検出された変異体を挙げないことを確かめる。
+// TestSimplifyReporter checks that survivors of removals are listed as candidates per enclosing function, and detected mutants are not.
 func TestSimplifyReporter(t *testing.T) {
 	var stdout, stderr strings.Builder
 	args := []string{"-no-cache", "-only", "STATEMENT_REMOVE,CONDITIONS_CONSTANT,ARITHMETIC_BASE", "-reporter", "simplify", "../../testdata/simplify"}
@@ -23,7 +23,7 @@ func TestSimplifyReporter(t *testing.T) {
 			t.Errorf("the candidates lack %q:\n%s", want, out)
 		}
 	}
-	// n < 0 の定数化と n == 0 -> true は検出され、ARITHMETIC_BASE は削除の変異ではない。
+	// Making n < 0 constant and n == 0 -> true are detected, and ARITHMETIC_BASE is not a removal.
 	for _, unwanted := range []string{"`n < 0`", "`n == 0` -> `true`", "ARITHMETIC_BASE", "killed"} {
 		if strings.Contains(out, unwanted) {
 			t.Errorf("the candidates contain %q:\n%s", unwanted, out)

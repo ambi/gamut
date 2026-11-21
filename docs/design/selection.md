@@ -1,118 +1,102 @@
-# gamut の設計：選択と順序
+# gamut design: selection and order
 
-この文書は、判定する変異体の選択、実行の順序、統合モード、保存のたびの判定、シャードと時間予算、呼び出しの深さの制限を定める。
-全体の目的とロードマップは [設計の概要](README.md) が定める。
+This document defines selecting the mutants to judge, the execution order, integration mode, judging on every save, shards and time budgets, and limiting the call depth.
+The [design overview](README.md) sets out the overall purpose and roadmap.
 
-## 判定する変異体の選択
+## Selecting mutants to judge
 
-### 差分（`-since`）
+### Diff (`-since`)
 
-Pull Request の検査やコーディングエージェントの反復で、変えた箇所の検出能力だけを知るための方式である。
+This mode tells how well the changed code is tested, for pull request checks and coding agents' iterations.
 
-- `git merge-base <ref> HEAD` から作業ツリーまでの差分を、`git diff -M --no-prefix -U0` で得る。追跡していないファイル（無視するものを除く）は全体を新しいとみなす。`git` がないか、参照を解決できなければ終了コード 1 で止める。
-- 差分は行の単位だが、Go のファイルは変わった行の前後を `go/scanner` で字句に分け、最長共通部分列で突き合わせて、新しい側で変わった字句の区間だけを残す。コメント、空白、改行の位置だけの変更は区間を作らない。消えた字句は、新しい側のその位置に幅 0 の区間を作る。
-- 変異体を選ぶのは、変わった区間と、変異箇所の式の区間（`-scope node`、既定）か囲む宣言の区間（`-scope decl`）の交わりである。幅 0 の区間は、区間の内側（端を除く）にあれば交わるとみなす。`decl` は宣言の署名の変更も捉える。
-- 差分の外の変異体は `PENDING` とし、数えない。差分に触れないパッケージ（パッケージと逆依存パッケージのディレクトリのファイルが変わらず、差分に交わる変異体もない）はビルドしない。
-- 差分の外の変異体のうち、前回 `KILLED` で、検出したテストが今はないものは再検査する。今回検出されなければ、報告に `previously_killed_by` を書き、要約の「no longer detected」に並べる。キャッシュがなければ前回の検出テストが分からないので再検査しない。
-- `-include-test-changes` を付けると、差分の外の変異体のうち、前回 `KILLED` でなく、差分が変えたテストが到達するものも再検査する。変えたテストは、テストファイルの宣言のうち変わった区間を持つものを推移的に参照するトップレベルのテストである。`TestMain` か `init` が変わればすべてのテストとする。逆依存パッケージのテストは、テストファイルが変われば、そのパッケージの全テストとする。
-- 名前を変えたファイルは `-M` で追い、旧パスでの識別子のキャッシュの判定を新しい識別子へ写す（`IDAt`）。被覆の記録は変異箇所の鍵が変わるので測り直す。
-- 被覆の記録は差分によらず[被覆の記録の再利用](reuse.md#被覆の記録の再利用)の規則に従う。差分の外の変異体の再検査に、今の到達が要るためである。
+- The diff from `git merge-base <ref> HEAD` to the working tree comes from `git diff -M --no-prefix -U0`. Untracked files (except ignored ones) count as entirely new. Without `git`, or if the ref does not resolve, the run stops with exit code 1.
+- The diff is in lines, but for Go files the lines around a change are split into tokens with `go/scanner` and matched by longest common subsequence, keeping only the ranges of changed tokens on the new side. Changes only to comments, whitespace, or line breaks make no range. Removed tokens make a zero-width range at that position on the new side.
+- A mutant is selected when a changed range intersects the range of the site's expression (`-scope node`, the default) or of the enclosing declaration (`-scope decl`). A zero-width range intersects when it lies strictly inside the range (not at its ends). `decl` also catches changes to a declaration's signature.
+- Mutants outside the diff are `PENDING` and not counted. Packages the diff does not touch (no files changed in the directories of the package and its reverse dependencies, and no mutant intersects the diff) are not built.
+- Mutants outside the diff that were `KILLED` last time by a test that no longer exists are checked again. If they are not detected this time, the report's `gamut.previouslyKilledBy` names the previous killing test, and the summary lists them under "no longer detected". Without a cache the previous killing test is unknown, so they are not checked.
+- With `-include-test-changes`, mutants outside the diff that were not `KILLED` last time and are reached by tests the diff changed are checked again too. The changed tests are the top-level tests that transitively refer to test-file declarations with changed ranges. If `TestMain` or `init` changed, every test counts. For tests of reverse dependencies, a changed test file means every test of that package.
+- Renamed files are followed with `-M`, and cached verdicts under the old path's identifiers are carried to the new identifiers (`IDAt`). Coverage records are measured again, since the site keys change.
+- Coverage recording follows the rules of [reusing coverage records](reuse.md#reusing-coverage-records) regardless of the diff, because checking mutants outside the diff again needs the current reach.
 
-### 識別子（`-mutant`）
+### Identifiers (`-mutant`)
 
-- 識別子か、その一意な前方一致を受け付け、繰り返し指定できる。どれにも当たらないか、複数に当たる指定があれば、候補を並べて終了コード 1 で止める。`-since` とは併用できない（終了コード 1）。
-- 指定した変異体を含むパッケージだけを準備する。報告には指定した変異体だけを載せる。
-- 被覆の記録は、規則どおり戻せないテストに加えて、指定した変異体の変異箇所に到達していたテストを測り直す。生き残りを埋めるために足したテストは、テストの鍵が変わるので測り直される。
-- 指定した変異体はキャッシュの判定を使わずに実行し、判定を書き戻す。
+- It takes an identifier or a unique prefix of one, and can be repeated. If a value matches none or several, the candidates are listed and the run stops with exit code 1. It cannot be combined with `-since` (exit code 1).
+- Only the packages containing the named mutants are prepared. The report lists only the named mutants.
+- Coverage recording measures again, besides the tests whose records cannot be restored by the rules, the tests that reached the named mutants' sites. A test added to fill a survivor changes its test key and is measured again.
+- The named mutants run without using cached verdicts, and their verdicts are written back.
 
-## 実行の順序
+## Execution order
 
-### テストの順序
+### Test order
 
-テストは次の順に実行し、最初の失敗で止める。
+Tests run in this order, stopping at the first failure:
 
-1. 前回この変異体を検出したテスト。
-2. 同じ変異箇所の別の変異体を検出したテスト。キャッシュは実行が終わるたびに書かれるので、今回の実行で先に検出されたものも含む。
-3. 残りのテスト。
+1. The test that killed this mutant last time.
+2. Tests that killed other mutants of the same site. The cache is written each time a run finishes, so this includes those detected earlier in the same run.
+3. The remaining tests.
 
-使い回すテストプロセスでは、判定のテストがこの順に `t.Run` で呼ぶ。
-`-isolate` では、1 つのテストのプロセスの中ではテストは `-test.run` の並びによらず宣言の順に走るので、順序はプロセスを分けて決める。
-どのプロセスもテストバイナリ 1 つのテストだけを持ち、パッケージ自身のテストバイナリを先にする。
-時間切れの上限は、命令かプロセスごとに決める。
-前回の検出テストが消えていれば、手順 1 を飛ばす。
+In a reused test process, the judging test calls them with `t.Run` in this order.
+With `-isolate`, tests in one process run in declaration order regardless of the order in `-test.run`, so the order is set by splitting processes.
+Each process holds the tests of one test binary only, the package's own test binary first.
+The timeout is set per command or per process.
+If the previous killing test is gone, step 1 is skipped.
 
-### 変異体の順序
+### Mutant order
 
-変異体の実行は、見積もり時間（実行するテストの被覆記録時の時間の合計。個別ビルドはパッケージのビルド時間を足す）の長い順にする（LPT 規則）。
-並列実行の最後に長い変異体が 1 つだけ残って待つことが減る。
+Mutants run in decreasing order of estimated time (the sum of the coverage-recording times of the tests to run, plus the package's build time for standalone mutants), the LPT rule.
+This reduces the chance that one long mutant is left running alone at the end of the parallel run.
+Compared with shortest first and with enumeration order, the differences were a few percent; shortest first had no advantage beyond progress appearing to move faster.
 
-2026-11-21、Apple Silicon の macOS、idmagic の `backend/oauth2/internal/token/usecases`（463 体を実行）、ワーカー数 2、`-no-cache` で、変異体の実行の時間を 3 回ずつ測った。
+## Integration mode
 
-| 順序 | 1 回目 | 2 回目 | 3 回目 |
-| --- | --- | --- | --- |
-| 長い順（採用） | 27.0 秒 | 26.7 秒 | 26.4 秒 |
-| 短い順 | 27.2 秒 | 28.7 秒 | 27.6 秒 |
-| 列挙の順 | 27.0 秒 | 27.5 秒 | 27.5 秒 |
+Go builds a separate test binary per package, so behavior observable only in the tests of a calling package cannot be detected by the target package's tests alone.
+`-integration` also tries detection with the tests of reverse dependencies.
 
-差は数パーセントで、短い順は進行の表示が早く進むほかに利点がなかった。
+- Reverse dependencies are found by running `go list -deps -test` over every package of the main module and following the test binaries' dependencies backwards: packages with tests whose test binaries link the target package. The target package itself is excluded.
+- The reverse dependencies' test binaries are built with the same overlay that carries the target package's rewrite. The target package's helper file holds the mutant numbers, so the same `GAMUT_MUTANT` selects them. With two or more target packages, a reverse dependency's test binary is built separately per target package, because putting two rewrites into one binary makes the numbers, which start at 1 per package, collide.
+- Coverage recording and running mutants span every test binary. Tests of reverse dependencies are named `<import path>.<test name>`; the package's own tests keep their names.
+- A reverse dependency has one test key, made from its Go files, test files, embedded files, `testdata`, and the files of the local packages its test binary depends on (except the target package).
+- A reverse dependency whose coverage records can all be restored takes its test list from the records and is not built until coverage must be measured or a mutant run. A package none of whose tests reaches the target package's sites keeps that record in the cache, so it is not built from then on.
+- The self-check uses only the package's own test binary.
+- For standalone mutants, the package's own test binary and the test binaries of reverse dependencies with tests that reached the site are built separately when their turn comes, and run. Mutants without reach records (`Untouched`) are judged with all of the package's own tests and all tests of the reverse dependencies that reached any site.
+- If the baseline tests of a reverse dependency fail, the run also stops without judging, with exit code 4.
 
-## 統合モード
+## Judging on every save
 
-Go ではパッケージごとにテストバイナリが分かれるので、呼び出し元のパッケージのテストでしか観測できない振る舞いは、対象パッケージのテストだけでは検出できない。
-`-integration` は、逆依存パッケージのテストでも検出を試す。
+`-watch` keeps watching the module's `.go` files after judging and judges again on every change. It ends with `SIGINT` or `SIGTERM`.
 
-- 逆依存パッケージは、メインモジュールの全パッケージに `go list -deps -test` を実行し、テストバイナリの依存を逆にたどって求める。テストを持ち、テストバイナリに対象パッケージがリンクされるパッケージである。対象パッケージ自身は含めない。
-- 逆依存パッケージのテストバイナリは、対象パッケージの書き換えを渡す同じ overlay でビルドする。変異体の番号は対象パッケージの補助ファイルが持つので、同じ `GAMUT_MUTANT` で選べる。対象パッケージが 2 つ以上あれば、逆依存パッケージのテストバイナリは対象パッケージごとに別にビルドする。1 つのバイナリに 2 つの書き換えを入れると、パッケージごとに 1 から振る番号が衝突するためである。
-- 被覆の記録と変異体の実行は、すべてのテストバイナリにまたがって行う。逆依存パッケージのテストの名前は `<import パス>.<テスト名>` にする。パッケージ自身のテストの名前は変えない。
-- 逆依存パッケージのテストの鍵はパッケージごとに 1 つで、そのパッケージの Go ファイル、テストファイル、埋め込みファイル、`testdata` と、テストバイナリが依存する手元のパッケージ（対象パッケージを除く）のファイルから作る。
-- 被覆の記録をすべて戻せる逆依存パッケージは、テストの一覧を記録から取り、被覆を測るか変異体を実行するまでビルドしない。どのテストも対象パッケージの変異箇所に到達しないパッケージは、その記録がキャッシュに残るので、次からはビルドされない。
-- 自己検査はパッケージ自身のテストバイナリだけで行う。
-- 個別ビルドの変異体は、パッケージ自身のテストバイナリと、変異箇所に到達したテストを持つ逆依存パッケージのテストバイナリを、その番が来たときに個別にビルドして実行する。到達の記録を持たない変異体（`Untouched`）は、パッケージ自身の全テストと、どれかの変異箇所に到達した逆依存パッケージの全テストで判定する。
-- 逆依存パッケージの基準のテストが失敗したときも、判定せずに終了コード 4 で止める。
+- Without `-since`, the scope is `-since HEAD -include-test-changes`: the diff being edited, and the survivors that changed tests reach.
+- The Go standard library has no file watching, so the modification times and sizes of `.go` files are compared every 500 milliseconds. Directories whose names start with `.` (`.git`, `.gamut`), `testdata`, and `vendor` are not watched.
+- After a change is found, gamut waits 1 second before judging, folding files saved in a row into one run.
+- The state is taken before judging and compared after it. Any number of saves during a run fold into the one run that follows.
+- Failing baseline tests or a failed quality gate do not stop it; the exit code goes to stderr and it waits for the next save.
 
-## 保存のたびの判定
+## Shards and time budgets
 
-`-watch` は、判定を終えた後もモジュールの `.go` ファイルを見張り、変わるたびに判定し直す。`SIGINT` か `SIGTERM` で終わる。
+These split judging a whole large repository across several CI jobs and cut it off in time.
 
-- 範囲は、`-since` がなければ `-since HEAD -include-test-changes` にする。編集中の差分と、変えたテストが到達する生き残りを判定する。
-- Go の標準ライブラリにはファイルの監視がないので、`.go` ファイルの更新時刻と大きさを 500 ミリ秒ごとに比べる。名前が `.` で始まるディレクトリ（`.git`、`.gamut`）、`testdata`、`vendor` は見ない。
-- 変更を見つけたら 1 秒待ってから判定し、続けて保存されたファイルを 1 回にまとめる。
-- 状態は判定の前に取り、判定の後に比べる。判定の間の保存は、何回あっても次の 1 回の判定にまとまる。
-- 基準のテストの失敗や品質の条件の失敗では止まらず、終了コードを標準エラーに出して次の保存を待つ。
+- `-shard k/n` judges only the mutants whose identifier's FNV-1a hash modulo n is k−1, and marks the rest `PENDING`. Splitting by identifier keeps the other mutants' assignments as mutants come and go, so each shard's cache stays effective. Each shard builds and records coverage in full.
+- At the end of each run, the run's internal report is kept in the cache (the latest one).
+- `gamut merge [-o <report>] [-cache-out <cache>] <shard cache>...` combines the reports kept in the caches and the caches' records. It never reads report files. For the same mutant it takes the verdict that is not `PENDING`, recounts, and recomputes the kill matrix. The report embeds the original sources, read from the module directory the shards judged if it exists here, and otherwise from the module of the working directory. Only caches of the same format version and environment are combined, and the records of unchanged reruns (whose key includes the shard) are not written. It prints the summary of the combined report and exits with code 2 if the quality gate is not met.
+- `-time-budget <duration>` starts no new mutant once that much time has passed since gamut started, and marks the rest `PENDING`. Running mutants are not stopped. Mutants that never started are not written to the cache, so the next run reuses what was judged and continues from there. Runs with a budget skip the unchanged-rerun shortcut (the previous report does not include the rest).
 
-## シャードと時間予算
+## Limiting the call depth
 
-大きなリポジトリの全体の判定を、複数の CI のジョブに分け、時間内に区切る。
+With `-max-depth <n>`, coverage recording counts only reach where the call depth from the test function to the site is at most n.
+For infrastructure functions that many tests pass through by accident, this reduces the reaching tests and makes it easier to see which test guards what.
+It increases survivors and `NOT COVERED`, so it is off by default.
 
-- `-shard k/n` は、変異体の識別子の FNV-1a ハッシュを n で割った余りが k−1 のものだけを判定し、残りを `PENDING` にする。識別子で分けるので、変異体が増えても減っても、ほかの変異体の割り当ては変わらず、シャードごとのキャッシュが効き続ける。ビルドと被覆の記録はシャードごとに全体を行う。
-- 判定の実行は、終わるたびにその実行の内部の報告をキャッシュに残す（最後の 1 回分）。
-- `gamut merge [-o <報告>] [-cache-out <キャッシュ>] <シャードのキャッシュ>...` は、各キャッシュに残した報告とキャッシュの記録を 1 つにまとめる。報告のファイルは読まない。同じ変異体は `PENDING` でない判定を採り、数を数え直し、kill matrix を求め直す。報告は元のソースを埋め込むので、シャードが判定したモジュールのディレクトリがあればそこから、なければ作業ディレクトリのモジュールから読む。キャッシュは同じ形式の版と環境のものだけをまとめ、変更のない再実行の記録（シャードの指定を鍵に含む）は書かない。まとめた報告の要約を出し、品質の条件を満たさなければ終了コード 2 を返す。
-- `-time-budget <時間>` は、gamut の起動からその時間を過ぎたら新しい変異体を始めず、残りを `PENDING` にする。実行中の変異体は止めない。始めなかった変異体はキャッシュに書かないので、次の実行は、判定済みのものを再利用して続きから判定する。予算を付けた実行では、変更のない再実行の近道を使わない（前回の報告は続きを含まない）。
+- The depth is counted inside the helpers `gamutHit` and `gamutInfect` by walking the frames of `runtime.Callers` and counting the frames of functions in the module up to one below the nearest `testing.tRunner` (the test function, or the subtest's function). The function containing the site counts as 1, and the test function itself is not counted. Subtests count from the subtest's function.
+- Consecutive frames of functions of the same declaration count as one, because schemata may wrap a site in a function literal (`func() { ... }()`), which should not count as a level. Users' function literals and recursion are treated the same way. Helper functions (names starting with `gamut`) are not counted.
+- Calls not under a test function (package initialization, goroutines started by tests) are not limited.
+- Reach beyond the limit is recorded as "d" and counts as neither reach nor infection. If the same test also reaches the site shallowly, that counts as reach. Frames are walked only while recording coverage, so judging mutants is no slower.
+- The depth limit changes the reach records, so it is part of the cache's environment. Sites reached only beyond the limit stay in the coverage records (`deep`), and runs that restore records still report the counts.
+- The numbers of excluded tests and reaches appear in the report's `gamut.maxDepthExcluded` and in the summary.
+- A smaller limit moves more mutants from killed to `NOT COVERED` and shortens the run, because fewer tests reach each mutant.
 
-## 呼び出しの深さの制限
+## Rejected ideas
 
-`-max-depth <n>` を付けると、被覆の記録で、テスト関数から変異箇所までの呼び出しの深さが n 以下の到達だけを数える。
-多くのテストが偶然通る基盤の関数で、到達したテストを減らし、どのテストが何を守っているかを見やすくする。
-生き残りと `NOT COVERED` が増えるので、既定では付けない。
-
-- 深さは、補助の `gamutHit` と `gamutInfect` の中で `runtime.Callers` のフレームをたどり、最も近い `testing.tRunner` の 1 つ下（テスト関数、サブテストならその関数）までの、モジュール内の関数のフレームで数える。変異箇所を含む関数を 1 とし、テスト関数自身は数えない。サブテストは、サブテストの関数から数える。
-- 同じ宣言の関数のフレームが続けば 1 つと数える。schemata は変異箇所を関数リテラル（`func() { ... }()`）で包むことがあり、それを 1 段と数えないためである。利用者の関数リテラルと再帰も同じ扱いになる。補助の関数（名前が `gamut` で始まるもの）は数えない。
-- テスト関数の下にない呼び出し（パッケージの初期化、テストが起動したゴルーチン）は制限しない。
-- 制限を超える到達は「d」として記録し、到達にも感染にも数えない。同じテストがその箇所に浅く到達すれば、到達に数える。フレームをたどるのは被覆の記録のときだけなので、変異体の判定の速さには影響しない。
-- 深さの制限は到達の記録を変えるので、キャッシュの環境に含める。制限を超えてだけ到達した箇所も被覆の記録に残し（`deep`）、記録を戻した実行でも数を出す。
-- 除いたテストの数と到達の数を、報告の `max_depth_excluded_tests`、`max_depth_excluded_reaches` と要約に出す。
-
-2026-11-21、idmagic の `usecases` で測った（既定の演算子、`-no-cache`）。
-
-| `-max-depth` | 検出 | 生き残り | `NOT COVERED` | 時間 | 除いたテスト（到達） |
-| --- | --- | --- | --- | --- | --- |
-| なし | 519 | 45 | 113 | 6.9 秒 | 0 |
-| 4 | 499 | 42 | 136 | 5.7 秒 | 9（123） |
-| 2 | 383 | 49 | 245 | 4.8 秒 | 67（1398） |
-
-## 採らなかった案
-
-| 案 | 採らない理由 |
+| Idea | Why not |
 | --- | --- |
-| `-test.run` の並びでテストの順序を決める | テストは 1 つのプロセスの中では宣言の順に走るので、並びは順序を変えない |
-| 統合モードで、逆依存パッケージのテストバイナリに対象パッケージすべての書き換えを入れる | 変異体の番号はパッケージごとに 1 から振るので、1 つの `GAMUT_MUTANT` が複数のパッケージの変異体を有効にする |
+| Set the test order by the order in `-test.run` | Tests in one process run in declaration order, so the order in the pattern changes nothing |
+| In integration mode, put the rewrites of every target package into a reverse dependency's test binary | Mutant numbers start at 1 per package, so one `GAMUT_MUTANT` would enable mutants of several packages |

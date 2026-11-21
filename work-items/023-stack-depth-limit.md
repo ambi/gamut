@@ -5,42 +5,16 @@ depends_on: []
 created_at: 2026-11-20
 ---
 
-# 呼び出しの深さで被覆を絞る
+# Limit coverage by call depth
 
-## 動機
+## Motivation
 
-多くのテストが偶然通る基盤の関数では、到達したテストが数百件になり、変異体の実行が遅くなる。
-そのような偶然の検出は、どのテストが何を守っているかも分かりにくくする。
-テスト関数から一定の深さ以内で到達した場合だけ、そのテストを被覆として数えれば、どちらも減らせる。
+Infrastructure functions that many tests pass through by chance get hundreds of reaching tests, slowing mutant runs and blurring which test guards what.
 
-## 対象範囲
+## Summary
 
-- `--max-depth <n>` で、被覆の記録の到達を、テスト関数から変異箇所までの呼び出しの深さが n 以下のものに限る。深さはモジュール内の関数のフレームだけを数える。
-- 深さの制限で除いたテストの数を要約に出す。
-
-## 対象外
-
-- 既定での有効化。生き残りが増えるので、利用者が選ぶ。
-
-## 設計
-
-`gamutHit` の中で `runtime.Callers` を呼び、フレームの関数名からモジュール内のものを数える。
-被覆の記録のときだけ呼ぶので、変異体の実行の速さには影響しない。
-`*testing.T` を受けるテスト関数のフレームを起点にする。
-
-## 完了の条件
-
-- 深い呼び出しの先にある変異箇所を持つ固定モジュールで、制限を付けると到達したテストから除かれる。
-
-## 検証
-
-- 端から端までのテスト。
-
-## 要約
-
-- `-max-depth` を足した。被覆の記録のときだけ、補助の `gamutHit` と `gamutInfect` が `runtime.Callers` で最も近い `testing.tRunner` までのフレームをたどり、モジュール内の関数を数える。制限を超える到達は「d」として記録し、到達にも感染にも数えない。
-- schemata が変異箇所を関数リテラルで包むので、同じ宣言の関数のフレームが続けば 1 つと数えることにした（設計の「呼び出しの深さの制限」）。
-- 補助が新たに import する `runtime` と `strings` は、対象パッケージの識別子と衝突しないよう別名で import する。
-- 深さの制限をキャッシュの環境に含め、制限を超えてだけ到達した箇所を被覆の記録の `deep` に残す。除いたテストと到達の数を、報告の `max_depth_excluded_tests`、`max_depth_excluded_reaches` と要約に出す。
-- 固定モジュール `testdata/depth`（深さ 3 で到達するテストと、サブテストから深さ 1 で到達するテスト）の端から端までのテスト（`TestMaxDepth`）で、制限 2 では深いテストが到達から除かれ、制限 3 と制限なしでは除かれないことを、被覆を測る実行と記録を戻す実行の両方で表明した。
-- idmagic の `usecases` では、制限 4 で 9 件のテストの 123 の到達を除き、6.9 秒が 5.7 秒になった。`NOT COVERED` は 113 体から 136 体に増えた。
+- With `-max-depth`, during coverage recording only, the helper's `gamutHit` and `gamutInfect` walk the frames up to the nearest `testing.tRunner` with `runtime.Callers`, counting module functions. Reach beyond the limit is recorded as "d" and counts as neither reach nor infection.
+- Consecutive frames of the same declaration count as one, since the schemata wrap sites in function literals.
+- The helper imports `runtime` and `strings` under aliases to avoid colliding with the target package.
+- The limit is part of the cache environment; sites reached only beyond it are kept as `deep`, and the removed tests and reaches are reported.
+- `TestMaxDepth` (`testdata/depth`) asserts limits 2, 3, and none, both when measuring and when restoring records. On idmagic's `usecases`, limit 4 removed 123 reaches of 9 tests, cutting 6.9 s to 5.7 s, and raised `NOT COVERED` from 113 to 136.

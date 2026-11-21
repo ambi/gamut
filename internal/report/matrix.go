@@ -10,28 +10,28 @@ import (
 	"github.com/ambi/gamut/internal/run"
 )
 
-// KillMatrix は、-kill-matrix で、変異体ごとに検出したテストのすべてから求めた、テストの見直しの候補である。
-// 包含は今の変異体に対するもので、将来の故障に対するものではないので、テストを消す根拠にはならない。
+// KillMatrix are the candidates for reviewing tests, computed under -kill-matrix from all the detecting tests of each mutant.
+// Subsumption is relative to the current mutants, not to future faults, so it is no reason to delete tests.
 type KillMatrix struct {
-	// Mutants は計算に使った変異体の数、Excluded は、テストが到達したのに検出したテストのすべてが分からないので除いた数
-	// （TIMED OUT、PENDING、kill matrix でない判定の KILLED）である。
+	// Mutants is the number of mutants used, and Excluded the number left out because tests reached them but not all detecting tests are known
+	// (TIMED OUT, PENDING, KILLED not judged by the kill matrix).
 	Mutants  int `json:"mutants"`
 	Excluded int `json:"excluded"`
-	// NoKill は、変異体に到達したのに 1 体も検出しなかったテストである。
+	// NoKill are tests that reached mutants but detected none.
 	NoKill []string `json:"tests_detecting_nothing"`
-	// Subsumed は、検出した変異体の集合が、ほかのテストの集合に真に含まれるテストである。
+	// Subsumed are tests whose set of detected mutants is a proper subset of another test's.
 	Subsumed []Subsumption `json:"subsumed_tests"`
-	// Duplicates は、検出した変異体の集合が同じテストの組である。
+	// Duplicates are groups of tests with the same set of detected mutants.
 	Duplicates [][]string `json:"duplicate_tests"`
 }
 
-// Subsumption は、Test が検出する変異体を、By のどのテストもすべて検出することを表す。
+// Subsumption means every test in By detects every mutant Test detects.
 type Subsumption struct {
 	Test string   `json:"test"`
 	By   []string `json:"by"`
 }
 
-// ComputeKillMatrix は、報告の変異体の Killers から KillMatrix を求めて入れる。
+// ComputeKillMatrix computes the KillMatrix from the Killers of the report's mutants and sets it.
 func (r *Report) ComputeKillMatrix() {
 	km := &KillMatrix{NoKill: []string{}, Subsumed: []Subsumption{}, Duplicates: [][]string{}}
 	kills := map[string]map[string]bool{}
@@ -106,7 +106,7 @@ func subset(a, b map[string]bool) bool {
 	return true
 }
 
-// writeKillMatrix は、要約に kill matrix の節を書く。
+// writeKillMatrix writes the kill matrix section of the summary.
 func writeKillMatrix(w io.Writer, km *KillMatrix) {
 	fmt.Fprintf(w, "\nkill matrix (%d mutants, %d excluded as timed out or not fully run): candidates to review, not to delete; subsumption holds only for these mutants\n", km.Mutants, km.Excluded)
 	if len(km.NoKill) > 0 {

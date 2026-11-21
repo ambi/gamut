@@ -5,42 +5,15 @@ depends_on: [004]
 created_at: 2026-11-20
 ---
 
-# 前回の検出テストを先に実行する
+# Run the previous detecting test first
 
-## 動機
+## Motivation
 
-gamut は感染したテストを短い順に実行し、最初の失敗で止める。
-前回その変異体を検出したテストがあれば、それを先に実行すると、多くの場合 1 件目で止まる。
+gamut ran infected tests shortest first and stopped at the first failure. Running the test that detected the mutant last time first usually stops at the first test.
 
-## 対象範囲
+## Summary
 
-- テストの順序を、前回の検出テスト、同じ変異箇所の別の変異体を検出したテスト、短いテストの順にする。
-- 変異体の実行の順序を、見積もり時間の短い順にする。全体の待ち時間の尾を短くするため、長いものは早めに始める案と比べて決める。
-
-## 対象外
-
-- 検出テストの全件の記録（[021](021-kill-matrix.md)）。
-
-## 設計
-
-前回の検出テストが消えていたら、通常の順序に戻す。
-変異体の実行順は、長いものから始めると並列実行の最後に長い変異体が残らない（LPT 規則）。
-短いものから始めると早期の進行表示が速い。
-idmagic の代表パッケージで両方を測り、全体時間の短い方を既定にする。
-
-## 完了の条件
-
-- 前回 `KILLED` だった変異体の再実行で、最初に実行するテストが前回の検出テストである。
-- 2 つの実行順の測定結果を設計文書に残す。
-
-## 検証
-
-- 検出テストの順序を表明する単体テスト。
-- idmagic の代表パッケージでの測定。
-
-## 要約
-
-- 1 つのテストのプロセスの中では、テストは `-test.run` の並びによらず宣言の順に走る。そのため、従来の「短い順に指定する」は順序を変えていなかった。順序はプロセスを分けて決め、前回の検出テストだけのプロセス、同じ変異箇所の別の変異体を検出したテストのプロセス、残りのプロセスの順に実行する。
-- 検出したトップレベルのテストを、キャッシュの記録に `killer` として残す。逆依存パッケージのテストの名前は `/` を含みうるので、`killed_by` を切って求める方式をやめた。
-- 変異体の実行順は、idmagic の代表パッケージで 3 回ずつ測り、長い順（LPT、中央値 26.7 秒）が短い順（27.6 秒）と列挙の順（27.5 秒）より速かったので、長い順を既定にした。測定は設計の「実行の順序」に残した。
-- 前回の検出テストが先頭のプロセスになることは、`TestAll_RunsThePreviousKillerFirst` と `TestPhases_OrdersPreviousKillerSiteKillersThenTheRest` で表明した。
+- Within one test process tests run in declaration order regardless of `-test.run`, so the old "shortest first" did not change the order. The order is set by separate processes: the previous detecting test alone, then tests that detected other mutants at the same site, then the rest.
+- The detecting top-level test is kept in the cache as `killer`.
+- Mutant order: measured three times on idmagic, longest first (LPT, median 26.7 s) beat shortest first (27.6 s) and enumeration order (27.5 s), so LPT is the default. The design's "Execution order" keeps the measurements.
+- `TestAll_RunsThePreviousKillerFirst` and `TestPhases_OrdersPreviousKillerSiteKillersThenTheRest` assert the order.

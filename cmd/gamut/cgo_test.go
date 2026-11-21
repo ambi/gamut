@@ -9,8 +9,8 @@ import (
 	"testing"
 )
 
-// TestCgo は、cgo を使うパッケージの、import "C" を持たないファイルを判定し、持つファイルを変異しないことを確かめる。
-// C コンパイラが使えなければ、cgo のパッケージを飛ばして報告し、ほかのパッケージの判定を続ける。
+// TestCgo checks that files without import "C" in a cgo package are judged, and files with it are not mutated.
+// Without a C compiler, the cgo package is skipped and reported, and the other packages are still judged.
 func TestCgo(t *testing.T) {
 	cc, err := exec.Command("go", "env", "CC").Output()
 	if err != nil {

@@ -16,17 +16,17 @@ import (
 	"github.com/ambi/gamut/internal/run"
 )
 
-// 選んだテストの群である。番号の小さい群ほど、変更が壊しうる見込みが高い。
+// Groups of selected tests. A lower group is more likely to be broken by the change.
 const (
-	// groupKiller は、変わった宣言の変異体を検出したテストである。
+	// groupKiller are tests that detected mutants of changed declarations.
 	groupKiller = 1
-	// groupReach は、変わった宣言に到達したほかのテストである。
+	// groupReach are the other tests that reached changed declarations.
 	groupReach = 2
-	// groupChanged は、変わったテストと、変わったテスト用の補助を使うテストである。
+	// groupChanged are changed tests and tests using changed test helpers.
 	groupChanged = 3
 )
 
-// selectedTest は、選んだ 1 件のテストである。
+// selectedTest is one selected test.
 type selectedTest struct {
 	Name    string `json:"name"`
 	Group   int    `json:"group"`
@@ -35,14 +35,14 @@ type selectedTest struct {
 	Reason  string `json:"reason"`
 }
 
-// selectedPackage は、1 つのパッケージの選んだテストで、選んだ順に並ぶ。
+// selectedPackage holds one package's selected tests in selection order.
 type selectedPackage struct {
 	Package string          `json:"package"`
 	Tests   []*selectedTest `json:"tests"`
 }
 
-// selectTestsMain は、差分 changes が壊しうるテストを、キャッシュ store の前回の判定と被覆の記録から選んで出す。何も実行しない。
-// キャッシュがないか、環境が変わって読み捨てたときは終了コード 1 にする。
+// selectTestsMain prints the tests the diff changes may break, selected from the previous verdicts and coverage records in the cache store. It runs nothing.
+// Without a cache, or when it was discarded because the environment changed, it exits with code 1.
 func selectTestsMain(stdout, stderr io.Writer, format string, targets []run.Target, changes *diff.Changes, store *cache.Store) int {
 	switch {
 	case store.Reset != "":
@@ -74,13 +74,13 @@ func selectTestsMain(stdout, stderr io.Writer, format string, targets []run.Targ
 	return exitOK
 }
 
-// selectTests は、パッケージごとにテストを選んで並べる。
+// selectTests selects and orders tests per package:
 //
-//   - 群 1：変わった宣言の変異体を検出したテストを、検出数の多い順に。kill matrix の判定なら検出したテストのすべてを、そうでなければ最初の 1 件を数える。
-//   - 群 2：変わった宣言の変異体に到達したほかのテストを、到達数の多い順に。前回の判定のない宣言（新しい宣言、変異体のない宣言）は、パッケージのテスト全体にする。
-//   - 群 3：変わったテストと、変わったテスト用の補助を推移的に参照するテスト。
+//   - Group 1: tests that detected mutants of changed declarations, most detections first. Kill matrix verdicts count every detecting test, others only the first.
+//   - Group 2: other tests that reached mutants of changed declarations, most reaches first. Declarations without previous verdicts (new ones, ones without mutants) select all the package's tests.
+//   - Group 3: changed tests and tests that refer transitively to changed test helpers.
 //
-// 前回の判定は、変異体の識別子ではなく、ファイルと宣言の名前で引く。宣言を書き換えると、変異体の識別子は変わりうるためである。
+// Previous verdicts are looked up by file and declaration name rather than mutant identifier, because rewriting a declaration may change its mutants' identifiers.
 func selectTests(targets []run.Target, changes *diff.Changes, store *cache.Store) []*selectedPackage {
 	type declKey struct{ file, decl string }
 	entries := map[declKey][]*cache.Entry{}
@@ -96,7 +96,7 @@ func selectTests(targets []run.Target, changes *diff.Changes, store *cache.Store
 		byPkg := map[string]map[string]*selectedTest{}
 		pick := func(name string) *selectedTest {
 			pkg := t.Pkg.ImportPath
-			// 逆依存パッケージのテストは、<import パス>.<名前> の形で記録されている。
+			// Tests of reverse dependencies are recorded as <import path>.<name>.
 			if i := strings.LastIndex(name, "."); i >= 0 {
 				pkg, name = name[:i], name[i+1:]
 			}
@@ -159,7 +159,7 @@ func selectTests(targets []run.Target, changes *diff.Changes, store *cache.Store
 		if t.Keys != nil {
 			funcs := t.Keys.TestFuncs()
 			for name := range t.Keys.ChangedTests(changes.Intersects) {
-				// 変わった補助そのものはテストではないので選ばない。
+				// A changed helper itself is not a test, so it is not selected.
 				if !slices.Contains(funcs, name) {
 					continue
 				}

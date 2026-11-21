@@ -8,9 +8,9 @@ import (
 	"github.com/ambi/gamut/internal/run"
 )
 
-// Merge は、シャードごとの報告を 1 つにまとめる。同じ変異体は、PENDING でない判定を採る。
-// 数は数え直し、kill matrix は求め直す。列挙で決まる値（arid の数、無効化した変異体）と被覆の記録で決まる値は、
-// どのシャードでも同じなので、最初の報告のものを採る。
+// Merge combines the reports of the shards into one. For the same mutant, the verdict that is not PENDING wins.
+// Counts are recomputed, and so is the kill matrix. Values fixed by enumeration (the arid count, disabled mutants) and by coverage records
+// are the same in every shard, so they come from the first report.
 func Merge(reps []*Report) (*Report, error) {
 	if len(reps) == 0 {
 		return nil, fmt.Errorf("no reports to merge")

@@ -11,7 +11,7 @@ func TestClamp(t *testing.T) {
 	}
 }
 
-// TestScore は Score(0) で v >= 0 の境界を通るが、> に変えても結果は 0 のままなので、その変異体は生き残る。
+// TestScore passes the boundary of v >= 0 with Score(0), but changing it to > still gives 0, so that mutant survives.
 func TestScore(t *testing.T) {
 	cases := []struct{ v, want int }{{0, 0}, {60, 100}, {-5, 0}}
 	for _, c := range cases {

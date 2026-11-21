@@ -2,7 +2,7 @@ package lib
 
 import "testing"
 
-// TestAdd は Add を呼ぶが結果を確かめないので、Add の変異体は lib のテストでは生き残る。
+// TestAdd calls Add without checking the result, so Add's mutants survive lib's tests.
 func TestAdd(t *testing.T) {
 	_ = Add(1, 2)
 }

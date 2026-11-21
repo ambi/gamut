@@ -8,15 +8,15 @@ import (
 	"testing"
 )
 
-// TestIgnore_ReportsCommentedMutantsApart は、無効化コメントで止めた変異体が、Ignored の状態でコメントの理由とともに報告に並ぶこと、
-// 数えないこと、理由のないコメントを警告することを確かめる。
+// TestIgnore_ReportsCommentedMutantsApart checks that mutants stopped by disable comments are listed in the report as Ignored with the comment's reason,
+// are not counted, and that comments without a reason get a warning.
 func TestIgnore_ReportsCommentedMutantsApart(t *testing.T) {
 	reportPath := filepath.Join(t.TempDir(), "report.json")
 	var stderr strings.Builder
 	if code := realMain([]string{"-no-cache", "-only", classicOnly, "-workers", "2", "-o", reportPath, "../../testdata/ignore"}, io.Discard, &stderr); code != 0 {
 		t.Fatalf("exit %d:\n%s", code, stderr.String())
 	}
-	// 止めた変異体は、Ignored の状態で、コメントの理由とともに報告に並ぶ。
+	// Stopped mutants are listed as Ignored with the comment's reason.
 	rep := readMTE(t, reportPath)
 	var judged, ignoredIDs []string
 	reasons := map[string]int{}
@@ -54,7 +54,7 @@ func TestIgnore_ReportsCommentedMutantsApart(t *testing.T) {
 		t.Errorf("want the ignored count in the summary, log:\n%s", stderr.String())
 	}
 
-	// 止めた変異体を -mutant で指定したら、コメントの位置を示して終了コード 1 にする。
+	// Selecting a stopped mutant with -mutant points at the comment and exits with code 1.
 	_, out, code := gamut(t, "-no-cache", "-only", classicOnly, "-mutant", ignoredIDs[0], "../../testdata/ignore")
 	if code != 1 || !strings.Contains(out, "//gamut:ignore comment covers") {
 		t.Errorf("-mutant on an ignored mutant: exit %d, want 1 with the comment position:\n%s", code, out)

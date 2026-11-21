@@ -1,4 +1,4 @@
-// Package mutant は、変異箇所の列挙、変異体の識別子、構築可能性の判定を持つ。
+// Package mutant enumerates mutation sites and holds mutant identifiers and viability checks.
 package mutant
 
 import (
@@ -19,10 +19,10 @@ import (
 	"github.com/ambi/gamut/internal/load"
 )
 
-// Type は変異演算子の名前である。
+// Type is the name of a mutator.
 type Type string
 
-// 変異演算子。名前は Gremlins と gomutants に合わせる。
+// Mutators. The names follow Gremlins and gomutants.
 const (
 	ArithmeticBase       Type = "ARITHMETIC_BASE"
 	ConditionalsBoundary Type = "CONDITIONALS_BOUNDARY"
@@ -30,172 +30,172 @@ const (
 	IncrementDecrement   Type = "INCREMENT_DECREMENT"
 	InvertNegatives      Type = "INVERT_NEGATIVES"
 	InvertBitwise        Type = "INVERT_BITWISE"
-	// InvertAssignments と InvertBitwiseAssignments は、複合代入の演算子を置き換える。
+	// InvertAssignments and InvertBitwiseAssignments replace the operator of a compound assignment.
 	InvertAssignments        Type = "INVERT_ASSIGNMENTS"
 	InvertBitwiseAssignments Type = "INVERT_BITWISE_ASSIGNMENTS"
-	// InvertLoopCtrl は、break と continue を入れ替える。
+	// InvertLoopCtrl swaps break and continue.
 	InvertLoopCtrl Type = "INVERT_LOOP_CTRL"
-	// InvertLogical は、&& と || を入れ替える。
+	// InvertLogical swaps && and ||.
 	InvertLogical Type = "INVERT_LOGICAL"
-	// RemoveLogicalNot は、論理否定の ! を取り除く。
+	// RemoveLogicalNot removes the logical negation !.
 	RemoveLogicalNot Type = "REMOVE_LOGICAL_NOT"
-	// BooleanLiteral は、宇宙スコープの true と false を入れ替える。
+	// BooleanLiteral swaps the universe-scope true and false.
 	BooleanLiteral Type = "BOOLEAN_LITERAL"
-	// ConditionsConstant は、if と for の条件と、&& と || の被演算子を定数にする。
+	// ConditionsConstant makes the conditions of if and for, and the operands of && and ||, constant.
 	ConditionsConstant Type = "CONDITIONS_CONSTANT"
-	// StatementRemove は、値を返さない呼び出しの文を実行しないようにする。
+	// StatementRemove keeps a call statement that returns no value from running.
 	StatementRemove Type = "STATEMENT_REMOVE"
-	// ReturnZero は、戻り値を持つ関数の本体の先頭で、戻り値の型のゼロ値を返すようにする。
+	// ReturnZero returns the zero values of the result types at the start of the body of a function with results.
 	ReturnZero Type = "RETURN_ZERO"
-	// RemoveSelfAssignments は、複合代入を単純な代入にする（x += y を x = y に）。
+	// RemoveSelfAssignments turns a compound assignment into a plain one (x += y into x = y).
 	RemoveSelfAssignments Type = "REMOVE_SELF_ASSIGNMENTS"
-	// IntegerIncrement と IntegerDecrement は、整数のリテラルを 1 増やす、1 減らす。
+	// IntegerIncrement and IntegerDecrement add 1 to and subtract 1 from an integer literal.
 	IntegerIncrement Type = "INTEGER_INCREMENT"
 	IntegerDecrement Type = "INTEGER_DECREMENT"
-	// FloatIncrement と FloatDecrement は、浮動小数点数のリテラルを 1 増やす、1 減らす。
+	// FloatIncrement and FloatDecrement add 1 to and subtract 1 from a floating-point literal.
 	FloatIncrement Type = "FLOAT_INCREMENT"
 	FloatDecrement Type = "FLOAT_DECREMENT"
-	// BranchIf、BranchElse、BranchCase は、if、else、switch の case の本体を空にする。
+	// BranchIf, BranchElse, and BranchCase empty the body of an if, an else, or a case of a switch.
 	BranchIf   Type = "BRANCH_IF"
 	BranchElse Type = "BRANCH_ELSE"
 	BranchCase Type = "BRANCH_CASE"
-	// ErrorfWrap は、fmt.Errorf の書式の %w を %v にし、エラーの連鎖を切る。
+	// ErrorfWrap turns %w in the format of fmt.Errorf into %v, breaking the error chain.
 	ErrorfWrap Type = "ERRORF_WRAP"
-	// ReturnErrorNil は、return の error 型の結果を nil にする。
+	// ReturnErrorNil turns a return's result of type error into nil.
 	ReturnErrorNil Type = "RETURN_ERROR_NIL"
 )
 
-// ErrorSite は、RETURN_ERROR_NIL の変異箇所である。return の結果の式 X を包み、X そのものの変異箇所とは別の箇所にする。
+// ErrorSite is the mutation site of RETURN_ERROR_NIL. It wraps the result expression X of a return, making it a site apart from X's own.
 type ErrorSite struct {
 	X ast.Expr
 }
 
-// Pos は結果の式の先頭である。
+// Pos is the start of the result expression.
 func (e *ErrorSite) Pos() token.Pos { return e.X.Pos() }
 
-// End は結果の式の終わりである。
+// End is the end of the result expression.
 func (e *ErrorSite) End() token.Pos { return e.X.End() }
 
-// emptiedID は、BRANCH_* の識別子の置き換え後の部分である。置き換え後の文字列は本体を含むので、固定の文字列を使う。
+// emptiedID is the replacement part of a BRANCH_* identifier. The replacement text contains the body, so a fixed string is used.
 const emptiedID = "<emptied>"
 
-// BranchSite は、BRANCH_* の変異箇所である。分岐の本体の文の並び（if と else のブロックの { と } の内側、case の : の後）を範囲にする。
-// 変異は本体を if false { ... } で包み、本体でだけ使う変数が使われなくならないよう参照を残す。
+// BranchSite is the mutation site of BRANCH_*. Its range is the statement list of the branch body (inside { and } of an if or else block, after : of a case).
+// The mutation wraps the body in if false { ... }, keeping references so that variables used only in the body stay used.
 type BranchSite struct {
-	// Branch は *ast.BlockStmt か *ast.CaseClause である。
+	// Branch is an *ast.BlockStmt or an *ast.CaseClause.
 	Branch   ast.Node
 	From, To token.Pos
 }
 
-// Pos は本体の先頭である。
+// Pos is the start of the body.
 func (b *BranchSite) Pos() token.Pos { return b.From }
 
-// End は本体の終わりである。
+// End is the end of the body.
 func (b *BranchSite) End() token.Pos { return b.To }
 
-// zeroID は、RETURN_ZERO の識別子の置き換え後の部分である。置き換え後の文字列は戻り値の型を含むので、固定の文字列を使う。
+// zeroID is the replacement part of a RETURN_ZERO identifier. The replacement text contains the result types, so a fixed string is used.
 const zeroID = "<zero>"
 
-// BodySite は、RETURN_ZERO の変異箇所である。関数の本体の { の 1 字だけを範囲にし、本体の中の箇所とは別の箇所にする。
+// BodySite is the mutation site of RETURN_ZERO. Its range is just the one character { of the function body, making it a site apart from those inside the body.
 type BodySite struct {
 	Func *ast.FuncDecl
 }
 
-// Pos は本体の { の位置である。
+// Pos is the position of the body's {.
 func (b *BodySite) Pos() token.Pos { return b.Func.Body.Lbrace }
 
-// End は本体の { の直後である。
+// End is right after the body's {.
 func (b *BodySite) End() token.Pos { return b.Func.Body.Lbrace + 1 }
 
-// removedID は、STATEMENT_REMOVE の識別子の置き換え後の部分である。置き換え後の文字列は文の中身を含むので、
-// 引数を書き換えても識別子が変わらないよう、識別子には固定の文字列を使う。
+// removedID is the replacement part of a STATEMENT_REMOVE identifier. The replacement text contains the statement,
+// so the identifier uses a fixed string, keeping it unchanged when the arguments are rewritten.
 const removedID = "<removed>"
 
-// ConditionSite は、CONDITIONS_CONSTANT の変異箇所である。条件の式 X を包み、X そのものの変異箇所とは別の箇所にする。
-// 範囲は X と同じで、schemata は包む側を先に書き換え、X の中の箇所をその中で書き換える。
+// ConditionSite is the mutation site of CONDITIONS_CONSTANT. It wraps the condition expression X, making it a site apart from X's own.
+// Its range equals X's; schemata rewrites the wrapping site first and the sites inside X within it.
 type ConditionSite struct {
 	X ast.Expr
 }
 
-// Pos は条件の式の先頭である。
+// Pos is the start of the condition expression.
 func (c *ConditionSite) Pos() token.Pos { return c.X.Pos() }
 
-// End は条件の式の終わりである。
+// End is the end of the condition expression.
 func (c *ConditionSite) End() token.Pos { return c.X.End() }
 
-// AllTypes は既定で有効な変異演算子である。RETURN_ZERO と STATEMENT_REMOVE は、実在のパッケージでの測定で、
-// 生き残りがテストの穴（結果を確かめていない関数、確かめていない副作用）を示し、時間の増加が 1〜2 割だったので既定に入れた。
+// AllTypes are the mutators enabled by default. RETURN_ZERO and STATEMENT_REMOVE joined the default because, measured on real packages,
+// their survivors pointed at gaps in the tests (functions whose results are not checked, side effects not checked) and they added 10 to 20 percent to the time.
 var AllTypes = []Type{ArithmeticBase, ConditionalsBoundary, ConditionalsNegation, IncrementDecrement, InvertNegatives, ReturnZero, StatementRemove}
 
-// OptIn は、既定では無効で、-only や設定で選んだときだけ有効になる変異演算子である。
-// 実在のパッケージで生き残りの数と仕分けの内訳を測ってから、既定の集合に入れるかを決める。
+// OptIn are the mutators off by default, enabled only when chosen with -only or in the config.
+// Whether one joins the default set is decided after measuring the number of survivors and their breakdown on real packages.
 var OptIn = []Type{InvertBitwise, InvertAssignments, InvertBitwiseAssignments, InvertLoopCtrl, InvertLogical, RemoveLogicalNot, BooleanLiteral, ConditionsConstant,
 	RemoveSelfAssignments, IntegerIncrement, IntegerDecrement, FloatIncrement, FloatDecrement, BranchIf, BranchElse, BranchCase,
 	ErrorfWrap, ReturnErrorNil}
 
-// Known は、gamut が知っているすべての変異演算子である。-only、設定、無効化コメント、受理の名前はこれで確かめる。
+// Known are all the mutators gamut knows. Names in -only, the config, disable comments, and acceptances are checked against it.
 var Known = slices.Concat(AllTypes, OptIn)
 
-// Mutant は、ソースの 1 つの区間（Offset から OriginalText の長さ）を ReplacementText に置き換える変異体である。
-// 演算子の変異では、区間は演算子の字句 1 つで、Original と Replacement はその字句である。
-// 字句で表せない変異（! の削除など）では、Original と Replacement は token.ILLEGAL で、文字列だけを持つ。
+// Mutant is a mutant that replaces one range of the source (from Offset, the length of OriginalText) with ReplacementText.
+// For an operator mutation, the range is one operator token, and Original and Replacement are those tokens.
+// For a mutation a token cannot express (such as removing !), Original and Replacement are token.ILLEGAL and only the strings are set.
 type Mutant struct {
-	// Index は schemata の中で変異体を選ぶ番号で、1 から始まる。
+	// Index is the number that selects the mutant in the schemata, starting at 1.
 	Index int
-	// ID は行と列に依存しない識別子である。
+	// ID is the identifier, independent of lines and columns.
 	ID   string
 	Type Type
 	File *load.File
-	// Offset はファイルの中での置き換える区間の先頭のバイト位置である。
+	// Offset is the byte offset in the file where the replaced range starts.
 	Offset      int
 	Original    token.Token
 	Replacement token.Token
-	// OriginalText と ReplacementText は、置き換える前と後の文字列である。演算子の変異では字句の文字列と同じである。
+	// OriginalText and ReplacementText are the text before and after replacement. For an operator mutation they equal the tokens' text.
 	OriginalText    string
 	ReplacementText string
 	Line            int
 	Column          int
-	// Site は変異箇所の構文木のノード（*ast.BinaryExpr、*ast.UnaryExpr、*ast.IncDecStmt、複合代入の *ast.AssignStmt）である。
+	// Site is the syntax tree node of the mutation site (*ast.BinaryExpr, *ast.UnaryExpr, *ast.IncDecStmt, or the *ast.AssignStmt of a compound assignment).
 	Site ast.Node
-	// Scope は変異箇所を囲む宣言の名前である。
+	// Scope is the name of the declaration enclosing the mutation site.
 	Scope string
-	// Viable は、変異後のパッケージが型検査を通るかである。
+	// Viable reports whether the mutated package passes type-checking.
 	Viable bool
-	// SiteKey は、変異箇所の行と列に依存しない鍵である。同じ箇所の変異体は同じ鍵を持つ。
-	// 被覆の記録を実行をまたいで引き継ぐときに、書き換えごとに変わる箇所の番号の代わりに使う。
+	// SiteKey is a key of the mutation site independent of lines and columns. Mutants at the same site share it.
+	// Carrying coverage records over across runs uses it instead of the site numbers, which change with every rewrite.
 	SiteKey string
 
-	// path は、囲む宣言の中での構文木の経路である。
+	// path is the path through the syntax tree within the enclosing declaration.
 	path []int
-	// idTo は、識別子に入れる置き換え後の部分である。ふつうは ReplacementText で、文や型を含む変異では固定の文字列である。
+	// idTo is the replacement part put in the identifier. It is usually ReplacementText, and a fixed string for mutations containing statements or types.
 	idTo string
 }
 
-// Key は、識別子のハッシュの部分を返す。パッケージの中で変異体を区別する短い鍵として使う。
+// Key returns the hash part of the identifier. It serves as a short key telling mutants apart within a package.
 func (m *Mutant) Key() string {
 	return m.ID[strings.LastIndex(m.ID, "::")+2:]
 }
 
-// IDAt は、変異体のファイルがモジュール相対のパス rel にあったときの識別子を返す。
-// ファイルの名前の変更の前の識別子を求め、前の判定を引き継ぐために使う。
+// IDAt returns the identifier the mutant would have if its file were at the module-relative path rel.
+// It finds the identifier from before a file rename, to carry over the previous verdict.
 func (m *Mutant) IDAt(rel string) string {
 	return identity(rel, m.Scope, m.path, m.Type, m.idTo)
 }
 
-// setID は、置き換え後の部分 to で識別子を作る。
+// setID builds the identifier with the replacement part to.
 func (m *Mutant) setID(rel string, to string) {
 	m.idTo = to
 	m.ID = identity(rel, m.Scope, m.path, m.Type, to)
 }
 
-// rule は、字句 from を to に置き換える規則である。to が token.ILLEGAL なら、from を取り除く。
+// rule replaces the token from with to. When to is token.ILLEGAL, it removes from.
 type rule struct {
 	typ  Type
 	from token.Token
 	to   token.Token
 }
 
-// replacement は、規則の置き換え後の文字列を返す。
+// replacement returns the rule's replacement text.
 func (r rule) replacement() string {
 	if r.to == token.ILLEGAL {
 		return ""
@@ -234,13 +234,13 @@ var unaryRules = []rule{
 	{RemoveLogicalNot, token.NOT, token.ILLEGAL},
 }
 
-// branchRules は break と continue の文の規則である。goto と fallthrough は変異しない。
+// branchRules are the rules for break and continue statements. goto and fallthrough are not mutated.
 var branchRules = []rule{
 	{InvertLoopCtrl, token.BREAK, token.CONTINUE},
 	{InvertLoopCtrl, token.CONTINUE, token.BREAK},
 }
 
-// assignRules は複合代入の文の規則である。単純な代入（=、:=）は変異しない。
+// assignRules are the rules for compound assignment statements. Plain assignments (=, :=) are not mutated.
 var assignRules = []rule{
 	{InvertAssignments, token.ADD_ASSIGN, token.SUB_ASSIGN},
 	{InvertAssignments, token.SUB_ASSIGN, token.ADD_ASSIGN},
@@ -271,13 +271,13 @@ var incDecRules = []rule{
 	{IncrementDecrement, token.DEC, token.INC},
 }
 
-// Enumerate は、パッケージの対象ファイルから、enabled に含まれる変異演算子の変異体を、既定の arid の規則で列挙する。
+// Enumerate enumerates, with the default arid rules, the mutants of the mutators in enabled across the package's target files.
 func Enumerate(pkg *load.Package, enabled []Type) []*Mutant {
 	out, _, _ := EnumerateWith(pkg, enabled, &Arid{})
 	return out
 }
 
-// EnumerateWith は、arid の規則 arid で変異体を列挙する。2 つ目の戻り値は、arid のコードの中なので作らなかった変異体の数である。
+// EnumerateWith enumerates mutants with the arid rules arid. The second result is the number of mutants not created because they are in arid code.
 func EnumerateWith(pkg *load.Package, enabled []Type, arid *Arid) ([]*Mutant, int, error) {
 	if err := arid.Validate(); err != nil {
 		return nil, 0, err
@@ -294,8 +294,8 @@ func EnumerateWith(pkg *load.Package, enabled []Type, arid *Arid) ([]*Mutant, in
 	return out, skipped, nil
 }
 
-// Without は、ms から drop が真を返す変異体を除き、残りの番号を 1 から振り直す。
-// schemata は番号を補助ファイルの配列の添字に使うので、番号に隙間を残さない。
+// Without removes from ms the mutants for which drop returns true and renumbers the rest from 1.
+// The schemata use the numbers as indexes into an array in the helper file, so no gaps are left.
 func Without(ms []*Mutant, drop func(*Mutant) bool) []*Mutant {
 	out := slices.DeleteFunc(ms, drop)
 	number(out)
@@ -308,7 +308,7 @@ func number(ms []*Mutant) {
 	}
 }
 
-// enumerateFile は、ファイルの変異体を列挙する。arid のコードの中の変異体は作らずに数える。
+// enumerateFile enumerates the mutants of a file. Mutants in arid code are counted instead of created.
 func enumerateFile(pkg *load.Package, file *load.File, enabled []Type, arid *aridChecker) ([]*Mutant, int) {
 	var out []*Mutant
 	skipped := 0
@@ -321,15 +321,15 @@ func enumerateFile(pkg *load.Package, file *load.File, enabled []Type, arid *ari
 	var path []int
 	scope := ""
 	aridDepth := 0
-	// parentOf は、いま訪れているノードの親を返す。ファイルなら nil を返す。
+	// parentOf returns the parent of the node being visited, or nil for the file.
 	parentOf := func() ast.Node {
 		if len(stack) < 2 {
 			return nil
 		}
 		return stack[len(stack)-2].node
 	}
-	// enclosingSignature は、いま訪れているノードを囲む最も内側の関数（宣言か関数リテラル）のシグネチャを返す。
-	// いま訪れているノードそのものは含めない（return func() error {...} の関数リテラルは、囲む関数の結果である）。
+	// enclosingSignature returns the signature of the innermost function (declaration or function literal) enclosing the node being visited.
+	// The node itself is not included (the function literal in return func() error {...} is a result of the enclosing function).
 	enclosingSignature := func() *types.Signature {
 		for i := len(stack) - 2; i >= 0; i-- {
 			switch fn := stack[i].node.(type) {
@@ -345,8 +345,8 @@ func enumerateFile(pkg *load.Package, file *load.File, enabled []Type, arid *ari
 		}
 		return nil
 	}
-	// allow は、emit が無視する arid の深さである。エラーメッセージの呼び出し（fmt.Errorf）は arid だが、
-	// その呼び出しそのものを変える変異体（ERRORF_WRAP、RETURN_ERROR_NIL）は、その呼び出しの arid では止めない。
+	// allow is the arid depth emit ignores. A call building an error message (fmt.Errorf) is arid,
+	// but mutants that change that very call (ERRORF_WRAP, RETURN_ERROR_NIL) are not stopped by its aridity.
 	allow := 0
 	emit := func(m *Mutant) {
 		if aridDepth > allow {
@@ -375,7 +375,7 @@ func enumerateFile(pkg *load.Package, file *load.File, enabled []Type, arid *ari
 		stack = append(stack, frame{node: n, arid: isArid})
 		path = append(path, index)
 		if len(stack) == 2 {
-			// ファイル直下の宣言が識別子の単位になる。
+			// Top-level declarations of the file are the units of identifiers.
 			scope = declName(n)
 		}
 		if isArid {
@@ -384,9 +384,9 @@ func enumerateFile(pkg *load.Package, file *load.File, enabled []Type, arid *ari
 		var rules []rule
 		var opPos token.Pos
 		var op token.Token
-		// add は、変異箇所 n の変異体を作る。識別子に入れる置き換え後の部分は idTo で、空なら toText である。
+		// add creates a mutant at the mutation site n. The replacement part put in the identifier is idTo, or toText when empty.
 		add := func(typ Type, at token.Pos, from, to token.Token, fromText, toText, idTo string) {
-			// 識別子の経路は宣言の中での相対位置にし、前に宣言が増えても変わらないようにする。
+			// The identifier's path is relative to the declaration, so declarations added before it do not change it.
 			rel := path[2:]
 			pos := pkg.Fset.Position(at)
 			m := &Mutant{
@@ -401,7 +401,7 @@ func enumerateFile(pkg *load.Package, file *load.File, enabled []Type, arid *ari
 			m.setID(file.Rel, idTo)
 			emit(m)
 		}
-		// 条件の式なら、その中の変異体より先に、条件を定数にする変異体を並べる。
+		// For a condition expression, list the mutants making the condition constant before the mutants inside it.
 		if expr, ok := n.(ast.Expr); ok && len(path) > 2 && slices.Contains(enabled, ConditionsConstant) && pkg.Info.Types[expr].Value == nil {
 			if consts := conditionConstants(stack[len(stack)-2].node, expr); len(consts) > 0 {
 				rel := path[2:]
@@ -413,7 +413,7 @@ func enumerateFile(pkg *load.Package, file *load.File, enabled []Type, arid *ari
 						Type: ConditionsConstant, File: file, Offset: pos.Offset,
 						Original: token.ILLEGAL, Replacement: token.ILLEGAL, OriginalText: text, ReplacementText: c,
 						Line: pos.Line, Column: pos.Column, Site: site, Scope: scope,
-						// 包む箇所は式そのものの箇所と範囲が同じなので、経路に印を足して別の鍵にする。
+						// The wrapping site has the same range as the expression's own, so a mark added to the path makes a different key.
 						SiteKey: siteKey(file.Rel, scope, append(slices.Clone(rel), -1)), path: slices.Clone(rel),
 					}
 					m.setID(file.Rel, c)
@@ -421,17 +421,17 @@ func enumerateFile(pkg *load.Package, file *load.File, enabled []Type, arid *ari
 				}
 			}
 		}
-		// return の error 型の結果なら、その中の変異体より先に、nil にする変異体を並べる。
+		// For a return's result of type error, list the mutant turning it into nil before the mutants inside it.
 		if expr, ok := n.(ast.Expr); ok && slices.Contains(enabled, ReturnErrorNil) && returnedError(pkg.Info, parentOf(), expr, enclosingSignature()) {
 			rel := path[2:]
 			pos := pkg.Fset.Position(expr.Pos())
 			text := string(file.Src[pos.Offset:pkg.Fset.Position(expr.End()).Offset])
 			m := &Mutant{
 				Type: ReturnErrorNil, File: file, Offset: pos.Offset,
-				// 式でだけ使う変数や import が使われなくならないよう、式は評価しない分岐に残す。
+				// Keep the expression in a branch that never runs, so that variables and imports used only in it stay used.
 				Original: token.ILLEGAL, Replacement: token.ILLEGAL, OriginalText: text, ReplacementText: "func() error { if false { return " + text + " }; return nil }()",
 				Line: pos.Line, Column: pos.Column, Site: &ErrorSite{X: expr}, Scope: scope,
-				// 包む箇所は式そのものの箇所と範囲が同じなので、経路に印を足して別の鍵にする。
+				// The wrapping site has the same range as the expression's own, so a mark added to the path makes a different key.
 				SiteKey: siteKey(file.Rel, scope, append(slices.Clone(rel), -4)), path: slices.Clone(rel),
 			}
 			m.setID(file.Rel, "nil")
@@ -441,7 +441,7 @@ func enumerateFile(pkg *load.Package, file *load.File, enabled []Type, arid *ari
 			emit(m)
 			allow = 0
 		}
-		// 分岐の本体なら、その中の変異体より先に、本体を空にする変異体を並べる。
+		// For a branch body, list the mutant emptying the body before the mutants inside it.
 		if typ, from, to, ok := branchBody(parentOf(), n); ok && slices.Contains(enabled, typ) && !arid.allArid(branchStmts(n)) {
 			start, end := pkg.Fset.Position(from).Offset, pkg.Fset.Position(to).Offset
 			text := string(file.Src[start:end])
@@ -468,7 +468,7 @@ func enumerateFile(pkg *load.Package, file *load.File, enabled []Type, arid *ari
 		case *ast.BranchStmt:
 			rules, opPos, op = branchRules, x.TokPos, x.Tok
 		case *ast.FuncDecl:
-			// 戻り値を持つ関数の本体の { の直後に、戻り値の型のゼロ値を返す文を差し込む。型はシグネチャの字句を写すので、そのファイルで必ず書ける。
+			// Insert a statement returning the zero values of the result types right after the { of the body of a function with results. The types copy the signature's text, so they can always be written in that file.
 			if zeros := zeroValues(file, pkg.Fset, x); zeros != "" && slices.Contains(enabled, ReturnZero) {
 				site := &BodySite{Func: x}
 				pos := pkg.Fset.Position(site.Pos())
@@ -483,8 +483,8 @@ func enumerateFile(pkg *load.Package, file *load.File, enabled []Type, arid *ari
 			}
 			return true
 		case *ast.ExprStmt:
-			// 値を返さない呼び出しの文を if false { ... } にする。引数でだけ使う変数や import が使われなくならないよう、文は消さずに残す。
-			// ログ出力の呼び出しの文は arid の規則で除かれ、数えられる。
+			// Turn a call statement that returns no value into if false { ... }. The statement is kept rather than deleted, so that variables and imports used only in the arguments stay used.
+			// Logging call statements are excluded by the arid rules and counted.
 			if call, ok := x.X.(*ast.CallExpr); ok && slices.Contains(enabled, StatementRemove) && returnsNothing(pkg.Info, call) {
 				text := string(file.Src[pkg.Fset.Position(x.Pos()).Offset:pkg.Fset.Position(x.End()).Offset])
 				add(StatementRemove, x.Pos(), token.ILLEGAL, token.ILLEGAL, text, "if false { "+text+" }", removedID)
@@ -505,7 +505,7 @@ func enumerateFile(pkg *load.Package, file *load.File, enabled []Type, arid *ari
 			}
 			return true
 		case *ast.Ident:
-			// 宇宙スコープの true と false だけを変異する。同じ名前の局所変数は変異しない。
+			// Mutate only the universe-scope true and false. Local variables of the same name are not mutated.
 			if slices.Contains(enabled, BooleanLiteral) && isUniverseBool(pkg.Info, x) {
 				add(BooleanLiteral, x.Pos(), token.ILLEGAL, token.ILLEGAL, x.Name, map[string]string{"true": "false", "false": "true"}[x.Name], "")
 			}
@@ -523,10 +523,10 @@ func enumerateFile(pkg *load.Package, file *load.File, enabled []Type, arid *ari
 	return out, skipped
 }
 
-// conditionConstants は、parent の子 expr が条件なら、CONDITIONS_CONSTANT で置き換える定数を返す。
-//   - if の条件：true と false。
-//   - for の条件：false だけ。true は無限ループになり、時間切れを待つだけで遅い。
-//   - && の被演算子：true だけ（その条件を外す）。|| の被演算子：false だけ。
+// conditionConstants returns, when expr, a child of parent, is a condition, the constants CONDITIONS_CONSTANT replaces it with.
+//   - The condition of an if: true and false.
+//   - The condition of a for: only false. true makes an infinite loop, which only waits for the timeout and is slow.
+//   - An operand of &&: only true (dropping that condition). An operand of ||: only false.
 func conditionConstants(parent ast.Node, expr ast.Expr) []string {
 	switch p := parent.(type) {
 	case *ast.IfStmt:
@@ -551,7 +551,7 @@ func conditionConstants(parent ast.Node, expr ast.Expr) []string {
 	return nil
 }
 
-// zeroValues は、関数の戻り値の型のゼロ値（*new(T)）をカンマで並べて返す。戻り値がない、本体がない、init なら空を返す。
+// zeroValues returns the zero values (*new(T)) of the function's result types, separated by commas. It returns empty when there are no results, no body, or for init.
 func zeroValues(file *load.File, fset *token.FileSet, fd *ast.FuncDecl) string {
 	if fd.Body == nil || fd.Type.Results == nil || fd.Name.Name == "init" && fd.Recv == nil {
 		return ""
@@ -566,8 +566,8 @@ func zeroValues(file *load.File, fset *token.FileSet, fd *ast.FuncDecl) string {
 	return strings.Join(zeros, ", ")
 }
 
-// branchBody は、n が if か else のブロック、switch の case の節なら、その演算子と、本体の文の並びの範囲を返す。
-// 本体が空の節と、fallthrough で終わる節（空にすると fallthrough を書けない）は返さない。select の節は対象にしない。
+// branchBody returns, when n is an if or else block or a case clause of a switch, its mutator and the range of the body's statement list.
+// Clauses with an empty body and clauses ending in fallthrough (emptied, they could not hold the fallthrough) are not returned. Clauses of select are not targets.
 func branchBody(parent, n ast.Node) (Type, token.Pos, token.Pos, bool) {
 	switch x := n.(type) {
 	case *ast.BlockStmt:
@@ -593,7 +593,7 @@ func branchBody(parent, n ast.Node) (Type, token.Pos, token.Pos, bool) {
 	return "", 0, 0, false
 }
 
-// branchStmts は、分岐の本体の文の並びを返す。
+// branchStmts returns the statement list of a branch body.
 func branchStmts(n ast.Node) []ast.Stmt {
 	switch x := n.(type) {
 	case *ast.BlockStmt:
@@ -604,8 +604,8 @@ func branchStmts(n ast.Node) []ast.Stmt {
 	return nil
 }
 
-// returnedError は、expr が return の結果で、囲む関数 sig のその位置の結果の型が error で、expr が nil でないかを返す。
-// 結果の型が error を満たす具体的な型（*MyErr など）なら nil にしない。nil にした値は error の nil と比べられないことがある。
+// returnedError reports whether expr is a result of a return, the result type at that position of the enclosing function sig is error, and expr is not nil.
+// A concrete result type that satisfies error (such as *MyErr) is not turned into nil: such a nil may not compare equal to a nil error.
 func returnedError(info *types.Info, parent ast.Node, expr ast.Expr, sig *types.Signature) bool {
 	ret, ok := parent.(*ast.ReturnStmt)
 	if !ok || sig == nil || sig.Results().Len() != len(ret.Results) || info.Types[expr].IsNil() {
@@ -615,7 +615,7 @@ func returnedError(info *types.Info, parent ast.Node, expr ast.Expr, sig *types.
 	return i >= 0 && types.Identical(sig.Results().At(i).Type(), types.Universe.Lookup("error").Type())
 }
 
-// errorfFormat は、lit が fmt.Errorf の書式の引数かを返す。
+// errorfFormat reports whether lit is the format argument of fmt.Errorf.
 func errorfFormat(info *types.Info, parent ast.Node, lit *ast.BasicLit) bool {
 	call, ok := parent.(*ast.CallExpr)
 	if !ok || lit.Kind != token.STRING || len(call.Args) == 0 || call.Args[0] != lit {
@@ -625,8 +625,8 @@ func errorfFormat(info *types.Info, parent ast.Node, lit *ast.BasicLit) bool {
 	return ok && fn.Pkg() != nil && fn.Pkg().Path() == "fmt" && fn.Name() == "Errorf"
 }
 
-// unwrapVerbs は、書式の字句 s の %w をすべて %v にした字句を返す。%w がなければ false を返す。
-// %% は動詞ではないので飛ばし、フラグ、幅、精度、引数の番号（%[1]w）は残す。
+// unwrapVerbs returns the format literal s with every %w turned into %v, or false when there is no %w.
+// %% is not a verb and is skipped; flags, width, precision, and argument indexes (%[1]w) are kept.
 func unwrapVerbs(s string) (string, bool) {
 	b := []byte(s)
 	changed := false
@@ -647,15 +647,15 @@ func unwrapVerbs(s string) (string, bool) {
 	return string(b), changed
 }
 
-// literalMutant は、リテラルの変異体の演算子と置き換え後の字句である。
+// literalMutant is the mutator and replacement text of a literal mutant.
 type literalMutant struct {
 	typ  Type
 	text string
 }
 
-// literalMutants は、数値のリテラル lit を 1 増やす変異体と 1 減らす変異体を返す。parent は lit の親のノードである。
-// 置き換え後の字句は 10 進で書き、負なら括弧で囲む（a-0 を a--1 にしない）。浮動小数点数は小数点か指数を必ず含め、整数の定数にしない。
-// make の容量と map の大きさの見込みは、変えても振る舞いが変わらないので変異しない。
+// literalMutants returns the mutants adding 1 to and subtracting 1 from the numeric literal lit. parent is lit's parent node.
+// The replacement is written in decimal and parenthesized when negative (so a-0 does not become a--1). A float always has a decimal point or an exponent, so it does not become an integer constant.
+// The capacity of make and the size hint of a map are not mutated, as changing them does not change behavior.
 func literalMutants(info *types.Info, lit *ast.BasicLit, parent ast.Node, enabled []Type) []literalMutant {
 	if sizeHint(info, lit, parent) {
 		return nil
@@ -682,7 +682,7 @@ func literalMutants(info *types.Info, lit *ast.BasicLit, parent ast.Node, enable
 			to  float64
 		}{{FloatIncrement, f + 1}, {FloatDecrement, f - 1}} {
 			if d.to == f || !slices.Contains(enabled, d.typ) {
-				// 大きすぎて 1 の差を表せない値は変異しない。
+				// Values too large to show a difference of 1 are not mutated.
 				continue
 			}
 			s := strconv.FormatFloat(d.to, 'g', -1, 64)
@@ -695,7 +695,7 @@ func literalMutants(info *types.Info, lit *ast.BasicLit, parent ast.Node, enable
 	return out
 }
 
-// signed は、負の数の字句を括弧で囲む。
+// signed parenthesizes the text of a negative number.
 func signed(s string) string {
 	if strings.HasPrefix(s, "-") {
 		return "(" + s + ")"
@@ -703,7 +703,7 @@ func signed(s string) string {
 	return s
 }
 
-// sizeHint は、lit が make の容量（3 つ目の引数）か、map の make の大きさの見込み（2 つ目の引数）かを返す。
+// sizeHint reports whether lit is the capacity of make (the third argument) or the size hint of make for a map (the second argument).
 func sizeHint(info *types.Info, lit *ast.BasicLit, parent ast.Node) bool {
 	call, ok := parent.(*ast.CallExpr)
 	if !ok || len(call.Args) < 2 {
@@ -723,7 +723,7 @@ func sizeHint(info *types.Info, lit *ast.BasicLit, parent ast.Node) bool {
 	return isMap && call.Args[1] == lit
 }
 
-// returnsNothing は、call が値を返さない関数の呼び出しかを返す。型の変換や組み込み関数の呼び出しは含めない（panic は含める）。
+// returnsNothing reports whether call calls a function that returns no value. Conversions and builtin calls are not included (panic is).
 func returnsNothing(info *types.Info, call *ast.CallExpr) bool {
 	tv, ok := info.Types[call]
 	if !ok || tv.IsType() {
@@ -733,7 +733,7 @@ func returnsNothing(info *types.Info, call *ast.CallExpr) bool {
 	return ok && tuple.Len() == 0
 }
 
-// isUniverseBool は、id が宇宙スコープの定数 true か false を指すかを返す。
+// isUniverseBool reports whether id refers to the universe-scope constant true or false.
 func isUniverseBool(info *types.Info, id *ast.Ident) bool {
 	if id.Name != "true" && id.Name != "false" {
 		return false
@@ -741,7 +741,7 @@ func isUniverseBool(info *types.Info, id *ast.Ident) bool {
 	return info.Uses[id] == types.Universe.Lookup(id.Name)
 }
 
-// identity は識別子を作る。to は置き換え後の文字列で、演算子の変異では字句の文字列なので、表現を広げる前と同じ識別子になる。
+// identity builds an identifier. to is the replacement text; for an operator mutation it is the token's text, so the identifier is the same as before the representation was widened.
 func identity(rel, scope string, path []int, typ Type, to string) string {
 	sum := sha256.Sum256([]byte(strings.Join([]string{rel, scope, joinPath(path), string(typ), to}, "\x00")))
 	return fmt.Sprintf("%s::%s::%s::%s", rel, typ, scope, hex.EncodeToString(sum[:5]))
@@ -760,7 +760,7 @@ func joinPath(path []int) string {
 	return strings.Join(parts, ".")
 }
 
-// DeclName は、最上位の宣言 n の名前を、変異体の識別子の宣言の部分と同じ形（関数は F、メソッドは T.M）で返す。
+// DeclName returns the name of the top-level declaration n in the same form as the declaration part of mutant identifiers (F for a function, T.M for a method).
 func DeclName(n ast.Node) string { return declName(n) }
 
 func declName(n ast.Node) string {
@@ -799,7 +799,7 @@ func recvName(e ast.Expr) string {
 	return "_"
 }
 
-// Apply は、変異体の区間を置き換えたファイルの内容を返す。
+// Apply returns the file contents with the mutant's range replaced.
 func (m *Mutant) Apply(src []byte) []byte {
 	out := make([]byte, 0, len(src)+len(m.ReplacementText))
 	out = append(out, src[:m.Offset]...)
@@ -808,14 +808,14 @@ func (m *Mutant) Apply(src []byte) []byte {
 	return out
 }
 
-// CheckViability は、変異体ごとに変異後のパッケージを型検査し、Viable を設定する。
+// CheckViability type-checks the mutated package for each mutant and sets Viable.
 func CheckViability(pkg *load.Package, mutants []*Mutant) {
 	CheckViabilityWith(pkg, mutants, nil)
 }
 
-// CheckViabilityWith は、known が結果を知っている変異体（2 つ目の戻り値が真）はその結果を使い、
-// 残りの変異体を CPU の数まで並列に型検査して、Viable を設定する。
-// 検査が読む import 先のオブジェクトは、パッケージの最初の型検査で解決済みなので、並列に読んでよい。
+// CheckViabilityWith uses known's result for mutants whose result it knows (second result true),
+// type-checks the rest in parallel up to the number of CPUs, and sets Viable.
+// The imported objects the checks read were resolved by the package's first type-check, so reading them in parallel is safe.
 func CheckViabilityWith(pkg *load.Package, mutants []*Mutant, known func(*Mutant) (viable, ok bool)) {
 	var todo []*Mutant
 	for _, m := range mutants {

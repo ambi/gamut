@@ -5,38 +5,15 @@ depends_on: [004]
 created_at: 2026-11-20
 ---
 
-# CI のシャードと時間予算を持つ
+# Support CI shards and time budgets
 
-## 動機
+## Motivation
 
-大きなリポジトリの全体の判定は、1 台の CI では時間内に終わらない。
+Judging a large repository as a whole does not finish in time on one CI machine.
 
-## 対象範囲
+## Summary
 
-- `--shard k/n` で、変異体の識別子のハッシュで分ける。同じ変異体はいつも同じシャードに入る。
-- シャードごとのキャッシュと報告を、`gamut merge` で 1 つにまとめる。
-- `--time-budget <duration>` で、予算を超えたら新しい変異体を始めず、残りを `PENDING` として報告する。キャッシュには判定済みのものだけを書く。
-
-## 対象外
-
-- CI ごとの設定例のうち GitHub 以外のもの。
-
-## 設計
-
-識別子のハッシュで分けると、変異体が増えても他のシャードの割り当てが変わらず、シャードごとのキャッシュが効き続ける。
-
-## 完了の条件
-
-- 固定モジュールを 2 つのシャードで実行してまとめた報告が、1 回で実行した報告と一致する。
-- 予算を小さくすると、残りが `PENDING` になり、次の実行で続きから判定される。
-
-## 検証
-
-- 端から端までのテスト。
-
-## 要約
-
-- `-shard k/n`（`run.Shard`）は、識別子の FNV-1a ハッシュで変異体を分け、シャードの外を `PENDING` にする。作業項目の `--shard` と `--time-budget` は、gamut のほかのフラグに合わせて 1 つのハイフンで書く。
-- `gamut merge` は、報告を `report.Merge`（同じ変異体は `PENDING` でない判定を採り、数え直す）で、キャッシュを `cache.Merge`（同じ版と環境のものだけ、quick の記録は捨てる）でまとめ、要約と品質の条件の終了コードを返す。
-- `-time-budget` は、gamut の起動からの時間で、予算を過ぎたら実行の待ち行列から新しい変異体を始めずに `PENDING` にし、キャッシュに書かない。予算を付けた実行は、変更のない再実行の近道を使わない。
-- 端から端までのテストで、固定モジュールを 2 つのシャードで実行してまとめた報告の状態が 1 回の実行と一致し、各シャードが一部だけを互いに重ならず判定し、まとめたキャッシュで実行し直すと判定をすべて再利用することを表明した（`TestShard_MergeEqualsOneRun`）。予算を 1 ナノ秒にすると実行の要る変異体が `PENDING` になってキャッシュに書かれず、次の実行で判定されることも表明した（`TestTimeBudget_LeavesTheRestPending`）。
+- `-shard k/n` (`run.Shard`) splits mutants by the FNV-1a hash of their identifiers and reports the rest as `PENDING`. Splitting by identifier keeps other shards' assignments stable as mutants change, so per-shard caches stay effective.
+- `gamut merge` combines the reports with `report.Merge` (the non-`PENDING` verdict wins; counts are recomputed) and the caches with `cache.Merge` (same version and environment only; quick records are dropped), and returns the summary and the quality gate's exit code.
+- `-time-budget` counts from gamut's start; past it, no new mutant starts, the rest are `PENDING` and not cached. Runs with a budget skip the unchanged-rerun shortcut.
+- `TestShard_MergeEqualsOneRun` and `TestTimeBudget_LeavesTheRestPending` assert both.

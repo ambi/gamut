@@ -8,7 +8,7 @@ import (
 	"github.com/ambi/gamut/internal/cache"
 )
 
-// TestStore_KeepsTheLastRunsReport は、実行の報告をキャッシュに残し、シャードをまとめるときに読み出せることを確かめる。
+// TestStore_KeepsTheLastRunsReport checks that a run's report stays in the cache and can be read when merging shards.
 func TestStore_KeepsTheLastRunsReport(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cache.json")
 	if _, err := cache.ReadLast(path); err == nil {
@@ -28,7 +28,7 @@ func TestStore_KeepsTheLastRunsReport(t *testing.T) {
 	if err := s.Save(); err != nil {
 		t.Fatal(err)
 	}
-	// 開き直しても、次の実行が書くまでは前の報告を保つ。
+	// Reopening keeps the previous report until the next run writes one.
 	s, err = cache.Open(path, "env")
 	if err != nil {
 		t.Fatal(err)

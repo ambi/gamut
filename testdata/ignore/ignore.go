@@ -1,15 +1,15 @@
-// Package ignore は、無効化コメントの各形式を持つ。端から端までのテストが、止めた変異体だけが報告の ignored に入ることを確かめる。
+// Package ignore has every form of disable comment. The end-to-end test checks that only the stopped mutants go into the report's ignored.
 package ignore
 
-// Sum は、止めない変異体を持つ。
+// Sum has mutants that are not stopped.
 func Sum(a, b int) int { return a + b }
 
-// Cached は、行末のコメントで止める。
+// Cached is stopped by a comment at the end of a line.
 func Cached(a, b int) int {
 	return a * b //gamut:ignore -- the product is only a cache key
 }
 
-// Fast は、関数の宣言の直前のコメントで、関数全体を止める。
+// Fast is stopped as a whole by a comment right before its declaration.
 //
 //gamut:ignore -- a fast path with the same result as Slow
 func Fast(a, b int) bool {
@@ -19,7 +19,7 @@ func Fast(a, b int) bool {
 	return a-b < 0
 }
 
-// Ranged は、範囲で ARITHMETIC_BASE だけを止める。比較は止めない。
+// Ranged stops only ARITHMETIC_BASE in a range, not the comparison.
 func Ranged(a, b int) bool {
 	//gamut:ignore-start ARITHMETIC_BASE -- defensive arithmetic
 	x := a + b
@@ -28,7 +28,7 @@ func Ranged(a, b int) bool {
 	return x > y
 }
 
-// NoReason は、理由のないコメントを持つ。止めるが警告する。
+// NoReason has a comment without a reason. It is stopped, with a warning.
 func NoReason(a, b int) int {
 	return a - b //gamut:ignore
 }

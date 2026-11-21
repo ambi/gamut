@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-// gamut は、gamut を args で実行し、報告の変異体、標準エラー出力、終了コードを返す。報告は終了コードが 0 のときだけ読む。
+// gamut runs gamut with args and returns the report's mutants, stderr, and the exit code. The report is read only when the exit code is 0.
 func gamut(t *testing.T, args ...string) ([]mutation, string, int) {
 	t.Helper()
 	reportPath := filepath.Join(t.TempDir(), "report.json")
@@ -32,7 +32,7 @@ func mustGamut(t *testing.T, args ...string) ([]mutation, string) {
 	return ms, stderr
 }
 
-// gitRepo は、dir を 1 回コミットした Git リポジトリにする。
+// gitRepo turns dir into a Git repository with one commit.
 func gitRepo(t *testing.T, dir string) {
 	t.Helper()
 	gitIn(t, dir, "init", "-q", "-b", "main")
@@ -54,7 +54,7 @@ func gitIn(t *testing.T, dir string, args ...string) {
 	}
 }
 
-// byScope は、変異体を囲む宣言ごとに、状態を並べる。
+// byScope lists the statuses of mutants per enclosing declaration.
 func byScope(ms []mutation) map[string][]string {
 	out := map[string][]string{}
 	for _, m := range ms {
@@ -109,7 +109,7 @@ func TestSince_JudgesOnlyMutantsInTheDiff(t *testing.T) {
 		}
 		with, _ := mustGamut(t, "-q", "-cache", cachePath, "-since", "HEAD", "-include-test-changes", dir)
 		for _, m := range with {
-			// 前回 KILLED でない Score の変異体（生き残り）は、変えたテスト TestScore が到達するので再検査する。
+			// Score's mutants not KILLED last time (survivors) are rechecked because the changed test TestScore reaches them.
 			if m.scope() == "Score" && m.Status == "Pending" && !slices.ContainsFunc(before, func(b mutation) bool { return b.ID == m.ID && b.Status == "Killed" }) {
 				t.Errorf("with -include-test-changes: %s stays PENDING", m.ID)
 			}
@@ -121,7 +121,7 @@ func TestSince_JudgesOnlyMutantsInTheDiff(t *testing.T) {
 	})
 
 	t.Run("mutants whose killer was deleted are rechecked outside the diff", func(t *testing.T) {
-		// 前回の判定をキャッシュに揃える。
+		// Bring the previous verdicts into the cache.
 		full, _ := mustGamut(t, "-q", "-cache", cachePath, dir)
 		killedByClamp := map[string]bool{}
 		for _, m := range full {
@@ -145,7 +145,7 @@ func TestSince_JudgesOnlyMutantsInTheDiff(t *testing.T) {
 			}
 		}
 
-		// 残った検出テスト TestScore も消すと、Clamp と Score の変異体はどのテストにも検出されなくなる。
+		// Also removing the remaining detecting test TestScore leaves the mutants of Clamp and Score undetected by any test.
 		commit(t, dir)
 		replace(t, dir, "reuse_test.go", "func TestScore(", "func removedScore(")
 		ms, _ = mustGamut(t, "-q", "-cache", cachePath, "-since", "HEAD", dir)
@@ -196,11 +196,11 @@ func TestMutant_RerunsOnlyTheNamedMutant(t *testing.T) {
 	if ms[0].Status != "Killed" || ms[0].Cached {
 		t.Errorf("after adding a test: %s cached=%t, want executed and KILLED", ms[0].Status, ms[0].Cached)
 	}
-	// 被覆を測り直すのは、指定した変異体の変異箇所に到達していた（そして変わった）TestIsAdult だけである。
+	// Only TestIsAdult, which reached the selected mutant's site (and changed), has its coverage remeasured.
 	if !strings.Contains(stderr, "coverage: 1 tests measured (1 one by one), 1 restored") {
 		t.Errorf("want only TestIsAdult measured, log:\n%s", stderr)
 	}
-	// 判定はキャッシュに書き戻され、次の実行で再利用される。
+	// The verdict is written back to the cache and reused in the next run.
 	again, _ := mustGamut(t, "-q", "-cache", cachePath, dir)
 	for _, m := range again {
 		if m.ID == survivor.ID && (m.Status != "Killed" || !m.Cached) {
@@ -245,14 +245,14 @@ func TestIntegration_DetectsWithReverseDependencyTests(t *testing.T) {
 			t.Errorf("%s killed by %q, want a test of integration/app", m.ID, m.KilledBy)
 		}
 	}
-	// unrelated の 2 件は、まとめた 1 回の実行で到達がないと分かるので、1 件ずつは測らない。
+	// The two tests of unrelated are found to reach nothing in one combined run, so they are not measured one by one.
 	if !strings.Contains(stderr, "coverage: 5 tests measured (3 one by one)") {
 		t.Errorf("want unrelated's tests measured in one probe, log:\n%s", stderr)
 	}
 	if !strings.Contains(stderr, "integration: integration/lib: no test of integration/unrelated reaches a mutated site") {
 		t.Errorf("want unrelated reported as unreached, log:\n%s", stderr)
 	}
-	// 変更のない次の実行では、被覆の記録を戻し、判定を再利用するので、逆依存パッケージのテストバイナリをビルドしない。
+	// The next unchanged run restores coverage records and reuses verdicts, so no reverse dependency test binary is built.
 	again, stderr := mustGamut(t, "-cache", cachePath, "-integration", lib)
 	if strings.Contains(stderr, "build: integration/") && strings.Contains(stderr, "rewritten") {
 		t.Errorf("want no reverse dependency built on an unchanged rerun, log:\n%s", stderr)
@@ -260,7 +260,7 @@ func TestIntegration_DetectsWithReverseDependencyTests(t *testing.T) {
 	if got := status(again); got["Add ARITHMETIC_BASE"] != "Killed" || got["Triple ARITHMETIC_BASE"] != "Killed" {
 		t.Errorf("rerun with -integration: %v, want both KILLED", got)
 	}
-	// app の検出テストを変えると、app のテストバイナリだけをビルドし直し、どのテストも到達しない unrelated はビルドしない。
+	// Changing app's detecting test rebuilds only app's test binary, not unrelated's, which no test reaches.
 	replace(t, filepath.Join(dir, "app"), "app_test.go", "\tif got := Sum3(1, 2, 3); got != 6 {", "\tgot := Sum3(1, 2, 3)\n\tif got != 6 {")
 	third, stderr := mustGamut(t, "-cache", cachePath, "-integration", lib)
 	if !strings.Contains(stderr, "build: integration/app with") || builds(stderr, "integration/unrelated") {
@@ -271,7 +271,7 @@ func TestIntegration_DetectsWithReverseDependencyTests(t *testing.T) {
 	}
 }
 
-// builds は、ログの build の行のどれかが pkg をビルドしたかを返す。
+// builds reports whether any build line of the log built pkg.
 func builds(log, pkg string) bool {
 	for line := range strings.Lines(log) {
 		if strings.HasPrefix(line, "build: ") && slices.Contains(strings.Fields(line), pkg) {
@@ -281,7 +281,7 @@ func builds(log, pkg string) bool {
 	return false
 }
 
-// copyTree は、src のディレクトリの木を一時ディレクトリへ写す。
+// copyTree copies the directory tree src to a temporary directory.
 func copyTree(t *testing.T, src string) string {
 	t.Helper()
 	dst := t.TempDir()

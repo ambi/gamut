@@ -6,8 +6,8 @@ import (
 	"testing"
 )
 
-// TestReady は、Ready が偽を返すと、自分の pid を ORPHAN_PIDFILE に書いて眠る子プロセスを起動し、その終了を待つ。
-// 時間切れでテストバイナリだけを止めると、この子プロセスが残る。
+// TestReady, when Ready returns false, starts a child process that writes its pid to ORPHAN_PIDFILE and sleeps, and waits for it to exit.
+// Stopping only the test binary on a timeout would leave this child process behind.
 func TestReady(t *testing.T) {
 	if Ready(1) {
 		return

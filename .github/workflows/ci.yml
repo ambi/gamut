@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   verify:
-    # Windows は、テストバイナリのプロセスの扱いを確かめてから加える（work-items/033）。
+    # Windows is added once the handling of test binary processes is verified (work-items/033).
     strategy:
       fail-fast: false
       matrix:

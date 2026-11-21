@@ -1,40 +1,28 @@
 ---
 status: pending
-stage: 公開
+stage: release
 depends_on: [002, 030]
 created_at: 2026-11-21
 ---
 
-# Windows で判定が macOS と Linux と一致することを確かめる
+# Verify that verdicts on Windows match macOS and Linux
 
-## 動機
+## Motivation
 
-テストバイナリを止める処理は、Unix ではプロセスグループごと `SIGKILL` を送るが、Windows ではテストバイナリだけを止める。
-テストが起動した子プロセスが残り、出力の管を握ったまま待ちを延ばしうる。
-判定のテストのプロセスはファイル記述子 3 で結果を返すが、Windows での `ExtraFiles` の扱いを確かめていない。
-Windows では、どの機能も動かして確かめていない。
+On Unix, stopping a test binary sends `SIGKILL` to its process group, but on Windows only the test binary stops, so child processes may remain and hold the output pipe. The judging test returns results on file descriptor 3, and `ExtraFiles` on Windows is unverified. Nothing has been run on Windows.
 
-## 対象範囲
+## Scope
 
-- Windows の CI で、端から端までのテストと canary の検算を通す。
-- 時間切れと取り消しで、子プロセスごと止める（Job Object）。
-- 判定のテストのプロセスの結果の受け渡しが Windows で動くことを確かめ、動かなければ別の手段（名前付きパイプなど）にする。
-- パスの区切り（識別子と報告の `files[].path` は `/`）と改行（CRLF のソースでの位置と差分の字句）を確かめる。
+- Pass the end-to-end tests and the canary check in Windows CI.
+- Stop child processes too on timeouts and cancellation (Job Object).
+- Verify that the judging test's result channel works on Windows, or switch to another channel (such as a named pipe).
+- Check path separators (identifiers and report paths use `/`) and line endings (positions and diff tokens in CRLF sources).
 
-## 対象外
+## Design
 
-- Windows に固有の変異演算子や arid の規則。
+A Job Object may need `golang.org/x/sys/windows`. Check first whether the standard library's `syscall` suffices; if an external module is added, write in the design why it beats the standard library.
 
-## 設計
+## Completion criteria
 
-Job Object を使うには `golang.org/x/sys/windows` が要りうる。標準ライブラリの `syscall` で書けるかを先に確かめ、外部モジュールを足すなら、標準ライブラリで書く案と比べた理由を設計に書く。
-
-## 完了の条件
-
-- Windows の CI で、`mise run verify` に相当する検査がすべて通る。
-- 子プロセスを起動するテストの時間切れで、子プロセスが残らない。
-
-## 検証
-
-- Windows の CI の実行結果。
-- 子プロセスを残すテストを持つ固定モジュールでの、端から端までのテスト。
+- Windows CI passes the equivalent of `mise run verify`.
+- A test that starts child processes leaves none behind after a timeout.

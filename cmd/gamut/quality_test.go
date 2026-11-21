@@ -7,14 +7,14 @@ import (
 	"testing"
 )
 
-// qualityModule は、重要領域の関数 Fee に生き残りを 1 体（LIVED）持ち、ほかの変異体は検出されるモジュールを作る。
+// qualityModule creates a module with one survivor (LIVED) in the critical function Fee, where the other mutants are detected.
 func qualityModule(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	write(t, dir, "go.mod", "module quality\n\ngo 1.27.4\n")
 	write(t, dir, "fee.go", `package quality
 
-// Fee は金額を計算する。
+// Fee computes an amount of money.
 //
 //gamut:critical
 func Fee(a int) int { return a * 2 }
@@ -47,11 +47,11 @@ func TestQuality_CriticalSurvivorsFailUntilAccepted(t *testing.T) {
 	if code != exitQuality || !strings.Contains(stderr, "1 survivors in critical regions") {
 		t.Fatalf("exit %d, want %d for the critical survivor:\n%s", code, exitQuality, stderr)
 	}
-	// 変更のない再実行は前回の報告を返すが、品質の条件は同じく当てる。
+	// An unchanged rerun returns the previous report, and the quality gate applies the same way.
 	if code, stderr := exit(t, "-cache", cachePath, "-only", "ARITHMETIC_BASE", dir); code != exitQuality {
 		t.Errorf("unchanged rerun: exit %d, want %d:\n%s", code, exitQuality, stderr)
 	}
-	// 品質の条件を満たさなくても、報告は書く。
+	// The report is written even when the quality gate fails.
 	reportPath := filepath.Join(t.TempDir(), "report.json")
 	if code, _ := exit(t, "-no-cache", "-only", "ARITHMETIC_BASE", "-o", reportPath, dir); code != exitQuality {
 		t.Fatalf("exit %d, want %d", code, exitQuality)
@@ -85,7 +85,7 @@ func TestQuality_GlobsThresholdsAndFailOnSurvived(t *testing.T) {
 		{"no conditions", nil, exitOK, ""},
 		{"a critical glob", []string{"-critical", "fee.go"}, exitQuality, "1 survivors in critical regions"},
 		{"a glob elsewhere", []string{"-critical", "plain.go"}, exitOK, ""},
-		// 2 体のうち 1 体を検出するので、点数は 50%。
+		// One of the two is detected, so the score is 50%.
 		{"a break threshold above the score", []string{"-threshold-break", "60"}, exitQuality, "below the break threshold 60%"},
 		{"a break threshold at the score", []string{"-threshold-break", "50"}, exitOK, ""},
 		{"fail on survived", []string{"-fail-on-survived"}, exitQuality, "1 survivors with -fail-on-survived"},
@@ -100,7 +100,7 @@ func TestQuality_GlobsThresholdsAndFailOnSurvived(t *testing.T) {
 			}
 		})
 	}
-	// 設定ファイルの項目も同じ意味を持つ。
+	// The config file keys mean the same.
 	write(t, dir, "gamut.json", `{"critical": ["fee.go"], "thresholds": {"break": 60}, "fail_on_survived": true}`)
 	code, stderr := exit(t, "-no-cache", "-only", "ARITHMETIC_BASE", dir)
 	for _, msg := range []string{"critical regions", "break threshold", "-fail-on-survived"} {
@@ -118,8 +118,8 @@ func TestQuality_BaselineAndSelfCheckFailures(t *testing.T) {
 	if code, stderr := exit(t, "-no-cache", baseline); code != exitBaseline {
 		t.Errorf("failing baseline: exit %d, want %d:\n%s", code, exitBaseline, stderr)
 	}
-	// 対象のコードが panic を握りつぶすと、forced fail がテストに届かない。
-	// RETURN_ZERO の箇所は defer より前の関数の入口にあり、そこでの panic は握りつぶされないので、演算子を絞る。
+	// When the code under test swallows panics, forced fail does not reach the tests.
+	// The RETURN_ZERO site is at the function entry before the defer, where a panic is not swallowed, so the mutators are narrowed.
 	selfCheck := t.TempDir()
 	write(t, selfCheck, "go.mod", "module swallow\n\ngo 1.27.4\n")
 	write(t, selfCheck, "swallow.go", "package swallow\n\nfunc Sum(a, b int) (s int) {\n\tdefer func() { _ = recover() }()\n\treturn a + b\n}\n")

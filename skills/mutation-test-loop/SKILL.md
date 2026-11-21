@@ -1,61 +1,61 @@
 ---
 name: mutation-test-loop
-description: gamut が報告した生き残りの変異体を、1 体ずつテストで埋めるか、等価として受理する。変更の後にミューテーションテストの生き残りを直して、テストの弱いところを埋めて、と頼まれたときに使う。
+description: Fill the surviving mutants gamut reports one at a time with tests, or accept them as equivalent. Use when asked, after a change, to fix mutation testing survivors or to fill weak spots in the tests.
 ---
 
-# 生き残りを埋める
+# Filling survivors
 
-gamut は、コードに小さな変異（`<` を `<=` にするなど）を入れても失敗しないテストを、生き残りとして報告する。
-生き残りは、テストが見ていない振る舞いの証拠である。
-1 体ずつ、テストを足して検出させるか、どの入力でも区別できない（等価な）ものとして理由とともに受理する。
+gamut reports as survivors the small changes to the code (such as turning `<` into `<=`) that make no test fail.
+A survivor is evidence of behavior the tests do not look at.
+One at a time, either add a test that detects it, or accept it, with a reason, as one that no input can tell apart (equivalent).
 
-## 手順
+## Steps
 
-1. **生き残りを得る。** Pull Request や作業中の変更なら、基準のブランチからの差分だけを判定する。
+1. **Get the survivors.** For a pull request or work in progress, judge only the diff from the base branch.
 
    ```console
    gamut -reporter agent -since main ./path/to/pkg
    ```
 
-   全体を見るときは `-since` を外す。
-   終わりの条件：JSON の `survivors` を得た。空なら、この skill は終わりである。`warnings` があれば、手順 6 で扱う。
+   To look at everything, drop `-since`.
+   Done when: you have the JSON's `survivors`. If it is empty, this skill is finished. If there are `warnings`, handle them in step 6.
 
-2. **1 体を選ぶ。** `critical: true` の生き残りを先にする（品質の条件で CI を落とす）。同じ `declaration` の生き残りは続けて扱う。
+2. **Pick one.** Take survivors with `critical: true` first (they fail CI through the quality gate). Handle survivors of the same `declaration` one after another.
 
-3. **分類に合わせてテストを書く。** `hint` を読み、`declaration` のソースと `diff` の `before` と `after` を比べ、変異で何が変わるかを確かめてから書く。
+3. **Write a test for its class.** Read `hint`, compare the `declaration` source with `before` and `after` in `diff`, and work out what the mutation changes before you write.
 
-   | `class` | 何が足りないか | 書くテスト |
+   | `class` | What is missing | The test to write |
    | --- | --- | --- |
-   | `not covered` | どのテストもこのコードを通らない | 宣言を呼び、結果を表明するテスト |
-   | `not infected` | 通るが、変異で値が変わる入力がない | 変異で値が変わる入力（境界の比較なら両辺が等しい入力）と、その結果の表明 |
-   | `not detected` | 値は変わるが、表明が見ていない | 変異で変わる値そのもの（戻り値の全体など）の表明 |
-   | `no longer detected` | 前回検出したテスト（`previously_killed_by`）が消えた | 消えたテストを戻すか、同じことを確かめるテスト |
+   | `not covered` | No test runs this code | A test that calls the declaration and asserts its result |
+   | `not infected` | Tests run it, but no input makes the mutation change a value | An input where the mutation changes a value (for a boundary comparison, one where both sides are equal) and an assertion on the result |
+   | `not detected` | A value changes, but no assertion looks at it | An assertion on the very value the mutation changes (such as the whole return value) |
+   | `no longer detected` | The test that detected it before (`previously_killed_by`) is gone | Bring the removed test back, or write one that checks the same thing |
 
-   既存の表駆動テストがあれば、その表に行を足す。なければ `t.Run` で名前の付いた場合を足す。
-   `tests` は、この変異体に到達したテストで、宣言の名前を含むものが先に並ぶ。足す先の候補である。
-   終わりの条件：書いたテストが、`after` のコードでは失敗し、`before` のコードでは通ると説明できる。
+   If there is a table-driven test, add a row to its table. Otherwise add a named case with `t.Run`.
+   `tests` lists the tests that reached this mutant, with those containing the declaration's name first. They are the candidates to add to.
+   Done when: you can explain why the test fails on the `after` code and passes on the `before` code.
 
-4. **確かめ直す。**
+4. **Check again.**
 
    ```console
    go test ./path/to/pkg
    gamut -mutant '<id>' ./path/to/pkg
    ```
 
-   `-mutant` はキャッシュを使わずに、その変異体だけを判定する。
-   終わりの条件：`go test` が通り、その変異体が `KILLED` である。`LIVED` のままなら手順 3 に戻る。2 回書き直しても検出できなければ、手順 5 で等価かを考える。
+   `-mutant` judges only that mutant, ignoring the cache.
+   Done when: `go test` passes and the mutant is `KILLED`. If it is still `LIVED`, go back to step 3. If two rewrites still do not detect it, consider in step 5 whether it is equivalent.
 
-5. **等価なら受理する。** どの入力でも `before` と `after` の結果が同じだと、入力の範囲で説明できるときだけ受理する（例：`n == max` のとき `n` と `max` のどちらを返しても同じ）。
+5. **Accept it if it is equivalent.** Accept only when you can explain, from the range of inputs, that `before` and `after` give the same result for every input (for example, when `n == max`, returning `n` or `max` is the same).
 
    ```console
-   gamut accept -reason '<どの入力でも同じになる理由>' '<id>'
+   gamut accept -reason '<why every input gives the same result>' '<id>'
    ```
 
-   受理はモジュールのルートの `gamut.accepted.json` に記録され、以後は数えられない。
-   説明できないなら受理せず、テストが足りないものとして利用者に報告する。
-   終わりの条件：受理したか、受理しない理由を報告に書いた。
+   The acceptance is recorded in `gamut.accepted.json` at the module root, and the mutant is no longer counted.
+   If you cannot explain it, do not accept it; report it to the user as missing tests.
+   Done when: you accepted it, or wrote in the report why you did not.
 
-6. **警告を扱う。** `warnings` の、`t.Skip` で飛ばしうるテストや、テストバイナリを子プロセスで起動するテストは、判定を誤らせうる。生き残りがそのテストだけに関わるなら、そのことを報告に添える。
+6. **Handle the warnings.** Tests in `warnings` that `t.Skip` may skip, and tests that start the test binary as a child process, can mislead the verdicts. If a survivor involves only such a test, say so in the report.
 
-7. **次の生き残りへ進む。** 全部を扱ったら、手順 1 の命令をもう一度実行する。
-   終わりの条件：`survivors` が空か、残りがすべて「受理しない理由を報告したもの」である。
+7. **Move to the next survivor.** When you have handled them all, run the command of step 1 again.
+   Done when: `survivors` is empty, or every remaining one is one you reported a reason not to accept.

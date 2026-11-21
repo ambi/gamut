@@ -1,84 +1,84 @@
-# gamut の手引き：実行
+# gamut guide: running
 
-この文書は、対象の指定、フラグ、テストプロセス、重要領域と品質の条件、終了コードを説明する。
+This document covers choosing targets, the flags, test processes, critical regions and the quality gate, and exit codes.
 
-## 対象の指定
+## Choosing targets
 
 ```console
 gamut -o report.json ./path/to/package
 gamut -o report.json ./path/to/module/...
 ```
 
-引数はパッケージディレクトリか、その下のすべてのパッケージを表す `<ディレクトリ>/...` で、複数を並べられる。
-複数のパッケージを 1 回で判定し、報告を 1 つにまとめる。
-対象のパッケージは同じモジュールに属していなければならない。
-テストファイルを持たないパッケージの変異体は、ビルドせずに `NOT COVERED` とする。
-あるパッケージの変異は、そのパッケージのテストだけで判定する。別の対象パッケージのテストは、変異のない版にリンクされる。
+Each argument is a package directory, or `<directory>/...` for every package below it; you can give several.
+gamut judges all the packages in one run and writes one report.
+The target packages must belong to the same module.
+Mutants of a package without test files are reported `NOT COVERED` without a build.
+A package's mutants are judged only with that package's tests. The tests of other target packages link the unmutated code.
 
-## フラグ
+## Flags
 
-| フラグ | 既定値 | 意味 |
+| Flag | Default | Meaning |
 | --- | --- | --- |
-| `-workers` | CPU の数の半分（1 以上） | 並列に動かすテストプロセスの数 |
-| `-only` | 既定の集合 | 有効にする変異演算子（カンマ区切り）。既定で無効な演算子も選べる |
-| `-disable` | なし | 既定の集合から外す変異演算子（カンマ区切り）。`-only` とは併用できない |
-| `-list-mutators` | false | 変異演算子の名前、説明、例、既定の集合に入るかを出して終わる |
-| `-version` | false | gamut の版を出して終わる |
-| `-arid-call` | なし | この glob（`<パッケージ>.<名前>`、`<パッケージ>.<型>.<名前>`）に当たる呼び出しを、ログ出力と同じく変異しない。繰り返し指定できる |
-| `-arid-package` | なし | このパッケージとその下のパッケージの呼び出しを変異しない。繰り返し指定できる |
-| `-no-arid` | false | ログ出力など、テストが観測しないことの多いコード（arid）も変異する |
-| `-exclude-files` | なし | モジュール相対のパスがこの正規表現に当たるファイルを変異しない。繰り返し指定できる |
-| `-config` | モジュールのルートの `gamut.json` | 設定ファイルのパス |
-| `-o` | なし | JSON の報告（mutation-testing-elements の形式）の書き出し先 |
-| `-reporter` | `text`（`-o` があれば `json` も） | 報告の形式。`text`（標準出力の要約）、`json`（mutation-testing-elements の形式）、`html`、`agent`（エージェント向けの JSON を標準出力に）、`simplify`（不要かもしれないコードの候補を標準出力に）。繰り返し指定できる |
-| `-report-dir` | `.gamut/report` | `html` と、`-o` のない `json` の書き出し先 |
-| `-annotations` | なし | `github` なら、直すべき生き残りを GitHub Actions の注釈として標準出力に書く |
-| `-dry-run` | false | 変異体と構築可能性だけを一覧にする |
-| `-timeout-factor` | 5 | 選んだテストの基準の時間に掛ける係数 |
-| `-timeout-min` | 2s | 時間切れの上限に足す時間 |
-| `-q` | false | 進行状況を出さない |
-| `-tags` | なし | 読み込み、ビルド、型検査に渡すビルドタグ（カンマ区切り） |
-| `-test-flags` | なし | テストバイナリのすべての実行に渡すフラグ（空白区切り、例：`"-short"`） |
-| `-cache` | `.gamut/cache.json` | 判定と被覆の記録のキャッシュの読み書き先（作業ディレクトリからの相対） |
-| `-no-cache` | false | キャッシュを読みも書きもしない |
-| `-checkpoint-interval` | 10s | 実行中もこの間隔でキャッシュを書き出す。強制終了で失う判定を、この間隔の分までにする（0 で止める） |
-| `-since` | なし | この Git の参照と `HEAD` の merge-base から作業ツリーまでの差分に交わる変異体だけを判定し、残りを `PENDING` にする |
-| `-scope` | `node` | `-since` で差分と交わりを取る区間。`node` は変異箇所の式、`decl` は囲む宣言 |
-| `-include-test-changes` | false | `-since` で、差分が変えたテストが到達する、差分の外の生き残りも再検査する |
-| `-mutant` | なし | この識別子（一意な前方一致でもよい）の変異体だけを、キャッシュを使わずに判定する。繰り返し指定できる |
-| `-integration` | false | 対象パッケージを import するモジュール内のパッケージのテストでも検出を試す |
-| `-watch` | false | 判定を終えた後も `.go` ファイルを見張り、保存のたびに差分を判定し直す（既定の範囲は `-since HEAD -include-test-changes`）。失敗しても止まらない |
-| `-shard` | なし | `k/n` で、変異体を識別子のハッシュで n 個に分けたうちの k 番目だけを判定する。シャードのキャッシュは `gamut merge` でまとめる |
-| `-time-budget` | 0 | この時間を過ぎたら新しい変異体を始めず、残りを `PENDING` にする。同じキャッシュでの次の実行が続きから判定する |
-| `-kill-matrix` | false | 変異体ごとに感染したテストをすべて実行して検出したテストをすべて記録し、何も検出しないテスト、包含されるテスト、重複するテストを報告する。変異体ごとにプロセスを起動するので遅い |
-| `-max-depth` | 0 | テスト関数からモジュール内の関数の呼び出しでこの深さまでの到達だけを、被覆に数える（0 で制限しない）。生き残りと `NOT COVERED` が増える |
-| `-isolate` | false | テストプロセスを変異体の間で使い回さず、変異体ごとに起動する |
-| `-detect-equivalent` | false | 生き残りごとにパッケージをコンパイルし、機械語が元と同じなら `EQUIVALENT` にする（ビルドキャッシュには書かない） |
-| `-critical` | なし | モジュール相対のパスがこの glob（`**` は任意の深さ）に当たるファイルを重要領域にする。繰り返し指定できる |
-| `-threshold-high` | 80 | 点数がこれ以上なら要約に `[high]` を付ける |
-| `-threshold-low` | 60 | 点数がこれ以上なら `[low]`、未満なら `[danger]` を付ける |
-| `-threshold-break` | 0（無効） | 点数がこれ未満なら終了コード 2 で終える |
-| `-fail-on-survived` | false | 受理していない生き残りが 1 体でもあれば終了コード 2 で終える |
-| `-cpuprofile` | なし | gamut 自身の CPU プロファイルの書き出し先（gamut の開発用） |
+| `-workers` | Half the number of CPUs (at least 1) | The number of test processes running in parallel |
+| `-only` | The default set | The mutators to enable (comma-separated). Mutators off by default can be chosen too |
+| `-disable` | None | Mutators to remove from the default set (comma-separated). Cannot be combined with `-only` |
+| `-list-mutators` | false | Print each mutator's name, description, example, and whether it is in the default set, then exit |
+| `-version` | false | Print the gamut version and exit |
+| `-arid-call` | None | Leave calls matching this glob (`<package>.<Func>`, `<package>.<Type>.<Method>`) unmutated, as logging is. Repeatable |
+| `-arid-package` | None | Leave calls into this package and the packages below it unmutated. Repeatable |
+| `-no-arid` | false | Also mutate code that tests rarely observe, such as logging (arid code) |
+| `-exclude-files` | None | Do not mutate files whose module-relative path matches this regular expression. Repeatable |
+| `-config` | `gamut.json` at the module root | The path of the config file |
+| `-o` | None | Where to write the JSON report (mutation-testing-elements format) |
+| `-reporter` | `text` (plus `json` with `-o`) | The report format: `text` (the summary on stdout), `json` (mutation-testing-elements format), `html`, `agent` (JSON for agents on stdout), or `simplify` (candidates for unneeded code on stdout). Repeatable |
+| `-report-dir` | `.gamut/report` | Where to write `html`, and `json` without `-o` |
+| `-annotations` | None | With `github`, print the survivors to fix as GitHub Actions annotations on stdout |
+| `-dry-run` | false | Only list the mutants and their viability |
+| `-timeout-factor` | 5 | The factor applied to the baseline time of the selected tests |
+| `-timeout-min` | 2s | The time added to the timeout |
+| `-q` | false | Do not print progress |
+| `-tags` | None | Build tags for loading, building, and type-checking (comma-separated) |
+| `-test-flags` | None | Flags passed to every run of a test binary (space-separated, such as `"-short"`) |
+| `-cache` | `.gamut/cache.json` | Where to read and write the cache of verdicts and coverage records (relative to the working directory) |
+| `-no-cache` | false | Neither read nor write the cache |
+| `-checkpoint-interval` | 10s | Also write the cache at this interval during the run, so a hard kill loses at most this much of the verdicts (0 disables) |
+| `-since` | None | Judge only the mutants intersecting the diff from the merge-base of this Git ref and `HEAD` to the working tree, and report the rest as `PENDING` |
+| `-scope` | `node` | The range intersected with the diff under `-since`: `node` is the mutated expression, `decl` the enclosing declaration |
+| `-include-test-changes` | false | Under `-since`, also recheck survivors outside the diff that tests changed by the diff reach |
+| `-mutant` | None | Judge only the mutant with this identifier (or a unique prefix of it), ignoring the cache. Repeatable |
+| `-integration` | false | Also try to detect mutants with the tests of module packages that import the target packages |
+| `-watch` | false | After judging, keep watching `.go` files and judge the diff again on every save (the default range is `-since HEAD -include-test-changes`). Failures do not stop it |
+| `-shard` | None | With `k/n`, judge only the k-th of n groups of mutants split by a hash of their identifiers. Combine the shards' caches with `gamut merge` |
+| `-time-budget` | 0 | Once this much time has passed, start no new mutants and report the rest as `PENDING`. The next run with the same cache continues from there |
+| `-kill-matrix` | false | Run every infected test of each mutant, record every test that detects it, and report tests that detect nothing, subsumed tests, and duplicate tests. Slow, as it starts a process per mutant |
+| `-max-depth` | 0 | Count only reaches within this many calls of module functions from the test function as coverage (0: no limit). Survivors and `NOT COVERED` increase |
+| `-isolate` | false | Start a test process per mutant instead of reusing processes across mutants |
+| `-detect-equivalent` | false | Compile the package for each survivor and report it `EQUIVALENT` when its machine code equals the original's (nothing is written to the build cache) |
+| `-critical` | None | Make files whose module-relative path matches this glob (`**` for any depth) a critical region. Repeatable |
+| `-threshold-high` | 80 | Label the summary `[high]` when the score is at or above this |
+| `-threshold-low` | 60 | Label it `[low]` when the score is at or above this, and `[danger]` below it |
+| `-threshold-break` | 0 (disabled) | Exit with code 2 when the score is below this |
+| `-fail-on-survived` | false | Exit with code 2 when any unaccepted mutant survives |
+| `-cpuprofile` | None | Where to write a CPU profile of gamut itself (for developing gamut) |
 
-## テストプロセス
+## Test processes
 
-テストプロセスは、gamut の 1 回の実行の間、変異体の間で使い回す。
-変異体がプロセスの状態を汚したと分かれば、そのプロセスを捨て、新しいプロセスで判定し直す。
-判定の前に、変異がテストに届くことを 1 件のテストで確かめる（forced fail）。
-届いていなければ判定せずに終了コード 5 で止まる。
-変異を無効にした状態で失敗するテストがあるときは、そのテストの出力を見せて終了コード 4 で止まる。
+Test processes are reused across mutants during one gamut run.
+When gamut finds that a mutant has dirtied a process's state, it throws the process away and judges again in a new process.
+Before judging, gamut checks with one test that mutations reach the tests (forced fail).
+If they do not, it stops with exit code 5 without judging.
+If a test fails with every mutation disabled, gamut shows that test's output and stops with exit code 4.
 
-## 重要領域と品質の条件
+## Critical regions and the quality gate
 
-認証や金額の計算のような箇所は、重要領域にして、すべての変異体の検出か受理を求められる。
-`-critical` の glob に当たるファイルと、関数の宣言の直前に `//gamut:critical` を書いた関数が重要領域である。
-重要領域に受理していない生き残りがあるか、点数（報告の `gamut.mutationScore`：検出した変異体の、検出したものと生き残りの和に対する割合）が `-threshold-break` 未満なら、報告と要約を書いたうえで終了コード 2 で終える。
+Code such as authentication or money calculations can be made a critical region, where every mutant must be detected or accepted.
+Files matching a `-critical` glob, and functions with `//gamut:critical` right before their declaration, are critical regions.
+If a critical region has an unaccepted survivor, or the score (the report's `gamut.mutationScore`: detected mutants as a share of detected mutants plus survivors) is below `-threshold-break`, gamut writes the reports and the summary and exits with code 2.
 
-| 終了コード | 意味 |
+| Exit code | Meaning |
 | --- | --- |
-| 0 | 判定を終え、品質の条件を満たした |
-| 1 | 引数、設定、読み込み、ビルドなどの誤り |
-| 2 | 判定を終えたが、品質の条件を満たさない |
-| 4 | 変異なしでテストが失敗し、判定しなかった |
-| 5 | forced fail の自己検査で変異がテストに届かないと分かり、判定しなかった |
+| 0 | Judging finished and the quality gate passed |
+| 1 | An error in the arguments, the configuration, loading, building, and so on |
+| 2 | Judging finished but the quality gate failed |
+| 4 | Tests failed without mutations, so nothing was judged |
+| 5 | The forced fail self-check found that mutations do not reach the tests, so nothing was judged |

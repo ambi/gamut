@@ -19,9 +19,9 @@ linters:
   settings:
     gosec:
       excludes:
-        - G204 # go コマンドとテストバイナリの起動は本ツールの目的そのものである
-        - G304 # 読み書きするパスは利用者が指定したパッケージと一時ディレクトリに限られる
-        - G703 # G304 と同じ理由。パスの汚染の解析版である
+        - G204 # starting the go command and test binaries is the very purpose of this tool
+        - G304 # the paths read and written are limited to the packages the user names and temporary directories
+        - G703 # the same reason as G304; this is its path-taint analysis
         - G306
     gocritic:
       enabled-tags: [diagnostic, performance, style]

@@ -1,4 +1,4 @@
-// Command gamut は、Go のパッケージにミューテーションテストを行う。
+// Command gamut runs mutation testing on Go packages.
 package main
 
 import (
@@ -38,16 +38,16 @@ func main() {
 	os.Exit(realMain(os.Args[1:], os.Stdout, os.Stderr))
 }
 
-// 終了コードである。
+// Exit codes.
 const (
 	exitOK = 0
-	// exitError は、引数、設定、読み込み、ビルドなどの誤りである。
+	// exitError is an error in the arguments, the configuration, loading, building, and so on.
 	exitError = 1
-	// exitQuality は、判定を終えたが品質の条件（重要領域、閾値、-fail-on-survived）を満たさないことである。
+	// exitQuality means judging finished but the quality gate (critical regions, thresholds, -fail-on-survived) failed.
 	exitQuality = 2
-	// exitBaseline は、変異なしでテストが失敗し、判定しなかったことである。
+	// exitBaseline means tests failed without mutations, so nothing was judged.
 	exitBaseline = 4
-	// exitSelfCheck は、forced fail の自己検査で変異がテストに届かないと分かり、判定しなかったことである。
+	// exitSelfCheck means the forced fail self-check found that mutations do not reach the tests, so nothing was judged.
 	exitSelfCheck = 5
 )
 
@@ -64,21 +64,21 @@ func realMain(args []string, stdout, stderr io.Writer) int {
 	return judge(args, stdout, stderr, modeJudge)
 }
 
-// mode は、judge の動き方である。
+// mode is how judge behaves.
 type mode int
 
 const (
-	// modeJudge は変異体を判定する。
+	// modeJudge judges mutants.
 	modeJudge mode = iota
-	// modePrune は、判定の後に、要らなくなった受理を受理の記録から消す（gamut accept -prune）。
+	// modePrune removes acceptances no longer needed from the record after judging (gamut accept -prune).
 	modePrune
-	// modeSelectTests は、何も実行せず、差分が壊しうるテストをキャッシュから選んで出す（gamut select-tests）。
+	// modeSelectTests runs nothing and prints the tests the diff may break, selected from the cache (gamut select-tests).
 	modeSelectTests
 )
 
-// mergeMain は、gamut merge を実行する。-shard で分けて実行したシャードのキャッシュから、判定の報告とキャッシュをそれぞれ 1 つにまとめる。
-// 報告は、各キャッシュに残したそのシャードの実行の報告からまとめ、報告のファイルは読まない。
-// まとめた報告の要約を標準出力に書き、品質の条件を満たさなければ終了コード 2 を返す。
+// mergeMain runs gamut merge: it combines the caches of shards run with -shard into one report and one cache.
+// The report is combined from the shard runs' reports kept in each cache; report files are not read.
+// It writes the combined report's summary to stdout and returns exit code 2 when the quality gate fails.
 func mergeMain(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("gamut merge", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -96,7 +96,7 @@ func mergeMain(args []string, stdout, stderr io.Writer) int {
 		fs.Usage()
 		return exitError
 	}
-	// 各シャードのキャッシュに残した、そのシャードの実行の報告をまとめる。
+	// Combine the reports of the shard runs kept in each shard's cache.
 	var reps []*report.Report
 	for _, path := range fs.Args() {
 		data, err := cache.ReadLast(path)
@@ -117,7 +117,7 @@ func mergeMain(args []string, stdout, stderr io.Writer) int {
 		return exitError
 	}
 	if *output != "" {
-		// 報告は元のソースを埋め込む。シャードが判定したモジュールのディレクトリがここにもあればそれを、なければ作業ディレクトリのモジュールを読む。
+		// The report embeds the original sources: from the module directory the shards judged if it exists here, otherwise from the working directory's module.
 		dir := rep.ModuleDir
 		if _, err := os.Stat(filepath.Join(dir, "go.mod")); dir == "" || err != nil {
 			if dir, err = moduleRoot(); err != nil {
@@ -144,10 +144,10 @@ func mergeMain(args []string, stdout, stderr io.Writer) int {
 	return qualityCode(rep, *failOnSurvived, stderr)
 }
 
-// acceptMain は、gamut accept を実行する。
-// 識別子を渡せば、モジュールのルートの受理の記録に足す。-prune なら、残りの引数で判定し、要らなくなった受理を消す。
+// acceptMain runs gamut accept.
+// Given identifiers, it adds them to the acceptance record at the module root. With -prune, it judges with the remaining arguments and removes acceptances no longer needed.
 func acceptMain(args []string, stdout, stderr io.Writer) int {
-	// -prune の後ろは判定のフラグとパターンなので、accept のフラグとして解釈しない。
+	// What follows -prune are judging flags and patterns, so they are not parsed as accept flags.
 	if len(args) > 0 && (args[0] == "-prune" || args[0] == "--prune") {
 		return judge(args[1:], stdout, stderr, modePrune)
 	}
@@ -155,7 +155,7 @@ func acceptMain(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	reason := fs.String("reason", "", "why the mutants are equivalent (required unless -prune)")
 	dir := fs.String("dir", ".", "a directory inside the module whose "+accept.FileName+" to update")
-	// -prune は先頭でだけ受け付ける。ここでは使い方に載せるために定義する。
+	// -prune is accepted only first; it is defined here to appear in the usage.
 	prune := fs.Bool("prune", false, "as the first argument: judge the packages given as the remaining arguments (with any gamut flags) and remove acceptances that a test now detects or whose mutant is gone")
 	fs.Usage = func() {
 		fmt.Fprintln(stderr, "usage: gamut accept -reason <text> [-dir <dir>] <mutant-id>...")
@@ -200,7 +200,7 @@ func acceptMain(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// judge は、パッケージの変異体を判定する。動き方は m が決める。
+// judge judges the mutants of the packages, behaving as m says.
 func judge(args []string, stdout, stderr io.Writer, m mode) int {
 	prune := m == modePrune
 	fs := flag.NewFlagSet("gamut", flag.ContinueOnError)
@@ -281,7 +281,7 @@ func judge(args []string, stdout, stderr io.Writer, m mode) int {
 				inner = append(inner, a)
 			}
 		}
-		// 既定の範囲は、HEAD からの差分と、変わったテストが到達する生き残りである。
+		// The default range is the diff from HEAD plus the survivors changed tests reach.
 		if *since == "" {
 			inner = append([]string{"-since", "HEAD"}, inner...)
 			if !*includeTestChanges {
@@ -313,7 +313,7 @@ func judge(args []string, stdout, stderr io.Writer, m mode) int {
 		return 1
 	}
 	earlyDir := load.ModuleRoot(strings.TrimSuffix(abs[0], string(filepath.Separator)+"..."))
-	// 設定ファイルの値は、指定されなかったフラグにだけ入れる。
+	// Config file values go only into flags not given on the command line.
 	cfg, err := readConfig(*configPath, earlyDir)
 	if err != nil {
 		fmt.Fprintln(stderr, "gamut:", err)
@@ -386,12 +386,12 @@ func judge(args []string, stdout, stderr io.Writer, m mode) int {
 		"test-flags=" + strings.Join(flags, " "),
 		fmt.Sprintf("timeout=%g,%s", *timeoutFactor, *timeoutMin),
 	}
-	// 深さの制限は到達の記録を変えるので、キャッシュの環境に含める。付けないときは足さず、既存のキャッシュを保つ。
+	// The depth limit changes reach records, so it is part of the cache environment. Without it nothing is added, keeping existing caches.
 	if *maxDepth > 0 {
 		settings = append(settings, fmt.Sprintf("max-depth=%d", *maxDepth))
 	}
-	// 選択のない実行は、入力が前回と同じなら、読み込みもビルドもせずに前回の報告を返す。
-	// 予算で残した変異体があると、前回の報告は続きを含まないので、近道を使わない。
+	// A run without selection returns the previous report, without loading or building, when the inputs match the previous run.
+	// When a budget left mutants pending, the previous report lacks the rest, so the shortcut is not used.
 	quickable := !*noCache && !*dryRun && len(ids) == 0 && *since == "" && m == modeJudge && *timeBudget == 0
 	var early *cache.Store
 	if !*noCache && earlyDir != "" {
@@ -402,7 +402,7 @@ func judge(args []string, stdout, stderr io.Writer, m mode) int {
 	}
 	var quickKey string
 	if quickable {
-		// 報告を変えるフラグはすべて鍵に入れる。品質の条件の -fail-on-survived は報告を変えず、再生した報告に当てる。
+		// Every flag that changes the report goes into the key. -fail-on-survived does not change the report and is applied to the replayed one.
 		quickKey = cache.QuickKey(slices.Concat(abs, settings, []string{
 			fmt.Sprintf("integration=%t", *integration), fmt.Sprintf("detect-equivalent=%t", *detectEquivalent),
 			"exclude=" + strings.Join(excludes, "\x00"), "critical=" + strings.Join(critical, "\x00"),
@@ -421,13 +421,13 @@ func judge(args []string, stdout, stderr io.Writer, m mode) int {
 			}
 		}
 	}
-	// git diff と依存の一覧は、読み込みを待たずに始める。モジュールが読み込みの結果と違えば、捨てて求め直す。
+	// git diff and the dependency list start without waiting for loading. If the module differs from what loading finds, they are discarded and recomputed.
 	var pre prefetch
 	if earlyDir != "" && !*dryRun {
 		pre.start(earlyDir, splitTags(*tags), abs, *since, !*noCache || *since != "")
 	}
 
-	// 前回の読み込みでエクスポートデータを求めたパッケージを、依存の一覧と並行して求める。
+	// Request the packages whose export data the previous load requested, alongside the dependency list.
 	loadKey := cache.QuickKey(slices.Concat([]string{"load", *tags}, abs)...)
 	var hint []string
 	if early != nil {
@@ -528,7 +528,7 @@ func judge(args []string, stdout, stderr io.Writer, m mode) int {
 		unrepeatableMu.Lock()
 		defer unrepeatableMu.Unlock()
 		for _, name := range tests {
-			// 複数のパッケージを判定するときは、どのパッケージのテストかを名前に付ける。
+			// When judging several packages, test names say which package's tests they are.
 			if len(targets) > 1 {
 				name = pkg + "." + name
 			}
@@ -566,7 +566,7 @@ func judge(args []string, stdout, stderr io.Writer, m mode) int {
 			fmt.Fprintf(logw, "integration: %s: %d reverse dependencies with tests\n", targets[i].Pkg.ImportPath, len(targets[i].RevDeps))
 		}
 	}
-	// 差分が変えたテストを求めるのにも鍵を使うので、キャッシュを使わなくても -since では鍵を計算する。
+	// Keys also serve to find the tests the diff changed, so -since computes them even without the cache.
 	var sources map[string][]string
 	if !*noCache || changes != nil {
 		if sources, err = computeKeys(pkgs, targets, !*noCache, &pre); err != nil {
@@ -576,14 +576,14 @@ func judge(args []string, stdout, stderr io.Writer, m mode) int {
 	}
 	var quick *cache.Quick
 	if quickable {
-		// 入力の状態は、テストを実行する前に取る。実行中にファイルが変わっても、変わる前の状態を記録しない。
+		// The input state is taken before running tests, so files changed during the run are not recorded in their earlier state.
 		if quick, err = quickInputs(fs.Args(), targets, sources, accepted.Path()); err != nil {
 			fmt.Fprintln(stderr, "gamut:", err)
 			return 1
 		}
 	}
 	if m == modeSelectTests {
-		// キャッシュは読むだけで、消えた変異体の記録も捨てない。書き換えた宣言の前の判定を、宣言の名前で引くためである。
+		// The cache is only read, and records of removed mutants are kept, so verdicts from before a declaration was rewritten can be looked up by declaration name.
 		store, err := openStore(*cachePath, pkgs[0].ModuleDir, settings)
 		if err != nil {
 			fmt.Fprintln(stderr, "gamut:", err)
@@ -605,14 +605,14 @@ func judge(args []string, stdout, stderr io.Writer, m mode) int {
 		}
 		opts.Cache = store
 		store.PutLoadHint(loadKey, hint)
-		// 取り消しや基準のテストの失敗で止まっても、それまでに実行した判定を残す。
+		// Even when stopped by cancellation or failing baseline tests, keep the verdicts run so far.
 		defer func() {
 			if err := store.Save(); err != nil {
 				fmt.Fprintln(stderr, "gamut: warning: saving the cache:", err)
 			}
 		}()
-		// SIGKILL（メモリ不足、CI の時間切れ）では上の書き込みが走らないので、一定の間隔でも書き出す。
-		// defer は後に登録したものが先に走るので、最後の書き込みの前に書き出しを止める。
+		// A SIGKILL (out of memory, a CI timeout) skips the write above, so the cache is also written at an interval.
+		// Deferred calls run last-registered first, so checkpointing stops before the final write.
 		if *checkpoint > 0 {
 			defer startCheckpoint(store, *checkpoint, stderr)()
 		}
@@ -649,7 +649,7 @@ func judge(args []string, stdout, stderr io.Writer, m mode) int {
 	var results []*run.Result
 	for _, rs := range perPackage {
 		for _, r := range rs {
-			// 識別子で指定したときは、指定した変異体だけを報告する。
+			// When selected by identifier, only the selected mutants are reported.
 			if opts.Select != nil && opts.Select.Mutants != nil && r.Status == run.Pending {
 				continue
 			}
@@ -674,7 +674,7 @@ func judge(args []string, stdout, stderr io.Writer, m mode) int {
 	}
 	rep.MarkCritical(criticalIDs)
 	rep.Thresholds = &thresholds
-	// 識別子で指定したときは、ほかの変異体を報告しないので、受理の「なくなった」は判定できない。
+	// When selected by identifier, other mutants are not reported, so acceptances cannot be judged "missing".
 	var acceptedHere []string
 	if opts.Select == nil || opts.Select.Mutants == nil {
 		acceptedHere = acceptedInPackages(accepted, pkgs)
@@ -700,7 +700,7 @@ func judge(args []string, stdout, stderr io.Writer, m mode) int {
 	if opts.Cache != nil {
 		var buf strings.Builder
 		if err := rep.WriteJSON(&buf); err == nil {
-			// 最後の実行の報告は、gamut merge がシャードの判定をまとめるのに読む。
+			// gamut merge reads the report of the last run to combine the shards' verdicts.
 			opts.Cache.PutLast(json.RawMessage(buf.String()))
 			if quick != nil {
 				quick.Report = json.RawMessage(buf.String())
@@ -711,7 +711,7 @@ func judge(args []string, stdout, stderr io.Writer, m mode) int {
 	return qualityCode(rep, *failOnSurvived, stderr)
 }
 
-// qualityCode は、判定を終えた報告が品質の条件を満たすかを確かめ、満たさなければ理由を書いて exitQuality を返す。
+// qualityCode checks whether the finished report passes the quality gate; if not, it writes why and returns exitQuality.
 func qualityCode(rep *report.Report, failOnSurvived bool, stderr io.Writer) int {
 	failures := rep.Quality(failOnSurvived)
 	if len(failures) == 0 {
@@ -721,7 +721,7 @@ func qualityCode(rep *report.Report, failOnSurvived bool, stderr io.Writer) int 
 	return exitQuality
 }
 
-// checkThresholds は、閾値の組み合わせを確かめ、誤りがあればその説明を返す。
+// checkThresholds checks the combination of thresholds and returns an explanation of any error.
 func checkThresholds(t report.Thresholds) string {
 	for _, v := range []float64{t.High, t.Low, t.Break} {
 		if v < 0 || v > 100 {
@@ -734,7 +734,7 @@ func checkThresholds(t report.Thresholds) string {
 	return ""
 }
 
-// startCheckpoint は、interval ごとにキャッシュを書き出し始める。返す関数は書き出しを止め、書き出し中なら終わるまで待つ。
+// startCheckpoint starts writing the cache every interval. The returned function stops it, waiting for a write in progress.
 func startCheckpoint(store *cache.Store, interval time.Duration, stderr io.Writer) func() {
 	done := make(chan struct{})
 	var wg sync.WaitGroup
@@ -758,7 +758,7 @@ func startCheckpoint(store *cache.Store, interval time.Duration, stderr io.Write
 	}
 }
 
-// openStore は、moduleDir の環境の下でキャッシュを開く。
+// openStore opens the cache under the environment of moduleDir.
 func openStore(path, moduleDir string, settings []string) (*cache.Store, error) {
 	env, err := cache.Environment(moduleDir, settings...)
 	if err != nil {
@@ -767,7 +767,7 @@ func openStore(path, moduleDir string, settings []string) (*cache.Store, error) 
 	return cache.Open(path, env)
 }
 
-// replay は、key の前回の実行から入力が変わっていなければ、その報告を返す。2 つ目の戻り値は、報告を返せたかである。
+// replay returns the report of the previous run of key when its inputs are unchanged. The second result reports whether it could.
 func replay(store *cache.Store, key string, start time.Time) (*report.Report, bool) {
 	q := store.Quick(key)
 	if q == nil {
@@ -786,7 +786,7 @@ func replay(store *cache.Store, key string, start time.Time) (*report.Report, bo
 	return &rep, true
 }
 
-// 報告の形式である。
+// Report formats.
 const (
 	reporterText     = "text"
 	reporterJSON     = "json"
@@ -795,18 +795,18 @@ const (
 	reporterSimplify = "simplify"
 )
 
-// reporters は、報告の出し方である。
+// reporters says how reports are produced.
 type reporters struct {
 	kinds []string
-	// output は -o の書き出し先で、json（mutation-testing-elements）の形式で書く。dir は -report-dir で、
-	// -o のない json と、html の書き出し先である。
+	// output is where -o writes, in json (mutation-testing-elements) format. dir is -report-dir,
+	// where json without -o and html go.
 	output, dir string
-	// annotations は CI の注釈の形式（github）で、空なら書かない。
+	// annotations is the CI annotation format (github), or empty for none.
 	annotations string
 }
 
-// newReporters は、-reporter の指定から報告の出し方を作る。指定がなければ text にする。
-// -o を指定すれば、-reporter によらず json の形式をそこへ書く。
+// newReporters builds reporters from the -reporter values, text by default.
+// With -o, json goes there regardless of -reporter.
 func newReporters(kinds []string, output, dir, annotations string) (*reporters, error) {
 	if annotations != "" && annotations != "github" {
 		return nil, fmt.Errorf("unknown -annotations %q; use github", annotations)
@@ -819,7 +819,7 @@ func newReporters(kinds []string, output, dir, annotations string) (*reporters, 
 			return nil, fmt.Errorf("unknown -reporter %q; use text, json, html, agent, or simplify", k)
 		}
 	}
-	// agent は標準出力に JSON を 1 つだけ書くので、標準出力に書くほかの形式と混ぜない。
+	// agent writes exactly one JSON document to stdout, so it does not mix with other stdout formats.
 	if slices.Contains(kinds, reporterAgent) && (slices.Contains(kinds, reporterText) || slices.Contains(kinds, reporterSimplify) || annotations != "") {
 		return nil, errors.New("-reporter agent writes one JSON document to stdout; it cannot be combined with -reporter text, -reporter simplify, or -annotations")
 	}
@@ -829,8 +829,8 @@ func newReporters(kinds []string, output, dir, annotations string) (*reporters, 
 	return &reporters{kinds: kinds, output: output, dir: dir, annotations: annotations}, nil
 }
 
-// repoPrefix は、Git のリポジトリのルートから moduleDir への相対パスを返す。リポジトリの外なら空を返す。
-// CI の注釈のファイルはリポジトリ相対で指定するので、モジュール相対のパスの前に付ける。
+// repoPrefix returns the path from the Git repository root to moduleDir, or empty outside a repository.
+// CI annotation files are relative to the repository, so it goes before module-relative paths.
 func repoPrefix(moduleDir string) string {
 	out, err := exec.Command("git", "-C", moduleDir, "rev-parse", "--show-toplevel").Output()
 	if err != nil {
@@ -851,7 +851,7 @@ func repoPrefix(moduleDir string) string {
 	return filepath.ToSlash(rel)
 }
 
-// deliver は、報告を指定の形式で書く。mutation-testing-elements の形式（json、html）は、ファイルの中身を moduleDir から読む。
+// deliver writes the report in the given formats. mutation-testing-elements formats (json, html) read file contents from moduleDir.
 func (o *reporters) deliver(rep *report.Report, moduleDir string, stdout io.Writer) error {
 	var mte *report.MTEReport
 	for _, k := range o.kinds {
@@ -895,10 +895,10 @@ func (o *reporters) deliver(rep *report.Report, moduleDir string, stdout io.Writ
 	return nil
 }
 
-// quickInputs は、前回の報告をそのまま返してよいかを次の実行で確かめるための、入力のファイルとディレクトリを集め、今の状態の指紋を取る。
-// 対象パッケージと依存ファイルのディレクトリの直下のファイル、依存ファイル、<ディレクトリ>/... のパターンの根の下の木である。
-// go.mod、go.sum、go.work、gamut、Go の版は、キャッシュの環境の鍵が捉える。
-// extra は、そのほかに状態を比べるファイル（受理の記録など）である。
+// quickInputs gathers the input files and directories the next run checks to decide whether the previous report can be returned as is, and fingerprints their current state:
+// the files directly in the directories of the target packages and dependency files, the dependency files, and the trees under the roots of <directory>/... patterns.
+// go.mod, go.sum, go.work, gamut, and the Go version are covered by the cache's environment key.
+// extra are other files whose state is compared (such as the acceptance record).
 func quickInputs(patterns []string, targets []run.Target, sources map[string][]string, extra ...string) (*cache.Quick, error) {
 	files := map[string]bool{}
 	for _, f := range extra {
@@ -942,8 +942,8 @@ func quickInputs(patterns []string, targets []run.Target, sources map[string][]s
 	return q, nil
 }
 
-// checkViability は、変異体の構築可能性を判定する。store があれば、鍵の変わらない変異体はその記録を使い、判定を記録する。
-// 型検査した変異体の数を返す。
+// checkViability checks the viability of mutants. With store, mutants with unchanged keys use their records, and verdicts are recorded.
+// It returns the number of mutants type-checked.
 func checkViability(targets []run.Target, store *cache.Store) int {
 	checked := 0
 	for _, t := range targets {
@@ -973,8 +973,8 @@ func checkViability(targets []run.Target, store *cache.Store) int {
 	return checked
 }
 
-// computeKeys は、targets に再利用の鍵を付ける。withRevDeps なら、逆依存パッケージのテストの鍵も付ける。
-// パッケージごとの外の依存のファイルを返す。
+// computeKeys attaches reuse keys to targets, and with withRevDeps also the test keys of reverse dependencies.
+// It returns the files of the external dependencies per package.
 func computeKeys(pkgs []*load.Package, targets []run.Target, withRevDeps bool, pre *prefetch) (map[string][]string, error) {
 	sources, err := pre.sources(pkgs)
 	if err != nil {
@@ -998,8 +998,8 @@ func computeKeys(pkgs []*load.Package, targets []run.Target, withRevDeps bool, p
 	return sources, nil
 }
 
-// openCache は、キャッシュを読み、名前を変えたファイルの変異体に前の判定を引き継ぎ、消えた変異体の記録を捨てる。
-// opened が nil でなければ、同じモジュールの環境で開いたものとして使う。
+// openCache reads the cache, carries previous verdicts over to mutants of renamed files, and discards records of removed mutants.
+// When opened is not nil, it is used as opened under the same module environment.
 func openCache(path string, settings []string, moduleDir string, targets []run.Target, changes *diff.Changes, opened *cache.Store) (*cache.Store, error) {
 	store := opened
 	if store == nil {
@@ -1028,7 +1028,7 @@ func openCache(path string, settings []string, moduleDir string, targets []run.T
 	return store, nil
 }
 
-// resolvePath は、シンボリックリンクを解決したパスを返す。解決できなければそのまま返す。
+// resolvePath returns the path with symbolic links resolved, or the path as is when it cannot.
 func resolvePath(p string) string {
 	if r, err := filepath.EvalSymlinks(p); err == nil {
 		return r
@@ -1036,8 +1036,8 @@ func resolvePath(p string) string {
 	return p
 }
 
-// resolveMutants は、識別子か、識別子の一意な前方一致から変異体を求める。
-// 当たらないか、複数に当たる指定があれば、候補を並べた誤りを返す。
+// resolveMutants finds mutants from identifiers or unique identifier prefixes.
+// A value that matches nothing or several mutants gives an error listing the candidates.
 func resolveMutants(ids []string, targets []run.Target, ignored []mutant.Ignored) (map[*mutant.Mutant]bool, error) {
 	out := map[*mutant.Mutant]bool{}
 	for _, id := range ids {
@@ -1076,8 +1076,8 @@ func resolveMutants(ids []string, targets []run.Target, ignored []mutant.Ignored
 	return out, nil
 }
 
-// checkSelectionFlags は、選択のフラグの組み合わせを確かめ、誤りがあればその説明を返す。
-// acceptedInPackages は、受理のうち、判定するパッケージのファイルを指すものの識別子を返す。
+// checkSelectionFlags checks the combination of selection flags and returns an explanation of any error.
+// acceptedInPackages returns the identifiers of acceptances pointing at files of the packages being judged.
 func acceptedInPackages(f *accept.File, pkgs []*load.Package) []string {
 	var dirs []string
 	for _, p := range pkgs {
@@ -1096,7 +1096,7 @@ func acceptedInPackages(f *accept.File, pkgs []*load.Package) []string {
 	return out
 }
 
-// readConfig は、path が空でなければそのファイルを、空なら moduleDir の設定ファイルを読む。どちらもなければ nil を返す。
+// readConfig reads the file at path if given, otherwise the config file of moduleDir, and returns nil when there is neither.
 func readConfig(path, moduleDir string) (*config.Config, error) {
 	switch {
 	case path != "":
@@ -1107,7 +1107,7 @@ func readConfig(path, moduleDir string) (*config.Config, error) {
 	return nil, nil
 }
 
-// applyConfig は、設定の値を、コマンドラインで指定されなかったフラグに入れる。
+// applyConfig puts the config values into the flags not given on the command line.
 func applyConfig(fs *flag.FlagSet, cfg *config.Config) error {
 	explicit := map[string]bool{}
 	fs.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
@@ -1124,7 +1124,7 @@ func applyConfig(fs *flag.FlagSet, cfg *config.Config) error {
 	return nil
 }
 
-// compileExcludes は、-exclude-files の正規表現をコンパイルする。
+// compileExcludes compiles the -exclude-files regular expressions.
 func compileExcludes(patterns []string) ([]*regexp.Regexp, error) {
 	out := make([]*regexp.Regexp, len(patterns))
 	for i, p := range patterns {
@@ -1137,7 +1137,7 @@ func compileExcludes(patterns []string) ([]*regexp.Regexp, error) {
 	return out, nil
 }
 
-// excluded は、モジュール相対のパス rel が、どれかの正規表現に当たるかを返す。
+// excluded reports whether the module-relative path rel matches any of the regular expressions.
 func excluded(res []*regexp.Regexp, rel string) bool {
 	for _, re := range res {
 		if re.MatchString(rel) {
@@ -1159,7 +1159,7 @@ func checkSelectionFlags(since, scope string, includeTestChanges bool, ids []str
 	return ""
 }
 
-// multiFlag は、繰り返し指定できる文字列のフラグである。
+// multiFlag is a repeatable string flag.
 type multiFlag []string
 
 func (m *multiFlag) String() string { return strings.Join(*m, ",") }
@@ -1177,7 +1177,7 @@ func typeNames(types []mutant.Type) []string {
 	return out
 }
 
-// exitCode は、実行の誤りを終了コードへ対応させる。
+// exitCode maps run errors to exit codes.
 func exitCode(err error) int {
 	switch {
 	case err == nil:
@@ -1200,7 +1200,7 @@ func splitTags(s string) []string {
 	return out
 }
 
-// selectTypes は、-only と -disable から有効な変異演算子を決める。どちらもなければ既定の集合である。
+// selectTypes decides the enabled mutators from -only and -disable, the default set when neither is given.
 func selectTypes(only, disable string) ([]mutant.Type, error) {
 	if only != "" && disable != "" {
 		return nil, errors.New("-only and -disable cannot be combined")
@@ -1230,7 +1230,7 @@ func parseTypes(s string) ([]mutant.Type, error) {
 	return out, nil
 }
 
-// writeMutators は、変異演算子の一覧を書く。
+// writeMutators writes the list of mutators.
 func writeMutators(w io.Writer) {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	for _, info := range mutant.Infos() {
@@ -1243,7 +1243,7 @@ func writeMutators(w io.Writer) {
 	_ = tw.Flush()
 }
 
-// moduleRoot は、作業ディレクトリを含むモジュールのルートを返す。
+// moduleRoot returns the root of the module containing the working directory.
 func moduleRoot() (string, error) {
 	out, err := exec.Command("go", "env", "GOMOD").Output()
 	if err != nil {
@@ -1256,7 +1256,7 @@ func moduleRoot() (string, error) {
 	return filepath.Dir(mod), nil
 }
 
-// writeMTE は、mutation-testing-elements の形式の報告を path に書く。
+// writeMTE writes the report in mutation-testing-elements format to path.
 func writeMTE(path string, mte *report.MTEReport) error {
 	return writeFile(path, func(w io.Writer) error {
 		enc := json.NewEncoder(w)
@@ -1265,7 +1265,7 @@ func writeMTE(path string, mte *report.MTEReport) error {
 	})
 }
 
-// writeFile は、path に write の書いた内容を書く。ディレクトリがなければ作る。
+// writeFile writes what write writes to path, creating the directory when missing.
 func writeFile(path string, write func(io.Writer) error) (err error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return err
@@ -1278,7 +1278,7 @@ func writeFile(path string, write func(io.Writer) error) (err error) {
 	return write(f)
 }
 
-// prefetch は、読み込みと並行して始める git diff と依存の一覧である。
+// prefetch holds the git diff and dependency list started alongside loading.
 type prefetch struct {
 	dir       string
 	wg        sync.WaitGroup
@@ -1289,7 +1289,7 @@ type prefetch struct {
 	diffStart bool
 }
 
-// start は、モジュール dir で、ref が空でなければ git diff を、withDeps なら依存の一覧を始める。
+// start starts, in the module dir, git diff when ref is not empty and the dependency list with withDeps.
 func (p *prefetch) start(dir string, tags, patterns []string, ref string, withDeps bool) {
 	p.dir = dir
 	if ref != "" {
@@ -1301,7 +1301,7 @@ func (p *prefetch) start(dir string, tags, patterns []string, ref string, withDe
 	}
 }
 
-// changes は、モジュール dir の ref からの差分を返す。先に始めた結果が同じモジュールのものなら、それを使う。
+// changes returns the diff of module dir from ref, using the prefetched result when it is for the same module.
 func (p *prefetch) changes(dir, ref string) (*diff.Changes, error) {
 	p.wg.Wait()
 	if p.diffStart && p.dir == dir {
@@ -1310,7 +1310,7 @@ func (p *prefetch) changes(dir, ref string) (*diff.Changes, error) {
 	return diff.Since(dir, ref)
 }
 
-// sources は、load.SourceDeps と同じものを返す。先に始めた一覧が使えれば、それを使う。
+// sources returns the same as load.SourceDeps, using the prefetched list when it can.
 func (p *prefetch) sources(pkgs []*load.Package) (map[string][]string, error) {
 	p.wg.Wait()
 	if p.deps != nil && p.depsErr == nil && len(pkgs) > 0 && p.dir == pkgs[0].ModuleDir {

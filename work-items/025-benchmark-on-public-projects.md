@@ -1,43 +1,28 @@
 ---
 status: pending
-stage: 公開
+stage: release
 depends_on: [004, 007]
 created_at: 2026-11-20
 ---
 
-# 公開プロジェクトで gomutants と Gremlins と比べる
+# Compare with gomutants and Gremlins on public projects
 
-## 動機
+## Motivation
 
-ゴールの判定には、公開プロジェクトでの再現できる測定が要る。
-今の測定は idmagic の 1 パッケージだけで、初回の実行しか比べていない。
+Judging the goal needs reproducible measurements on public projects. The measurements so far cover one idmagic package and only first runs.
 
-## 対象範囲
+## Scope
 
-- 公開されている Go のプロジェクトを 3〜5 件選ぶ。テストが速く外部の資源を要らないもの（標準ライブラリに近い小さなライブラリ）と、パッケージの多いもの（CLI など）を混ぜる。
-- gamut、gomutants、Gremlins を同じ変異演算子、同じワーカー数で実行し、次を測る。
-  - 初回の時間。
-  - 変更のない再実行の時間。
-  - 1 関数を変えた後の再実行の時間（gamut は `--since`、他はそれぞれの増分の機能）。
-  - 共有ビルドキャッシュの増加。
-  - 両方が生成する変異体の判定の一致と、食い違いの内訳。
-- 測定を自動化する `bench/` のスクリプトと、結果の文書 `docs/benchmark.md` を置く。
+- Pick 3 to 5 public Go projects, mixing small fast libraries without external resources and projects with many packages (such as CLIs).
+- Run gamut, gomutants, and Gremlins with the same mutators and workers, and measure the first run, an unchanged rerun, a rerun after changing one function (gamut with `-since`, the others with their incremental features), the growth of the shared build cache, and the agreement of verdicts on mutants all generate, explaining every disagreement.
+- Put scripts automating the measurements in `bench/` and the results in a document.
 
-## 対象外
+## Design
 
-- 結果の宣伝。
+Average two runs per measurement and make sure nothing else loads the machine; leftover processes can make measurements vary two- to threefold. Check that no test binary processes remain before and after measuring gamut.
 
-## 設計
+## Completion criteria
 
-各測定は 2 回の平均にし、測定の前に他の負荷がないことを確かめる。
-残ったプロセスが CPU を使い続けると、測定が 2〜3 倍揺れうる。
-gamut も測定の前後にテストバイナリのプロセスが残っていないことを確かめる。
-
-## 完了の条件
-
-- `docs/benchmark.md` に、日付、環境、版、上の各項目の表がある。
-- 食い違いの内訳をすべて説明している。
-
-## 検証
-
-- `bench/` のスクリプトの再実行で、同じ傾向の結果が出る。
+- The results document has the date, environment, versions, and a table of each measurement above.
+- Every disagreement is explained.
+- Rerunning the scripts gives results with the same trends.

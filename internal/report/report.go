@@ -1,4 +1,4 @@
-// Package report は、判定を報告（mutation-testing-elements の JSON と HTML、エージェント向けの JSON、GitHub の注釈）と標準出力の要約にする。
+// Package report turns verdicts into reports (mutation-testing-elements JSON and HTML, JSON for agents, GitHub annotations) and the summary on stdout.
 package report
 
 import (
@@ -14,7 +14,7 @@ import (
 	"github.com/ambi/gamut/internal/run"
 )
 
-// Mutation は 1 体の変異体の判定である。
+// Mutation is the verdict of one mutant.
 type Mutation struct {
 	ID          string   `json:"id"`
 	Type        string   `json:"type"`
@@ -27,32 +27,32 @@ type Mutation struct {
 	Mode        string   `json:"mode,omitempty"`
 	Tests       []string `json:"tests,omitempty"`
 	KilledBy    string   `json:"killed_by,omitempty"`
-	// Cached は、判定を実行せずに前の実行から再利用したかである。
+	// Cached reports whether the verdict was reused from a previous run without running.
 	Cached bool `json:"cached,omitempty"`
-	// PreviouslyKilledBy は、前回の検出テストが消えたので再検査し、今回は検出されなかったときの、前回の検出テストである。
+	// PreviouslyKilledBy is the previous detecting test, when that test is gone, the mutant was rechecked, and this time it was not detected.
 	PreviouslyKilledBy string `json:"previously_killed_by,omitempty"`
-	// Accepted は、等価な変異体として受理したときの理由である。受理した変異体は判定を保つが、数と効率に含めない。
+	// Accepted is the reason when the mutant was accepted as equivalent. Accepted mutants keep their verdicts but are left out of counts and efficacy.
 	Accepted string `json:"accepted,omitempty"`
-	// Critical は、重要領域の変異体かである。重要領域の生き残りは品質の条件を満たさない。
+	// Critical reports whether the mutant is in a critical region. Survivors in critical regions fail the quality gate.
 	Critical bool `json:"critical,omitempty"`
-	// Killers は、-kill-matrix で、検出したトップレベルのテストのすべてである。
+	// Killers are, under -kill-matrix, all the detecting top-level tests.
 	Killers []string `json:"killers,omitempty"`
 }
 
-// survivor は、m が直すべき生き残り（LIVED か NOT COVERED で、受理していない）かを返す。
+// survivor reports whether m is a survivor to fix (LIVED or NOT COVERED, and not accepted).
 func (m Mutation) survivor() bool {
 	return m.Accepted == "" && (m.Status == string(run.Lived) || m.Status == string(run.NotCovered))
 }
 
-// Thresholds は、点数（MutationScore）の閾値である。High 以上を high、Low 以上を low、それ未満を danger とする。
-// Break が正なら、点数が Break 未満のとき品質の条件を満たさない。
+// Thresholds are the thresholds of the score (MutationScore): high at or above High, low at or above Low, and danger below.
+// When Break is positive, a score below it fails the quality gate.
 type Thresholds struct {
 	High  float64 `json:"high"`
 	Low   float64 `json:"low"`
 	Break float64 `json:"break,omitempty"`
 }
 
-// Label は、点数 score の閾値によるラベル（high、low、danger）を返す。
+// Label returns the label of score by the thresholds (high, low, danger).
 func (t Thresholds) Label(score float64) string {
 	switch {
 	case score >= t.High:
@@ -63,51 +63,51 @@ func (t Thresholds) Label(score float64) string {
 	return "danger"
 }
 
-// SkippedPackage は、判定できずに飛ばしたパッケージと、その理由である。
+// SkippedPackage is a package skipped because it cannot be judged, with the reason.
 type SkippedPackage struct {
 	Package string `json:"package"`
 	Reason  string `json:"reason"`
 }
 
-// StaleAcceptance は、もう要らない受理である。gamut accept -prune で消せる。
+// StaleAcceptance is an acceptance no longer needed. gamut accept -prune removes it.
 type StaleAcceptance struct {
 	ID     string `json:"id"`
 	Reason string `json:"reason"`
-	// Why は、detected（テストが検出するようになった）か missing（変異体がなくなった）である。
+	// Why is detected (a test now detects it) or missing (the mutant is gone).
 	Why string `json:"why"`
 }
 
-// 受理が要らなくなった理由である。
+// The reasons an acceptance is no longer needed.
 const (
 	StaleDetected = "detected"
 	StaleMissing  = "missing"
 )
 
-// File は JSON の 1 ファイルである。
+// File is one file of the JSON.
 type File struct {
 	FileName  string     `json:"file_name"`
 	Path      string     `json:"path"`
 	Mutations []Mutation `json:"mutations"`
 }
 
-// Report は、1 回の実行の判定の全体である。要約、報告の各形式、品質の条件はこれから作る。
-// JSON にするのは、内部の状態（変更のない再実行の再生とシャードのまとめのためのキャッシュ）としてだけで、外向きの形ではない。
+// Report is all the verdicts of one run. The summary, every report format, and the quality gate come from it.
+// It is serialized only as internal state (the cache for replaying unchanged reruns and merging shards), never as an external shape.
 type Report struct {
 	GoModule string `json:"go_module"`
-	// Version は、判定した gamut の版である。
+	// Version is the gamut version that judged.
 	Version string `json:"version,omitempty"`
-	// ModuleDir は、判定したモジュールのディレクトリである。gamut merge が、報告に埋め込む元のソースを読むのに使う。
+	// ModuleDir is the directory of the judged module. gamut merge reads the original sources embedded in the report from it.
 	ModuleDir string `json:"module_dir,omitempty"`
-	// Package は、1 パッケージならその import パス、複数なら実行時に指定したパターンである。
+	// Package is the import path for one package, or the patterns given to the run for several.
 	Package string `json:"package"`
-	// Packages は判定したパッケージの import パスである。
+	// Packages are the import paths of the judged packages.
 	Packages          []string `json:"packages,omitempty"`
 	TestEfficacy      float64  `json:"test_efficacy"`
 	MutationsCoverage float64  `json:"mutations_coverage"`
-	// MutationScore は、検出した変異体（KILLED、TIMED OUT）の、検出したものと生き残り（LIVED、NOT COVERED）の和に対する割合である。
-	// TestEfficacy と違い、どのテストも到達しない変異体も検出できなかったものとして数える。閾値はこの点数に当てる。
+	// MutationScore is the share of detected mutants (KILLED, TIMED OUT) among detected mutants plus survivors (LIVED, NOT COVERED).
+	// Unlike TestEfficacy, it counts mutants no test reaches as undetected. The thresholds apply to this score.
 	MutationScore float64 `json:"mutation_score"`
-	// Thresholds は、要約のラベルに使った閾値である。
+	// Thresholds are the thresholds used for the summary's label.
 	Thresholds        *Thresholds `json:"thresholds,omitempty"`
 	MutantsTotal      int         `json:"mutants_total"`
 	MutantsKilled     int         `json:"mutants_killed"`
@@ -115,35 +115,35 @@ type Report struct {
 	MutantsNotViable  int         `json:"mutants_not_viable"`
 	MutantsNotCovered int         `json:"mutants_not_covered"`
 	MutantsTimedOut   int         `json:"mutants_timed_out"`
-	// MutantsPending は、選択の外で判定しなかった変異体の数である。MutantsTotal と効率の計算には含めない。
+	// MutantsPending is the number of mutants outside the selection, not judged. It is left out of MutantsTotal and efficacy.
 	MutantsPending int `json:"mutants_pending,omitempty"`
-	// MutantsArid は、テストが観測しないことの多いコード（ログ出力など、arid）の中なので作らなかった変異体の数である。
+	// MutantsArid is the number of mutants not created because they are in code tests rarely observe (such as logging; arid code).
 	MutantsArid int `json:"mutants_arid,omitempty"`
-	// UnrepeatableTests は、同じプロセスで 2 回目に失敗したテストの名前である。それが到達する変異体は、プロセスを使い回さずに判定した。
+	// UnrepeatableTests are the names of the tests that failed on their second run in the same process. Mutants they reach were judged without reusing processes.
 	UnrepeatableTests []string `json:"unrepeatable_tests,omitempty"`
-	// MaxDepthExcludedTests は、-max-depth を超えてだけ変異箇所に到達したので、その箇所の到達から除いたテストの数である。
-	// MaxDepthExcludedReaches は、除いた到達（テストと変異箇所の組）の数である。
+	// MaxDepthExcludedTests is the number of tests removed from a site's reach because they reached it only beyond -max-depth.
+	// MaxDepthExcludedReaches is the number of removed reaches (pairs of a test and a mutation site).
 	MaxDepthExcludedTests   int `json:"max_depth_excluded_tests,omitempty"`
 	MaxDepthExcludedReaches int `json:"max_depth_excluded_reaches,omitempty"`
-	// SkippedPackages は、パターンに当たったが判定できずに飛ばしたパッケージ（cgo の前処理ができないものなど）である。
+	// SkippedPackages are the packages that matched the patterns but were skipped because they cannot be judged (such as when cgo preprocessing fails).
 	SkippedPackages []SkippedPackage `json:"skipped_packages,omitempty"`
-	// KillMatrix は、-kill-matrix のときの、テストの見直しの候補である。
+	// KillMatrix are the candidates for reviewing tests under -kill-matrix.
 	KillMatrix *KillMatrix `json:"kill_matrix,omitempty"`
-	// MutantsIgnored は、無効化コメントで止めた変異体の数である。MutantsTotal と効率の計算には含めない。
+	// MutantsIgnored is the number of mutants stopped by disable comments. It is left out of MutantsTotal and efficacy.
 	MutantsIgnored int     `json:"mutants_ignored,omitempty"`
 	ElapsedTime    float64 `json:"elapsed_time"`
 	Files          []File  `json:"files"`
-	// Ignored は、無効化コメントで止めた変異体である。判定しないので Files とは分けて持つ。
+	// Ignored are the mutants stopped by disable comments. They are not judged, so they are kept apart from Files.
 	Ignored []IgnoredMutation `json:"ignored,omitempty"`
-	// MutantsEquivalent は、コンパイル結果が元と同じで EQUIVALENT とした変異体の数である。MutantsTotal と効率の計算には含めない。
+	// MutantsEquivalent is the number of mutants found EQUIVALENT because they compile to the original's code. It is left out of MutantsTotal and efficacy.
 	MutantsEquivalent int `json:"mutants_equivalent,omitempty"`
-	// MutantsAccepted は、受理した変異体のうち判定したものの数である。MutantsTotal と効率の計算には含めない。
+	// MutantsAccepted is the number of judged accepted mutants. It is left out of MutantsTotal and efficacy.
 	MutantsAccepted int `json:"mutants_accepted,omitempty"`
-	// StaleAccepted は、判定したパッケージの受理のうち、もう要らないものである。
+	// StaleAccepted are the acceptances of the judged packages that are no longer needed.
 	StaleAccepted []StaleAcceptance `json:"stale_accepted,omitempty"`
 }
 
-// IgnoredMutation は、無効化コメントで止めた 1 体の変異体である。
+// IgnoredMutation is one mutant stopped by a disable comment.
 type IgnoredMutation struct {
 	ID          string `json:"id"`
 	Type        string `json:"type"`
@@ -152,11 +152,11 @@ type IgnoredMutation struct {
 	Column      int    `json:"column"`
 	Original    string `json:"original"`
 	Replacement string `json:"replacement"`
-	// Reason は、コメントの -- の後ろに書いた理由である。
+	// Reason is the reason written after -- in the comment.
 	Reason string `json:"reason,omitempty"`
 }
 
-// AddIgnored は、無効化コメントで止めた変異体を報告に足す。
+// AddIgnored adds the mutants stopped by disable comments to the report.
 func (r *Report) AddIgnored(ignored []mutant.Ignored) {
 	for _, ig := range ignored {
 		m := ig.Mutant
@@ -174,7 +174,7 @@ func (r *Report) AddIgnored(ignored []mutant.Ignored) {
 	r.MutantsIgnored = len(r.Ignored)
 }
 
-// Build は判定から報告を作る。label は package フィールドに入れる名前、packages は判定したパッケージの import パスである。
+// Build builds the report from verdicts. label is the name for the package field, and packages are the import paths of the judged packages.
 func Build(module, label string, packages []string, results []*run.Result, elapsed time.Duration) *Report {
 	r := &Report{GoModule: module, Package: label, Packages: packages, ElapsedTime: elapsed.Seconds()}
 	byFile := map[string]*File{}
@@ -203,7 +203,7 @@ func Build(module, label string, packages []string, results []*run.Result, elaps
 	return r
 }
 
-// count は、変異体の状態の数と効率を数え直す。PENDING と受理した変異体は数えない。
+// count recomputes the counts per status and efficacy. PENDING and accepted mutants are not counted.
 func (r *Report) count() {
 	r.MutantsTotal, r.MutantsKilled, r.MutantsLived, r.MutantsNotViable = 0, 0, 0, 0
 	r.MutantsNotCovered, r.MutantsTimedOut, r.MutantsPending, r.MutantsAccepted, r.MutantsEquivalent = 0, 0, 0, 0, 0
@@ -241,14 +241,14 @@ func (r *Report) count() {
 		r.TestEfficacy = 100 * float64(detected) / float64(covered)
 		r.MutationsCoverage = 100 * float64(covered) / float64(covered+r.MutantsNotCovered)
 	}
-	// 判定する変異体がなければ、検出できなかったものもないので 100 とする。
+	// Without mutants to judge, nothing went undetected either, so it is 100.
 	r.MutationScore = 100
 	if all := detected + r.MutantsLived + r.MutantsNotCovered; all > 0 {
 		r.MutationScore = 100 * float64(detected) / float64(all)
 	}
 }
 
-// MarkCritical は、識別子が ids にある変異体を重要領域の変異体にする。
+// MarkCritical marks the mutants whose identifiers are in ids as being in critical regions.
 func (r *Report) MarkCritical(ids map[string]bool) {
 	for i := range r.Files {
 		for k := range r.Files[i].Mutations {
@@ -258,12 +258,12 @@ func (r *Report) MarkCritical(ids map[string]bool) {
 	}
 }
 
-// Quality は、品質の条件を満たさない理由を返す。満たせば空である。
-//   - 重要領域に、受理していない生き残り（LIVED、NOT COVERED）がある。
-//   - Thresholds.Break が正で、点数がそれ未満である。
-//   - failOnSurvived で、受理していない生き残りが 1 体でもある。
+// Quality returns why the quality gate fails, or empty when it passes:
+//   - A critical region has an unaccepted survivor (LIVED, NOT COVERED).
+//   - Thresholds.Break is positive and the score is below it.
+//   - With failOnSurvived, there is any unaccepted survivor.
 //
-// PENDING、EQUIVALENT、受理した変異体は生き残りに数えない。-since の実行では、選んだ変異体だけに当たる。
+// PENDING, EQUIVALENT, and accepted mutants do not count as survivors. In a -since run it applies only to the selected mutants.
 func (r *Report) Quality(failOnSurvived bool) []string {
 	var critical, survivors int
 	for _, f := range r.Files {
@@ -290,10 +290,10 @@ func (r *Report) Quality(failOnSurvived bool) []string {
 	return out
 }
 
-// ApplyAccepted は、受理を報告に当てる。ids は、判定したパッケージのファイルを指す受理の識別子で、reason はその理由を引く。
-// 受理した変異体は判定を保ったまま accepted に理由を入れ、数と効率から外す。
-// 受理のうち、テストが検出するようになったもの（KILLED、TIMED OUT）と、変異体がなくなったものを StaleAccepted に並べる。
-// PENDING の変異体は、今回判定していないので、どちらにもしない。
+// ApplyAccepted applies acceptances to the report. ids are the accepted identifiers pointing at files of the judged packages, and reason looks up their reasons.
+// Accepted mutants keep their verdicts, get the reason in accepted, and are left out of counts and efficacy.
+// Acceptances that a test now detects (KILLED, TIMED OUT) and those whose mutant is gone are listed in StaleAccepted.
+// PENDING mutants were not judged this time, so they are neither.
 func (r *Report) ApplyAccepted(ids []string, reason func(id string) string) {
 	found := map[string]bool{}
 	for i := range r.Files {
@@ -325,21 +325,21 @@ func (r *Report) ApplyAccepted(ids []string, reason func(id string) string) {
 	r.count()
 }
 
-// WriteJSON は報告を JSON で書く。
+// WriteJSON writes the report as JSON.
 func (r *Report) WriteJSON(w io.Writer) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(r)
 }
 
-// WriteSummary は、生き残りを理由ごとに並べた要約を書く。報告だけから書くので、保存した報告からも同じ要約を書ける。
+// WriteSummary writes the summary listing survivors by reason. It writes only from the report, so a saved report gives the same summary.
 func WriteSummary(w io.Writer, r *Report) {
 	lived, covered := string(run.Lived), string(run.NotCovered)
 	groups := []struct {
 		title, hint string
 		match       func(Mutation) bool
 	}{
-		// 重要領域の生き残りは、品質の条件を満たさないので先頭に並べ、ほかの組には並べない。
+		// Survivors in critical regions fail the quality gate, so they come first and appear in no other group.
 		{"critical survivors", "every mutant in a critical region must be detected or accepted",
 			func(x Mutation) bool { return x.Critical && x.survivor() }},
 		{"no longer detected", "the tests that killed these mutants last time are gone and no remaining test fails: restore or replace them",
@@ -367,7 +367,7 @@ func WriteSummary(w io.Writer, r *Report) {
 		var lines []string
 		for _, f := range r.Files {
 			for _, m := range f.Mutations {
-				// 受理した生き残りは、直すものとして並べない。重要領域の生き残りは、先頭の組にだけ並べる。
+				// Accepted survivors are not listed as ones to fix. Survivors in critical regions appear only in the first group.
 				if m.Accepted != "" || i > 0 && m.Critical && m.survivor() || !g.match(m) {
 					continue
 				}
@@ -464,8 +464,8 @@ func WriteSummary(w io.Writer, r *Report) {
 	fmt.Fprintln(w, score)
 }
 
-// MarkReused は、実行して決まる判定（KILLED、TIMED OUT、not detected の LIVED、EQUIVALENT、個別ビルドの NOT VIABLE）を、
-// キャッシュから再利用したとする。保存した報告を、変更のない再実行の報告として返すときに使う。
+// MarkReused marks the verdicts decided by running (KILLED, TIMED OUT, LIVED not detected, EQUIVALENT, NOT VIABLE of standalone builds)
+// as reused from the cache. It is used when returning a saved report as the report of an unchanged rerun.
 func (r *Report) MarkReused() {
 	for i := range r.Files {
 		for k := range r.Files[i].Mutations {

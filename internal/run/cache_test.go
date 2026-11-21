@@ -13,8 +13,8 @@ import (
 	"github.com/ambi/gamut/internal/run"
 )
 
-// TestAll_RecordsVerdictsFinishedBeforeCancel は、実行の途中で取り消しても、それまでに終わった判定だけをキャッシュに残すことを確かめる。
-// 取り消しの後に止められた実行は失敗に見えるので、KILLED として記録してはならない。
+// TestAll_RecordsVerdictsFinishedBeforeCancel checks that cancelling midway leaves in the cache only the verdicts finished by then.
+// A run stopped after cancellation looks like a failure, so it must not be recorded as KILLED.
 func TestAll_RecordsVerdictsFinishedBeforeCancel(t *testing.T) {
 	pkg, err := loadOne("../../testdata/fixture", nil)
 	if err != nil {
@@ -54,7 +54,7 @@ func TestAll_RecordsVerdictsFinishedBeforeCancel(t *testing.T) {
 		t.Fatalf("cache holds %d verdicts, want exactly the 1 finished before cancel", reopened.Len())
 	}
 
-	// 残った 1 体は再利用し、残りを実行して、キャッシュなしの判定と一致する。
+	// The one recorded mutant is reused, the rest run, and the verdicts match those without a cache.
 	results, err := run.Run(context.Background(), pkg, mutants, run.Options{Workers: 2, TimeoutFactor: 5, TimeoutMin: time.Second})
 	if err != nil {
 		t.Fatal(err)

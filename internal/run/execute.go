@@ -17,9 +17,9 @@ import (
 
 var failLine = regexp.MustCompile(`(?m)^\s*--- FAIL: (\S+)`)
 
-// priorKillers は、m の実行で先に試すテストの名前を、試す順に返す。
-// 前回 m を検出したテストを先頭に、同じ変異箇所の別の変異体を検出したテストを続ける。
-// キャッシュは実行が終わるたびに書かれるので、今回の実行で先に検出されたものも含む。
+// priorKillers returns, in the order to try, the names of the tests tried first when running m.
+// The test that detected m last time comes first, followed by tests that detected other mutants at the same site.
+// The cache is written after every run, so detections earlier in this run are included.
 func (u *unit) priorKillers(m *mutant.Mutant, store *cache.Store) []string {
 	if store == nil {
 		return nil
@@ -41,10 +41,10 @@ func (u *unit) priorKillers(m *mutant.Mutant, store *cache.Store) []string {
 	return out
 }
 
-// phases は、tests を、テストのプロセスごとのまとまりに分けて、実行する順に返す。
-// 1 つ目は前回の検出テスト（prior[0]）だけ、2 つ目は残りの prior、最後に残りのテストである。
-// 1 つのプロセスの中ではテストは宣言の順に走るので、-test.run の並びでは順序を決められない。そのためプロセスを分ける。
-// どのまとまりも 1 つのテストバイナリのテストだけを持ち、パッケージ自身のテストバイナリを先にする。
+// phases splits tests into groups, one per test process, and returns them in the order to run.
+// The first holds only the previous detecting test (prior[0]), the second the rest of prior, and the last the remaining tests.
+// Within one process tests run in declaration order, so the order in -test.run cannot set it; hence the separate processes.
+// Each group holds tests of only one test binary, with the package's own test binary first.
 func phases(tests []*testCase, prior []string, bins []*binary) [][]*testCase {
 	byName := map[string]*testCase{}
 	for _, t := range tests {
@@ -84,8 +84,8 @@ func phases(tests []*testCase, prior []string, bins []*binary) [][]*testCase {
 	return out
 }
 
-// execute は、変異体 m を有効にして tests を実行する。前回の検出テストを先に、別のプロセスで実行し、最初の失敗で止める。
-// binPath は、テストバイナリごとに実行するファイルを返す。誤りを返したら、変異体を構築不能とする。
+// execute enables the mutant m and runs tests, the previous detecting test first in its own process, stopping at the first failure.
+// binPath returns the file to run per test binary. When it returns an error, the mutant is not viable.
 func (u *unit) execute(ctx context.Context, m *mutant.Mutant, tests []*testCase, opts Options, binPath func(*binary) (string, error)) *Result {
 	if opts.KillMatrix {
 		return u.executeAll(ctx, m, tests, opts, binPath)
@@ -108,7 +108,7 @@ func (u *unit) execute(ctx context.Context, m *mutant.Mutant, tests []*testCase,
 			return &Result{Mutant: m, Status: NotViable, Elapsed: time.Since(start)}
 		}
 		if path != b.path {
-			// 個別ビルドのバイナリは変異を直接書き込んでいるので、選択の番号を渡さない。
+			// A standalone binary has the mutation written in directly, so no selection number is passed.
 			index = 0
 		}
 		quoted := make([]string, len(g))
@@ -132,7 +132,7 @@ func (u *unit) execute(ctx context.Context, m *mutant.Mutant, tests []*testCase,
 				top, _, _ := strings.Cut(string(f[1]), "/")
 				r.Killer = b.prefix + top
 			} else if len(g) == 1 {
-				// 失敗の行がなくても（os.Exit など）、1 件だけ実行したならそのテストが検出した。
+				// Even without a failure line (such as with os.Exit), when only one test ran, that test detected it.
 				r.Killer = g[0].name
 			}
 		default:
@@ -144,13 +144,13 @@ func (u *unit) execute(ctx context.Context, m *mutant.Mutant, tests []*testCase,
 	return r
 }
 
-// verboseLine は、-test.v の出力の、トップレベルのテストの始まり（=== RUN）と結果（--- PASS/FAIL/SKIP）の行である。
-// サブテストの結果の行は字下げされ、サブテストの始まりの行は名前に / を含むので、どちらも当たらない。
+// verboseLine matches the lines of -test.v output that start a top-level test (=== RUN) and give its result (--- PASS/FAIL/SKIP).
+// Subtest result lines are indented and subtest start lines contain / in the name, so neither matches.
 var verboseLine = regexp.MustCompile(`(?m)^(?:=== RUN\s+([^\s/]+)$|--- (PASS|FAIL|SKIP): ([^\s/]+) )`)
 
-// executeAll は、kill matrix のために、変異体 m を有効にして tests をすべて実行し、失敗したトップレベルのテストをすべて記録する。
-// 最初の失敗で止めない。panic や os.Exit でプロセスが落ちたら、結果の出ていない実行中のテストが検出したとし、
-// まだ始まっていないテストを新しいプロセスで実行し直す。時間切れなら TIMED OUT にし、検出したテストは記録しない。
+// executeAll, for the kill matrix, enables the mutant m, runs every test in tests, and records every failing top-level test.
+// It does not stop at the first failure. When the process dies from a panic or os.Exit, the running test without a result counts as a detector,
+// and the tests not yet started run again in a new process. On a timeout it reports TIMED OUT and records no detecting tests.
 func (u *unit) executeAll(ctx context.Context, m *mutant.Mutant, tests []*testCase, opts Options, binPath func(*binary) (string, error)) *Result {
 	start := time.Now()
 	r := &Result{Mutant: m, Status: Lived, Reason: ReasonNotDetected, Matrix: true}
@@ -208,12 +208,12 @@ func (u *unit) executeAll(ctx context.Context, m *mutant.Mutant, tests []*testCa
 				case !started[t.local]:
 					next = append(next, t)
 				case !finished[t.local] && err != nil:
-					// 結果の行を出さずにプロセスが落ちた。
+					// The process died without printing a result line.
 					killers[t.name] = true
 				}
 			}
 			if err != nil && len(next) == len(remaining) {
-				// どのテストも始まらずに落ちた（TestMain の失敗など）。残りを 1 件ずつ確かめる手間はかけず、先頭のテストが検出したとする。
+				// It died before any test started (such as a failing TestMain). Rather than checking the rest one by one, the first test counts as the detector.
 				killers[remaining[0].name] = true
 				next = next[1:]
 			}
@@ -234,8 +234,8 @@ func (u *unit) executeAll(ctx context.Context, m *mutant.Mutant, tests []*testCa
 	return r
 }
 
-// standalone は、schemata に埋め込めなかった変異体を、テストバイナリごとに個別にビルドして判定する。
-// ビルドは、そのテストバイナリのテストを実行する番が来たときに行う。
+// standalone judges a mutant that could not be embedded in the schemata by building it standalone per test binary.
+// Each build happens when it is the turn of that test binary's tests to run.
 func (u *unit) standalone(ctx context.Context, m *mutant.Mutant, tests []*testCase, opts Options) *Result {
 	name := "standalone-" + strconv.Itoa(m.Index)
 	overlay, err := writeOverlay(u.work, name, map[string][]byte{m.File.Path: m.Apply(m.File.Src)})
@@ -254,7 +254,7 @@ func (u *unit) standalone(ctx context.Context, m *mutant.Mutant, tests []*testCa
 			return p, nil
 		}
 		p := filepath.Join(u.work, name+"-"+strconv.Itoa(slices.Index(u.bins, b))+".test")
-		// 型検査を通ってもコンパイラが拒む変異体（定数の桁あふれなど）は構築不能とする。
+		// Mutants the compiler rejects despite passing type-checking (such as constant overflow) are not viable.
 		if err := goTestC(ctx, b.dir, u.Pkg.ImportPath, u.Pkg.Tags, overlay, p); err != nil {
 			return "", err
 		}

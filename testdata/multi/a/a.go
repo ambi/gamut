@@ -1,7 +1,7 @@
-// Package a は、b が import する対象パッケージである。
+// Package a is a target package that b imports.
 package a
 
-// Max は x と y の大きい方を返す。
+// Max returns the larger of x and y.
 func Max(x, y int) int {
 	if x > y {
 		return x

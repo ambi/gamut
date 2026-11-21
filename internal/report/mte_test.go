@@ -14,7 +14,7 @@ import (
 	"github.com/ambi/gamut/internal/report"
 )
 
-// schemaFile は、mutation-testing-report-schema 3.9.0 の JSON Schema である（Apache License 2.0、同じディレクトリの LICENSE を参照）。
+// schemaFile is the JSON Schema of mutation-testing-report-schema 3.9.0 (Apache License 2.0; see LICENSE in the same directory).
 const schemaFile = "testdata/mutation-testing-report-schema.json"
 
 func TestMTE_ValidatesAgainstTheSchema(t *testing.T) {
@@ -35,7 +35,7 @@ func TestMTE_ValidatesAgainstTheSchema(t *testing.T) {
 	lived.PreviouslyKilledBy = "TestGone"
 	matrix := m("p.go::ARITHMETIC_BASE::F::11", "KILLED", "")
 	matrix.KilledBy, matrix.Killers = "TestF", []string{"TestF", "TestG"}
-	// 本体を空にする変異体の置き換える字句は、3 行目の { の直後から 5 行目の } の前まで。
+	// The replaced text of the mutant emptying a body runs from right after { on line 3 to before } on line 5.
 	branch := report.Mutation{ID: "p.go::BRANCH_IF::F::10", Type: "BRANCH_IF", Status: "KILLED", Line: 3, Column: 23,
 		Original: "\n\treturn a + b\n", Replacement: "if false {\n\treturn a + b\n}"}
 	rep := &report.Report{
@@ -109,7 +109,7 @@ func TestMTE_ValidatesAgainstTheSchema(t *testing.T) {
 			t.Errorf("mutant %s: %q, want %q", k, got[k], w)
 		}
 	}
-	// 複数行の字句の終わりは、最後の改行の後ろの列で表す。
+	// The end of multi-line text is given as the column after the last newline.
 	if loc := byKey["10"].Location; loc.Start != (report.MTEPosition{Line: 3, Column: 23}) || loc.End != (report.MTEPosition{Line: 5, Column: 1}) {
 		t.Errorf("multi-line location %+v, want 3:23-5:1", loc)
 	}
@@ -142,13 +142,13 @@ func TestMTE_ValidatesAgainstTheSchema(t *testing.T) {
 		!slices.Equal(g.UnrepeatableTests, []string{"TestG"}) || g.Counts.Arid != 2 {
 		t.Errorf("top-level gamut %+v", g)
 	}
-	// 数は報告の数をそのまま写す。
+	// Counts copy the report's counts as is.
 	if g.MutationScore != rep.MutationScore || g.Counts.Killed != rep.MutantsKilled || g.Counts.Survived != rep.MutantsLived {
 		t.Errorf("counts %+v and score %v, want the report's", g.Counts, g.MutationScore)
 	}
 }
 
-// TestValidate_RejectsBrokenReports は、検証器そのものが、スキーマに合わない報告を拒むことを確かめる。
+// TestValidate_RejectsBrokenReports checks that the validator itself rejects reports that do not match the schema.
 func TestValidate_RejectsBrokenReports(t *testing.T) {
 	schemaData, err := os.ReadFile(schemaFile)
 	if err != nil {
@@ -185,14 +185,14 @@ func TestWriteHTML_EmbedsTheReport(t *testing.T) {
 	if !strings.Contains(html, `<script src="https://cdn.jsdelivr.net/npm/mutation-testing-elements@3.9.0/dist/mutation-test-elements.js"></script>`) {
 		t.Errorf("the viewer script is not pinned:\n%s", html)
 	}
-	// ソースの "</script>" で埋め込みの script が閉じないよう、JSON の < はエスケープする。
+	// JSON escapes <, so "</script>" in the source does not close the embedding script.
 	if strings.Count(html, "</script>") != 2 {
 		t.Errorf("the embedded source closes a script element:\n%s", html)
 	}
 }
 
-// validate は、doc を JSON Schema（draft-07）の schema で検証する。このスキーマが使うキーワード
-// （type、required、properties、additionalProperties、items、enum、$ref、minimum、maximum、uniqueItems、pattern）だけを扱う。
+// validate validates doc against the JSON Schema (draft-07) schema. It handles only the keywords this schema uses
+// (type, required, properties, additionalProperties, items, enum, $ref, minimum, maximum, uniqueItems, pattern).
 func validate(root, schema map[string]any, doc any, at string) []string {
 	if ref, ok := schema["$ref"].(string); ok {
 		name := strings.TrimPrefix(ref, "#/definitions/")

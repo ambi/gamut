@@ -10,32 +10,32 @@ import (
 	"strings"
 )
 
-// Arid は、テストが観測しないことの多いコード（arid）の規則である。arid のコードの中では変異体を作らない。
-// 規則は呼び出し先の types.Object のパッケージと名前で判定し、字句の一致には頼らない。
+// Arid holds the rules for code that tests rarely observe (arid code). No mutants are created inside arid code.
+// The rules judge by the package and name of the callee's types.Object, never by matching text.
 type Arid struct {
-	// Off なら、既定の規則も設定の規則も使わない。
+	// Off disables both the default rules and the configured ones.
 	Off bool
-	// Calls は、arid とする関数とメソッドの glob である。関数は "<パッケージ>.<名前>"、メソッドは "<パッケージ>.<型>.<名前>" に当てる。
-	// * は / と . を含む任意の文字列に当たる。
+	// Calls are globs of arid functions and methods, matched against "<package>.<Func>" for functions and "<package>.<Type>.<Method>" for methods.
+	// * matches any string, including / and ..
 	Calls []string
-	// Packages は、呼び出しを arid とするパッケージの import パスである。その下のパッケージも含む。
+	// Packages are the import paths of packages whose calls are arid, including the packages below them.
 	Packages []string
 }
 
-// aridPackages は、既定で呼び出しを arid とするパッケージである。ログ、メトリクス、トレースの出力はテストが観測しないことが多い。
+// aridPackages are the packages whose calls are arid by default. Tests rarely observe logging, metrics, and tracing output.
 var aridPackages = []string{"log", "log/slog", "expvar", "go.opentelemetry.io/otel"}
 
-// loggingPackages は、Debug*、Info*、Warn*、Error* のメソッドをロガーのメソッドとみなすパッケージである。
-// これら以外では、受け手の型の名前が Log を含むときだけロガーとみなす。
+// loggingPackages are the packages whose Debug*, Info*, Warn*, and Error* methods are treated as logger methods.
+// Elsewhere, a receiver counts as a logger only when its type name contains Log.
 var loggingPackages = []string{"log/slog", "go.uber.org/zap", "github.com/sirupsen/logrus", "github.com/rs/zerolog", "github.com/go-logr/logr", "k8s.io/klog"}
 
-// aridChecker は、1 つのパッケージで規則を当てる。
+// aridChecker applies the rules within one package.
 type aridChecker struct {
 	info *types.Info
 	rule *Arid
 }
 
-// Validate は、Calls の glob の構文を確かめる。
+// Validate checks the syntax of the globs in Calls.
 func (a *Arid) Validate() error {
 	for _, g := range a.Calls {
 		if _, err := path.Match(slashless(g), ""); err != nil {
@@ -45,10 +45,10 @@ func (a *Arid) Validate() error {
 	return nil
 }
 
-// slashless は、glob の * が / をまたいで当たるよう、/ を path.Match で特別でない文字にする。
+// slashless turns / into a character path.Match does not treat specially, so that * in a glob matches across /.
 func slashless(s string) string { return strings.ReplaceAll(s, "/", "|") }
 
-// node は、n が arid かを返す。arid のノードの中では変異体を作らない。
+// node reports whether n is arid. No mutants are created inside an arid node.
 func (c *aridChecker) node(n ast.Node) bool {
 	if c.rule.Off {
 		return false
@@ -69,8 +69,8 @@ func (c *aridChecker) node(n ast.Node) bool {
 	return false
 }
 
-// call は、呼び出しが出力だけのもの（ログ、メトリクス、トレース、標準エラーへの書き出し、設定で足したもの）かを返す。
-// そのような呼び出しは、引数を変異せず、文の削除もしない。
+// call reports whether the call only produces output (logging, metrics, tracing, writing to stderr, or calls added in the config).
+// Such calls have neither their arguments mutated nor their statements removed.
 func (c *aridChecker) call(call *ast.CallExpr) bool {
 	obj := callee(c.info, call)
 	if obj == nil || obj.Pkg() == nil {
@@ -100,7 +100,7 @@ func (c *aridChecker) call(call *ast.CallExpr) bool {
 	return false
 }
 
-// message は、呼び出しが panic、errors.New、fmt.Errorf かを返す。メッセージの算術は変異しないが、panic の文の削除は残す。
+// message reports whether the call is panic, errors.New, or fmt.Errorf. Arithmetic in the message is not mutated, but removing a panic statement is kept.
 func (c *aridChecker) message(call *ast.CallExpr) bool {
 	obj := callee(c.info, call)
 	switch o := obj.(type) {
@@ -116,8 +116,8 @@ func (c *aridChecker) message(call *ast.CallExpr) bool {
 	return false
 }
 
-// stmt は、文が arid の呼び出しの文だけからなるかを返す（ログを出すだけの if など）。条件を含めて全体を arid とする。
-// Google の規則 arid(n) = simple(n) ? expert(n) : children.every(arid) の、文についての形である。
+// stmt reports whether the statement consists only of arid call statements (such as an if that only logs). The whole statement, condition included, is then arid.
+// It is the statement form of Google's rule arid(n) = simple(n) ? expert(n) : children.every(arid).
 func (c *aridChecker) stmt(s ast.Stmt) bool {
 	switch x := s.(type) {
 	case *ast.ExprStmt:
@@ -131,12 +131,12 @@ func (c *aridChecker) stmt(s ast.Stmt) bool {
 	return false
 }
 
-// allArid は、文の並びが arid の文だけからなるかを返す（ログを出すだけの分岐の本体など）。そのような本体は空にしない。
+// allArid reports whether the statement list consists only of arid statements (such as a branch body that only logs). Such a body is not emptied.
 func (c *aridChecker) allArid(list []ast.Stmt) bool {
 	return !c.rule.Off && len(list) > 0 && !slices.ContainsFunc(list, func(s ast.Stmt) bool { return !c.stmt(s) })
 }
 
-// timeArithmetic は、算術の被演算子が time.Now() か time.Since() の呼び出しかを返す。経過時間の計算はテストが観測しにくい。
+// timeArithmetic reports whether an operand of the arithmetic is a call to time.Now() or time.Since(). Tests rarely observe elapsed-time calculations.
 func (c *aridChecker) timeArithmetic(b *ast.BinaryExpr) bool {
 	switch b.Op {
 	case token.ADD, token.SUB, token.MUL, token.QUO, token.REM:
@@ -155,7 +155,7 @@ func (c *aridChecker) timeArithmetic(b *ast.BinaryExpr) bool {
 	return false
 }
 
-// stringMethod は、宣言が String、GoString、Error のメソッド（引数なしで string を返す）かを返す。表示のための本体は観測されにくい。
+// stringMethod reports whether the declaration is a String, GoString, or Error method (no parameters, returning string). Bodies for display are rarely observed.
 func stringMethod(fd *ast.FuncDecl) bool {
 	if fd.Recv == nil || fd.Type.Params.NumFields() != 0 || fd.Type.Results.NumFields() != 1 {
 		return false
@@ -169,7 +169,7 @@ func stringMethod(fd *ast.FuncDecl) bool {
 	return ok && id.Name == "string"
 }
 
-// callee は、呼び出し先の Object を返す。関数の値や型の変換なら nil を返す。
+// callee returns the callee's Object, or nil for a function value or a conversion.
 func callee(info *types.Info, call *ast.CallExpr) types.Object {
 	switch f := ast.Unparen(call.Fun).(type) {
 	case *ast.SelectorExpr:
@@ -189,7 +189,7 @@ func logMethod(name string) bool {
 	return false
 }
 
-// typeName は、型（ポインタを外す）の名前を返す。名前がなければ空を返す。
+// typeName returns the name of the type (with any pointer removed), or empty when it has none.
 func typeName(t types.Type) string {
 	if p, ok := t.(*types.Pointer); ok {
 		t = p.Elem()
@@ -200,7 +200,7 @@ func typeName(t types.Type) string {
 	return ""
 }
 
-// isStderr は、e が os.Stderr かを返す。
+// isStderr reports whether e is os.Stderr.
 func isStderr(info *types.Info, e ast.Expr) bool {
 	sel, ok := ast.Unparen(e).(*ast.SelectorExpr)
 	if !ok {
@@ -210,7 +210,7 @@ func isStderr(info *types.Info, e ast.Expr) bool {
 	return ok && v.Pkg() != nil && v.Pkg().Path() == "os" && v.Name() == "Stderr"
 }
 
-// under は、import パス p が roots のどれかか、その下にあるかを返す。
+// under reports whether the import path p is one of roots or below one.
 func under(p string, roots []string) bool {
 	return slices.ContainsFunc(roots, func(r string) bool { return p == r || strings.HasPrefix(p, r+"/") })
 }

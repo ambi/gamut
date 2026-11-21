@@ -7,9 +7,9 @@ import (
 	"github.com/ambi/gamut/internal/load"
 )
 
-// TestWithHint_HintNeedsNoTargetExportUnlessImported は、エクスポートデータを求めるパッケージ（次回の hint）が、
-// 依存と、別の対象パッケージが import する対象パッケージだけであることを確かめる。
-// multi では b が a を import するので、a は含み、b と c は含まない。
+// TestWithHint_HintNeedsNoTargetExportUnlessImported checks that the packages whose export data is requested (the next hint)
+// are only the dependencies and the targets another target imports.
+// In multi, b imports a, so a is included and b and c are not.
 func TestWithHint_HintNeedsNoTargetExportUnlessImported(t *testing.T) {
 	_, hint, _, err := load.WithHint([]string{"../../testdata/multi/..."}, nil, nil)
 	if err != nil {
@@ -28,7 +28,7 @@ func TestWithHint_HintNeedsNoTargetExportUnlessImported(t *testing.T) {
 	}
 }
 
-// TestWithHint_StaleHintGivesTheSameTypes は、前回の hint、古い hint（ないパッケージを含む）、hint なしのどれでも、同じ型の検査の結果になることを確かめる。
+// TestWithHint_StaleHintGivesTheSameTypes checks that the previous hint, a stale hint (with missing packages), and no hint all give the same type-check results.
 func TestWithHint_StaleHintGivesTheSameTypes(t *testing.T) {
 	patterns := []string{"../../testdata/multi/..."}
 	base, hint, _, err := load.WithHint(patterns, nil, nil)

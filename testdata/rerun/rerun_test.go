@@ -2,7 +2,7 @@ package rerun
 
 import "testing"
 
-// TestIsAdult は境界の 18 を試さないので、>= を > にした変異体は生き残る。
+// TestIsAdult does not try the boundary 18, so the mutant turning >= into > survives.
 func TestIsAdult(t *testing.T) {
 	if !IsAdult(30) || IsAdult(5) {
 		t.Error("IsAdult is wrong")

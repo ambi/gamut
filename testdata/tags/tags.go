@@ -1,4 +1,4 @@
 package tags
 
-// Inc はタグがなくても列挙される。
+// Inc is enumerated even without tags.
 func Inc(x int) int { return x + 1 }

@@ -51,7 +51,7 @@ func TestFile_AddSaveLoadRemove(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 差分で読みやすいよう、項目ごとに行を分けて、識別子の順に書く。
+	// One line per field, in identifier order, so diffs read easily.
 	if !strings.Contains(string(data), "\n    \""+idB+"\": {\n") {
 		t.Errorf("unexpected layout:\n%s", data)
 	}

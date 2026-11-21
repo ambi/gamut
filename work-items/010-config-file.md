@@ -5,44 +5,17 @@ depends_on: []
 created_at: 2026-11-20
 ---
 
-# 設定ファイルを読む
+# Read a config file
 
-## 動機
+## Motivation
 
-変異演算子、arid の規則、重要領域、閾値、タイムアウトを毎回フラグで渡すのは、CI と手元で設定がずれる原因になる。
+Passing mutators, arid rules, critical regions, thresholds, and timeouts as flags every time lets CI and local runs drift apart.
 
-## 対象範囲
+## Summary
 
-- モジュールのルートの `gamut.json` を読む。`--config <path>` で別のファイルを指定できる。
-- 項目：`mutators`、`exclude_files`（正規表現）、`arid`（呼び出しの glob）、`critical`（パスの glob）、`thresholds`、`timeout`、`workers`、`tags`、`test_flags`。
-- フラグは設定ファイルより優先する。
-- JSON Schema を `schema/gamut.schema.json` に置く。
-- 未知の項目は終了コード 1 で拒否する。
-
-## 対象外
-
-- YAML と TOML。依存を増やさないため、標準ライブラリで読める JSON に限る。
-
-## 設計
-
-設定はキャッシュの環境のハッシュ（[004](004-result-cache.md)）に含める。
-判定に影響しない項目（`workers`）は除く。
-
-## 完了の条件
-
-- 設定ファイルの各項目が、同じ意味のフラグと同じ判定を生む。
-- 未知の項目で終了コード 1 になる。
-
-## 検証
-
-- 設定の読み込みの単体テストと、固定モジュールでの端から端までのテスト。
-
-## 要約
-
-- `internal/config` が `gamut.json` を読み、項目を同じ意味のフラグの値に直す。`cmd/gamut` は、コマンドラインで指定されなかったフラグにだけその値を入れるので、後段はフラグで指定したときと同じ値を受け取る。
-- 項目は、いま機能のある `mutators`、`exclude_files`、`timeout`（`factor`、`min`）、`workers`、`tags`、`test_flags` に絞った。`arid`、`critical`、`thresholds` は、機能より先に受け付けると効かない項目を書けてしまうので、019 と 014 がそれぞれの機能と一緒に足す。
-- `exclude_files` と同じ意味のフラグ `-exclude-files`（繰り返し可）を足した。カンマ区切りにしなかったのは、正規表現がカンマを含みうるためである。外した後の変異体の番号は `mutant.Without` で 1 から振り直す。
-- 設定ファイルはキャッシュの鍵に直接は入れず、判定に影響する値は、フラグと同じく実際の値で環境に入る。`exclude_files` は変更のない再実行の鍵に入れた。
-- 未知の項目（入れ子を含む）、未知の変異演算子、正規表現と時間の形の誤り、正でない係数とワーカー数、最上位の値の後のデータは、終了コード 1 で止める。
-- JSON Schema は `schema/gamut.schema.json` に置き、項目の名前と変異演算子の候補がコードと一致することを単体テストで確かめる。
-- 単体テストで、全項目が同じ意味のフラグの値に直ることを確かめた。端から端までのテストで、`mutators`、`exclude_files`、`timeout` がフラグと同じ判定になること、フラグが設定より優先されること、`-config` のファイルを読むこと、未知の項目と存在しない `-config` で終了コード 1 になることを表明した。
+- `internal/config` reads `gamut.json` and turns its keys into the values of the equivalent flags; `cmd/gamut` puts them only into flags not given on the command line. Only JSON is supported, to stay on the standard library.
+- Keys were limited to features that existed (`mutators`, `exclude_files`, `timeout`, `workers`, `tags`, `test_flags`); `arid`, `critical`, and `thresholds` arrived with their features.
+- `-exclude-files` (repeatable, since regular expressions may contain commas) was added; remaining mutants are renumbered with `mutant.Without`.
+- The file itself is not a cache key; values that affect verdicts enter the environment like flags.
+- Unknown keys, unknown mutators, malformed values, and trailing data exit with code 1.
+- `schema/gamut.schema.json` is checked against the code by unit tests, and end-to-end tests assert that keys behave like their flags and that flags win.

@@ -9,9 +9,9 @@ import (
 	"github.com/ambi/gamut/internal/run"
 )
 
-// WriteGitHubAnnotations は、直すべき生き残り（受理していない LIVED と NOT COVERED）を、GitHub Actions のワークフローコマンドで書く。
-// Pull Request では、その行に注釈として表示される。重要領域の生き残りは品質の条件を満たさないので error、ほかは warning にする。
-// prefix は、リポジトリのルートからモジュールのルートへの相対パスである。注釈のファイルはリポジトリ相対で指定する。
+// WriteGitHubAnnotations writes the survivors to fix (unaccepted LIVED and NOT COVERED) as GitHub Actions workflow commands.
+// On a pull request they show as annotations on their lines. Survivors in critical regions fail the quality gate, so they are errors; the rest are warnings.
+// prefix is the relative path from the repository root to the module root, since annotation files are given relative to the repository.
 func WriteGitHubAnnotations(w io.Writer, r *Report, prefix string) {
 	for _, f := range r.Files {
 		file := path.Join(prefix, f.Path)
@@ -34,7 +34,7 @@ func WriteGitHubAnnotations(w io.Writer, r *Report, prefix string) {
 	}
 }
 
-// classOf は、生き残りの分類を返す。
+// classOf returns the class of a survivor.
 func classOf(m Mutation) string {
 	switch {
 	case m.PreviouslyKilledBy != "":
@@ -45,7 +45,7 @@ func classOf(m Mutation) string {
 	return m.Reason
 }
 
-// hintOf は、生き残りの直し方の指針を返す。要約の組の指針と同じ文である。
+// hintOf returns the hint for fixing a survivor, the same text as for the summary's group.
 func hintOf(m Mutation) string {
 	switch {
 	case m.PreviouslyKilledBy != "":
@@ -58,12 +58,12 @@ func hintOf(m Mutation) string {
 	return "tests run the mutant and see a different value, but none fails: strengthen an assertion"
 }
 
-// escapeData は、ワークフローコマンドの本文を GitHub の規則でエスケープする。
+// escapeData escapes a workflow command's message by GitHub's rules.
 func escapeData(s string) string {
 	return strings.NewReplacer("%", "%25", "\r", "%0D", "\n", "%0A").Replace(s)
 }
 
-// escapeProperty は、ワークフローコマンドの属性の値を GitHub の規則でエスケープする。
+// escapeProperty escapes a workflow command's property value by GitHub's rules.
 func escapeProperty(s string) string {
 	return strings.NewReplacer("%", "%25", "\r", "%0D", "\n", "%0A", ":", "%3A", ",", "%2C").Replace(s)
 }

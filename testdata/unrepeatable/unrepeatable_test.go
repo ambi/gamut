@@ -2,7 +2,7 @@ package unrepeatable
 
 import "testing"
 
-// TestSwitch は、on を戻さずに確かめる。同じプロセスで 2 回目に実行すると、on が偽に戻って失敗する。
+// TestSwitch checks without resetting on. Run a second time in the same process, on flips back to false and it fails.
 func TestSwitch(t *testing.T) {
 	Switch(1)
 	if !on {

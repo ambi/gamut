@@ -5,45 +5,17 @@ depends_on: [003]
 created_at: 2026-11-20
 ---
 
-# 逆依存パッケージのテストでも検出を試す
+# Also try to detect mutants with the tests of reverse dependencies
 
-## 動機
+## Motivation
 
-Go ではパッケージごとにテストバイナリが分かれるので、呼び出し元のパッケージのテストが観測する振る舞いは、対象パッケージのテストだけでは検出できない。
-idmagic のテスト方針も、この理由で逆依存パッケージのテストによる検出を求めている。
+Go builds a test binary per package, so behavior observed by the tests of calling packages cannot be detected by the target package's tests alone.
 
-## 対象範囲
+## Summary
 
-- `--integration` で、対象パッケージを import するモジュール内のパッケージ（推移的）のうちテストを持つものを列挙する。
-- 対象パッケージの書き換えを同じ overlay で渡し、逆依存パッケージのテストバイナリを 1 回ずつビルドする。
-- 被覆の記録と変異体の実行を、すべてのテストバイナリにまたがって行う。テストの名前は `<パッケージ>.<テスト名>` で区別する。
-- 逆依存パッケージのテストのうち、対象パッケージの変異箇所にまったく到達しないパッケージは、以後の実行で除外し、その旨をキャッシュに残す。
-
-## 対象外
-
-- モジュールの外のパッケージ。
-
-## 設計
-
-逆依存は `go list -deps -test` の結果を逆にたどって求める。
-変異箇所の番号は対象パッケージの補助ファイルが持ち、逆依存のテストバイナリにもそのパッケージがリンクされるので、同じ環境変数で選べる。
-
-## 完了の条件
-
-- 呼び出し元のパッケージのテストでだけ検出できる変異体を持つ 2 パッケージの固定モジュールで、通常は `LIVED`、`--integration` では `KILLED` になる。
-- idmagic の `backend/signinpolicy/domain` で、gomutants の統合モードと判定を比べ、食い違いを説明できる。
-
-## 検証
-
-- 上の固定モジュールに対する端から端までのテスト。
-- idmagic での比較（`compare-with-gomutants` スキル）。
-
-## 要約
-
-- 逆依存パッケージは `load.ReverseDeps` が、メインモジュール全体への `go list -deps -test` の結果を逆にたどって求める。逆依存パッケージのテストバイナリは、対象パッケージの書き換えと同じ overlay で、1 回の `go test -c -o <ディレクトリ>/ <パッケージ>...` にまとめてビルドする。出力の名前はパッケージの最後の要素なので、それが重なるパッケージは別の組にする。最初の組で共通の依存をビルドキャッシュに載せ、残りの組を CPU の数まで同時に走らせる。
-- 対象パッケージが複数あるときは、逆依存パッケージのテストバイナリを対象パッケージごとに分けた。1 つに複数の書き換えを入れると、パッケージごとに 1 から振る変異体の番号が `GAMUT_MUTANT` で衝突するためである。
-- 逆依存パッケージのテストの名前は `<import パス>.<テスト名>`、キャッシュの鍵はパッケージごとに 1 つ（そのパッケージと、対象パッケージを除く手元の依存のファイル）にした。
-- 「到達しないパッケージを除外する」記録は、別の表を作らず被覆の記録で表した。全テストの記録を戻せる逆依存パッケージは、一覧を記録から取り、被覆を測るか変異体を実行するまでビルドしない。到達しないパッケージは、変わらない限りビルドされない。
-- 個別ビルドの変異体は、逆依存パッケージのテストバイナリも、その番が来たときに個別にビルドする。自己検査はパッケージ自身のテストバイナリだけで行う。
-- `testdata/integration` の端から端までのテスト（`TestIntegration_DetectsWithReverseDependencyTests`）で、通常は `LIVED` と `NOT COVERED` の変異体が `-integration` では `KILLED` になること、到達しないパッケージを報告すること、変更なしの再実行で逆依存パッケージをビルドしないこと、テストを変えた逆依存パッケージだけをビルドし直すことを表明した。
-- idmagic の `backend/signinpolicy/domain`（27 体、逆依存パッケージ 110 個、テスト 2,773 件）で、ワーカー数 2 の gamut は 163 秒（完了の時点では 363 秒。その後のビルドのまとめ方、被覆の記録のまとめ方、テストプロセスの使い回しで短くなった）、gomutants 0.7.3 の `--integration --cache=off` は 748 秒だった。共有ビルドキャッシュの増加は、gomutants の初回が 2,432 ファイル 244 MiB、gamut がビルドのフラグを変えた後の初回で 1,432 ファイル 313 MiB、`domain` を 1 回編集するごとに 48〜56 MiB だった（作成時刻で数えた）。統合モードなしの gamut は 17 体 KILLED、10 体 NOT COVERED で、統合モードでは 27 体すべて KILLED になった。両者が生成した 27 体の判定はすべて一致し、食い違いは gomutants だけが生成した 2 体（二項の `-` への `INVERT_NEGATIVES`、README の既知の原因）だった。110 個の逆依存パッケージのうち 101 個は、どのテストも変異箇所に到達しなかった。
+- `load.ReverseDeps` finds reverse dependencies by walking `go list -deps -test` over the main module backwards. Their test binaries are built with the target's overlay in one `go test -c -o <dir>/ <packages>...`; packages with the same last element go into separate batches, the first batch warms the build cache, and the rest run in parallel.
+- With several targets, reverse dependency binaries are split per target, since mutant numbers start at 1 per package and would collide in `GAMUT_MUTANT`.
+- Reverse dependency tests are named `<import path>.<test name>`, with one cache key per package.
+- Unreached packages are represented by coverage records: a reverse dependency whose records can all be restored is not built until needed, so unreached packages stay unbuilt while unchanged.
+- `TestIntegration_DetectsWithReverseDependencyTests` asserts `LIVED`/`NOT COVERED` turning `KILLED` under `-integration`, the report of unreached packages, and the build behavior on reruns.
+- On idmagic's `backend/signinpolicy/domain` (27 mutants, 110 reverse dependencies), gamut took 163 s against 748 s for gomutants 0.7.3 `--integration`, with matching verdicts on the shared 27 mutants. 101 of the 110 packages reached no mutation site.

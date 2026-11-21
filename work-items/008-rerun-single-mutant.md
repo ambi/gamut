@@ -5,40 +5,15 @@ depends_on: [004]
 created_at: 2026-11-20
 ---
 
-# 変異体を識別子で指定して再実行する
+# Rerun mutants selected by identifier
 
-## 動機
+## Motivation
 
-生き残りを埋めるテストを書いたら、その変異体だけを確かめ直したい。
-今の gamut は全変異体を実行し直すしかない。
+After writing a test for a survivor, the user wants to check just that mutant, but gamut could only run every mutant again.
 
-## 対象範囲
+## Summary
 
-- `--mutant <id>`（繰り返し可、一意な前方一致を受け付ける）で、指定した変異体だけを実行する。
-- 指定した変異体はキャッシュを使わず、判定をキャッシュへ書き戻す。
-- 被覆の記録は、指定した変異体の変異箇所に到達していたテストだけを測り直す。
-- 報告には指定した変異体だけを載せる。
-
-## 対象外
-
-- 対話的な閲覧画面。エージェント向けの報告（[017](017-agent-reporter-and-skill.md)）で代える。
-
-## 設計
-
-前方一致が複数に当たるときは、候補を並べて終了コード 1 で止める。
-
-## 完了の条件
-
-- 固定モジュールで、生き残りを指定して再実行すると、その 1 体だけが実行される。
-- テストを足した後の再実行で、判定が `KILLED` に変わる。
-
-## 検証
-
-- 端から端までのテスト。
-
-## 要約
-
-- `-mutant` は識別子か一意な前方一致を受け付け、完全一致を前方一致より優先する。当たらないか複数に当たれば、候補を並べて終了コード 1 で止める。`-since` との併用は終了コード 2 にした。
-- 指定した変異体を含むパッケージだけを準備する。schemata には全変異体を埋め込み、被覆の記録の番号とキャッシュの記録を通常の実行と共有する。
-- 被覆の記録は、規則どおり戻せないテストに加えて、指定した変異体の変異箇所に到達していたテストを測り直す。
-- 端から端までのテスト（`TestMutant_RerunsOnlyTheNamedMutant`）で、テストを足した後に指定した生き残りが `KILLED` に変わること、報告がその 1 体だけであること、被覆を測ったテストが 1 件であること、書き戻した判定が次の実行で再利用されることを表明した。
+- `-mutant` takes an identifier or a unique prefix, preferring exact matches. No match or several matches list the candidates and exit with code 1.
+- Only packages containing the selected mutants are prepared. The schemata still embed every mutant, so coverage numbers and cache records are shared with normal runs.
+- Selected mutants ignore the cache and write their verdicts back. Tests that reached their sites are remeasured.
+- `TestMutant_RerunsOnlyTheNamedMutant` asserts that a survivor turns `KILLED` after adding a test, that the report holds only that mutant, that one test is measured, and that the verdict is reused next time.

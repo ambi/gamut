@@ -2,20 +2,20 @@ package calc
 
 import "testing"
 
-// TestPanicky は、失敗を panic で知らせる。プロセスが落ちても、後のテストの検出も記録されなければならない。
+// TestPanicky reports failure by panicking. Even when the process dies, detections by later tests must be recorded.
 func TestPanicky(t *testing.T) {
 	if Add(2, 3) != 5 {
 		panic("wrong sum")
 	}
 }
 
-// TestNothing は表明を持たない。
+// TestNothing has no assertions.
 func TestNothing(t *testing.T) {
 	_ = Add(1, 2)
 	_ = Sub(1, 2)
 }
 
-// TestAdd と TestAddAgain は同じ変異体を検出し、どちらも TestBoth に包含される。
+// TestAdd and TestAddAgain detect the same mutants, and TestBoth subsumes both.
 func TestAdd(t *testing.T) {
 	if Add(2, 3) != 5 {
 		t.Fatal("wrong sum")

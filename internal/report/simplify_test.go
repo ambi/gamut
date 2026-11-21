@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// TestWriteSimplify は、候補の選び方（検出されなかった削除の変異だけ）と、複数行の文の表示を確かめる。
+// TestWriteSimplify checks how candidates are chosen (only undetected removals) and how multi-line statements are shown.
 func TestWriteSimplify(t *testing.T) {
 	rep := &Report{Files: []File{{Path: "a.go", Mutations: []Mutation{
 		{ID: "a.go::STATEMENT_REMOVE::F::1", Type: "STATEMENT_REMOVE", Status: "LIVED", Reason: "not detected", Line: 3, Column: 2, Original: "save(x,\n\ty)", Replacement: "<removed>"},

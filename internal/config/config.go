@@ -1,4 +1,4 @@
-// Package config は、モジュールのルートの設定ファイル gamut.json を読み、同じ意味のフラグの値に直す。
+// Package config reads the config file gamut.json at the module root and turns it into the values of the equivalent flags.
 package config
 
 import (
@@ -20,58 +20,58 @@ import (
 	"github.com/ambi/gamut/internal/mutant"
 )
 
-// FileName は、モジュールのルートで探す設定ファイルの名前である。
+// FileName is the name of the config file looked for at the module root.
 const FileName = "gamut.json"
 
-// Config は設定ファイルの中身である。省いた項目は、フラグの既定値のままにする。
+// Config is the contents of the config file. Omitted keys leave the flag defaults alone.
 type Config struct {
-	// Path は読んだファイルのパスである。
+	// Path is the path of the file read.
 	Path string `json:"-"`
-	// Mutators は有効にする変異演算子で、-only と同じ意味である。
+	// Mutators are the mutators to enable, as with -only.
 	Mutators []string `json:"mutators,omitempty"`
-	// ExcludeFiles は、変異の対象から外すファイルのモジュール相対のパスの正規表現で、-exclude-files と同じ意味である。
+	// ExcludeFiles are regular expressions of module-relative paths of files not to mutate, as with -exclude-files.
 	ExcludeFiles []string `json:"exclude_files,omitempty"`
-	// Timeout は時間切れの上限の係数と下限で、-timeout-factor と -timeout-min と同じ意味である。
+	// Timeout is the factor and minimum of the timeout, as with -timeout-factor and -timeout-min.
 	Timeout *Timeout `json:"timeout,omitempty"`
-	// Workers は -workers と同じ意味である。
+	// Workers is as with -workers.
 	Workers *int `json:"workers,omitempty"`
-	// Tags はビルドタグで、-tags と同じ意味である。
+	// Tags are build tags, as with -tags.
 	Tags []string `json:"tags,omitempty"`
-	// TestFlags はテストバイナリに渡すフラグで、-test-flags と同じ意味である。
+	// TestFlags are flags passed to test binaries, as with -test-flags.
 	TestFlags []string `json:"test_flags,omitempty"`
-	// Critical は重要領域のファイルのモジュール相対のパスの glob で、-critical と同じ意味である。
+	// Critical are globs of module-relative paths of critical region files, as with -critical.
 	Critical []string `json:"critical,omitempty"`
-	// Thresholds は点数の閾値で、-threshold-high、-threshold-low、-threshold-break と同じ意味である。
+	// Thresholds are the score thresholds, as with -threshold-high, -threshold-low, and -threshold-break.
 	Thresholds *Thresholds `json:"thresholds,omitempty"`
-	// FailOnSurvived は -fail-on-survived と同じ意味である。
+	// FailOnSurvived is as with -fail-on-survived.
 	FailOnSurvived *bool `json:"fail_on_survived,omitempty"`
-	// Arid は、変異しない呼び出しを足す。-arid-call と -arid-package と同じ意味である。
+	// Arid adds calls not to mutate, as with -arid-call and -arid-package.
 	Arid *Arid `json:"arid,omitempty"`
 }
 
-// Arid は、arid の規則に足す呼び出しとパッケージである。
+// Arid are the calls and packages added to the arid rules.
 type Arid struct {
-	// Calls は関数とメソッドの glob（"<パッケージ>.<名前>"、"<パッケージ>.<型>.<名前>"）である。
+	// Calls are globs of functions and methods ("<package>.<Func>", "<package>.<Type>.<Method>").
 	Calls []string `json:"calls,omitempty"`
-	// Packages は import パスである。その下のパッケージも含む。
+	// Packages are import paths, including the packages below them.
 	Packages []string `json:"packages,omitempty"`
 }
 
-// Thresholds は点数の閾値（百分率）である。
+// Thresholds are the score thresholds (percentages).
 type Thresholds struct {
 	High  *float64 `json:"high,omitempty"`
 	Low   *float64 `json:"low,omitempty"`
 	Break *float64 `json:"break,omitempty"`
 }
 
-// Timeout は時間切れの上限の設定である。
+// Timeout configures the timeout.
 type Timeout struct {
 	Factor *float64 `json:"factor,omitempty"`
-	// Min は Go の time.ParseDuration の形（"2s" など）である。
+	// Min is in the form of Go's time.ParseDuration (such as "2s").
 	Min *string `json:"min,omitempty"`
 }
 
-// Find は、モジュールのルート dir の設定ファイルを読む。なければ nil を返す。
+// Find reads the config file in the module root dir, or returns nil when there is none.
 func Find(dir string) (*Config, error) {
 	path := filepath.Join(dir, FileName)
 	if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
@@ -80,7 +80,7 @@ func Find(dir string) (*Config, error) {
 	return Load(path)
 }
 
-// Load は、path の設定ファイルを読み、項目の値を確かめる。未知の項目は誤りにする。
+// Load reads the config file at path and checks the values. Unknown keys are errors.
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -144,8 +144,8 @@ func (c *Config) check() error {
 	return nil
 }
 
-// Flags は、設定した項目を、同じ意味のフラグの名前から値への対応にする。
-// 繰り返し指定できるフラグ（-exclude-files）は値を複数持つ。省いた項目は含めない。
+// Flags maps the names of the equivalent flags to the values of the keys that are set.
+// Repeatable flags (-exclude-files) have several values. Omitted keys are not included.
 func (c *Config) Flags() map[string][]string {
 	out := map[string][]string{}
 	if len(c.Mutators) > 0 {
@@ -196,7 +196,7 @@ func (c *Config) Flags() map[string][]string {
 	return out
 }
 
-// Items は、設定ファイルの最上位の項目の名前を、名前の順に返す。JSON Schema との一致を確かめるのに使う。
+// Items returns the names of the top-level keys of the config file in name order, for checking against the JSON Schema.
 func Items() []string {
 	var out []string
 	t := reflect.TypeFor[Config]()

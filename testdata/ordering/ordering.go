@@ -1,7 +1,7 @@
-// Package ordering は、前回の検出テストを先に実行することを確かめる固定モジュールである。
+// Package ordering is a fixed module checking that the previous detecting test runs first.
 package ordering
 
-// Double は v の 2 倍を返す。
+// Double returns twice v.
 func Double(v int) int {
 	return v * 2
 }

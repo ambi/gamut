@@ -5,63 +5,18 @@ depends_on: [003]
 created_at: 2026-11-20
 ---
 
-# 判定を位置に依存しない鍵でキャッシュし、変わらない変異体を実行しない
+# Cache verdicts under position-independent keys and skip unchanged mutants
 
-## 動機
+## Motivation
 
-gamut は毎回、全変異体を実行し直す。
-変更のない再実行や、1 関数を変えた後の再実行でも、初回と同じ時間がかかる。
-パッケージ単位のキャッシュでは import 先の変更を追えず、古い判定を返しうるので、変異体ごとに依存を鍵に含める必要がある。
+gamut ran every mutant again on every run, even unchanged reruns. A per-package cache cannot follow changes in imported packages, so the dependencies must be part of each mutant's key.
 
-## 対象範囲
+## Summary
 
-- 変異体ごとに、次の鍵と判定を `.gamut/cache.json` に保存する。
-  - 囲む宣言の正規化した構文木のハッシュ（コメントと空白を除く）。
-  - 対象パッケージのほかの宣言のうち、囲む宣言が参照するもののハッシュ（同じパッケージの補助関数の変更を捉える）。
-  - import するモジュール内のパッケージのソースのハッシュ。
-  - 到達したテストの関数本体と、テストが参照するテストファイル内の宣言のハッシュ。
-  - 環境のハッシュ：Go の版、gamut の版、`go.mod` と `go.sum`、変異演算子の集合、ビルドタグ、テストのフラグ、設定ファイル。
-- 状態ごとに次の規則で再利用する。
-  - `KILLED`：囲む宣言と検出したテストが変わらなければ再利用する。
-  - `LIVED`：囲む宣言、依存、到達したテストが変わらず、到達するテストが増えていなければ再利用する。
-  - `NOT COVERED`：囲む宣言が変わらず、どのテストも到達しないままなら再利用する。
-  - `TIMED OUT`：囲む宣言と依存が変わらなければ再利用する。
-- 中断（Ctrl-C、時間切れ）しても、それまでの判定を保存する。書き込みは一時ファイルからの改名で原子的に行う。
-- `--no-cache` で無効にする。
-
-## 対象外
-
-- 被覆の記録自体の省略（[005](005-incremental-coverage.md)）。この項目では被覆の記録は毎回行う。
-
-## 設計
-
-変異体の識別子はすでに位置に依存しないので、キャッシュの鍵の主キーにそのまま使う。
-依存の追跡は、実行時の呼び出しグラフを記録せず、`go/types` の参照から宣言の依存を静的に得る。
-最初は「同じパッケージ内の参照する宣言」と「import するモジュール内のパッケージ全体」の粒度にし、粗い側に倒す。
-
-採らない案：判定と一緒に元のソースを保存して差分で位置を補正する方式。報告が肥大し、依存の変更を捉えない。
-
-## 完了の条件
-
-- 変更のない再実行で、変異体を 1 体も実行しない。
-- 1 関数を変えた後の再実行で、その関数の変異体と、その関数を参照する宣言の変異体だけを実行する。
-- 補助関数（別の宣言）を変えると、それを呼ぶ関数の生き残りが実行し直される。
-- `go.mod` を変えると、全変異体を実行し直す。
-- キャッシュの有無で、判定がすべて一致する。
-
-## 検証
-
-- 上の各条件を、固定モジュールのコピーを書き換えながら確かめる端から端までのテスト。
-- idmagic の 3 パッケージで、キャッシュありとなしの判定の一致と、再実行の時間を測る。
-
-## 要約
-
-- 新しいパッケージ `internal/cache` が鍵の計算（`Keys`）とファイルの読み書き（`Store`、`Environment`）を持ち、再利用の規則は `internal/run` の `reusable` が持つ。`load.SourceDeps` が `go list -deps -test` でテストバイナリの手元の依存を得る。
-- 保存先は `-cache`（既定は作業ディレクトリの `.gamut/cache.json`）にした。モジュールのルートに書くと、対象のソースツリーへ書き込まない不変条件に反するためである。
-- 被覆の記録は毎回行うので、`NOT COVERED` と `not infected` はキャッシュを使わずに決まる。キャッシュを引くのは実行が要る変異体だけで、`KILLED` は検出したテストを今回も実行すること、`LIVED` は到達と実行のテストの集合が前回と同じことも求めた。到達と感染の変化をこれで捉える。
-- テストファイルは型検査せず、名前の一致で参照を近似した。テストだけが import するパッケージのエクスポートデータがないためである。テストの鍵はテストファイルの宣言だけを含め、テストが呼ぶパッケージの宣言を含めない。含めると 1 関数の変更でそれを呼ぶテストが到達する別の宣言まで実行し直すためで、限界は設計に書いた。
-- 依存には、インターフェースのメソッドの呼び出しから同名のメソッドへの辺と、すべての宣言から `init` への辺を足した。外の依存には、埋め込みファイルと `testdata` の下のファイルも含めた。
-- 環境の鍵は gamut の実行ファイルの中身を含める。設定ファイル（[010](010-config-file.md)）を足すときは、その中身も `Environment` の settings に加える。
-- 取り消しの後に終わった実行は記録しない。止められたテストが失敗に見え、`KILLED` として残るためで、このガードを外すと失敗するテストを置いた。`SIGTERM` も取り消しとして扱うようにした。
-- `testdata/reuse` の端から端までのテスト（`cmd/gamut/cache_test.go`）で、変更なし、コメントと行の移動、1 関数の変更、補助関数の変更、テストの変更、`go.mod` の変更の各段階について、実行した変異体の宣言と、キャッシュなしの判定との一致を表明した。
-- idmagic の 3 パッケージ（593 体）では、キャッシュなし 40.0 秒、変更なしの再実行 10.4 秒（実行 0 体）、補助関数を 1 行変えた後 13.1 秒（実行 33 体）で、判定はすべて一致した。残りの時間の大半は被覆の記録で、[005](005-incremental-coverage.md) で扱う。
+- `internal/cache` computes keys (`Keys`) and reads and writes the file (`Store`, `Environment`); the reuse rules live in `reusable` in `internal/run`. `load.SourceDeps` gets the test binary's local dependencies with `go list -deps -test`.
+- The cache lives at `-cache` (default `.gamut/cache.json` in the working directory), not at the module root, so judging never writes to the target source tree.
+- Coverage is recorded every run, so `NOT COVERED` and `not infected` need no cache. `KILLED` is reused only when the detecting test still runs, and `LIVED` only when the sets of reaching and run tests are unchanged.
+- Test files are not type-checked (export data of test-only imports is missing); references are approximated by name. Test keys include only test file declarations.
+- Dependencies include edges from interface method calls to methods of the same name and from every declaration to `init`; external dependencies include embedded files and `testdata`. The environment key includes the gamut executable's contents.
+- Runs finished after cancellation are not recorded, since stopped tests look like failures; `SIGTERM` counts as cancellation.
+- `cmd/gamut/cache_test.go` asserts the executed mutants and the match with uncached verdicts across edits. On three idmagic packages (593 mutants): 40.0 s uncached, 10.4 s unchanged (0 run), 13.1 s after a one-line helper change (33 run).

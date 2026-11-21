@@ -1,4 +1,4 @@
-// Package operators は、既定では無効な変異演算子の、KILLED になる例と LIVED になる例を持つ。
+// Package operators has, for the mutators off by default, examples that end up KILLED and examples that end up LIVED.
 package operators
 
 import (
@@ -6,25 +6,25 @@ import (
 	"fmt"
 )
 
-// Accumulate の acc += v を acc = v にしても、テストの入力 acc = 0 では値が変わらないので生き残る。
+// Turning acc += v into acc = v in Accumulate survives, because with the test's input acc = 0 the value does not change.
 func Accumulate(acc, v int) int {
 	acc += v
 	return acc
 }
 
-// Limit の 3 を 4 にしても 2 にしても、テストが値を確かめるので検出される。
+// Turning Limit's 3 into 4 or 2 is detected, because the test checks the value.
 func Limit() int { return 3 }
 
-// Retries の 5 を 6 にしても 4 にしても、テストが値を確かめないので生き残る。
+// Turning Retries' 5 into 6 or 4 survives, because the test does not check the value.
 func Retries() int { return 5 }
 
-// Rate の 0.5 を 1.5 にしても -0.5 にしても、テストが値を確かめるので検出される。
+// Turning Rate's 0.5 into 1.5 or -0.5 is detected, because the test checks the value.
 func Rate() float64 { return 0.5 }
 
-// Ratio の 1.5 を 2.5 にしても 0.5 にしても、テストが値を確かめないので生き残る。
+// Turning Ratio's 1.5 into 2.5 or 0.5 survives, because the test does not check the value.
 func Ratio() float64 { return 1.5 }
 
-// Abs の if の本体を空にすると、テストの入力 -2 で値が変わり、検出される。
+// Emptying the body of Abs's if changes the value for the test's input -2, so it is detected.
 func Abs(n int) int {
 	if n < 0 {
 		n = -n
@@ -32,7 +32,7 @@ func Abs(n int) int {
 	return n
 }
 
-// Note の if の本体を空にしても、テストが通知を確かめないので生き残る。
+// Emptying the body of Note's if survives, because the test does not check the notification.
 func Note(n int) int {
 	if n > 0 {
 		notified++
@@ -40,7 +40,7 @@ func Note(n int) int {
 	return n
 }
 
-// Sign の else の本体を空にすると、テストの入力 1 で値が変わり、検出される。
+// Emptying the body of Sign's else changes the value for the test's input 1, so it is detected.
 func Sign(n int) int {
 	s := 0
 	if n < 0 {
@@ -51,7 +51,7 @@ func Sign(n int) int {
 	return s
 }
 
-// Level の else の本体を空にしても、既定の値が else の値と同じなので生き残る。
+// Emptying the body of Level's else survives, because the default value equals the else's value.
 func Level(n int) string {
 	l := "low"
 	if n > 9 {
@@ -62,7 +62,7 @@ func Level(n int) string {
 	return l
 }
 
-// Name の case の本体を空にすると、テストの入力 1 で値が変わり、検出される。
+// Emptying the body of Name's case changes the value for the test's input 1, so it is detected.
 func Name(n int) string {
 	s := "?"
 	switch n {
@@ -72,7 +72,7 @@ func Name(n int) string {
 	return s
 }
 
-// Kind の case の本体を空にしても、既定の値が case の値と同じなので生き残る。
+// Emptying the body of Kind's case survives, because the default value equals the case's value.
 func Kind(n int) string {
 	s := "even"
 	switch n % 2 {
@@ -82,16 +82,16 @@ func Kind(n int) string {
 	return s
 }
 
-// ErrBase は、包まれるエラーである。
+// ErrBase is the wrapped error.
 var ErrBase = errors.New("base")
 
-// Wrap の %w を %v にすると、テストが errors.Is で確かめるので検出される。
+// Turning %w into %v in Wrap is detected, because the test checks with errors.Is.
 func Wrap() error { return fmt.Errorf("wrap: %w", ErrBase) }
 
-// Annotate の %w を %v にしても、テストがメッセージしか確かめないので生き残る。
+// Turning %w into %v in Annotate survives, because the test checks only the message.
 func Annotate() error { return fmt.Errorf("annotate: %w", ErrBase) }
 
-// Check の return ErrBase を nil にすると、テストの入力 -1 で検出される。
+// Turning Check's return ErrBase into nil is detected with the test's input -1.
 func Check(n int) error {
 	if n < 0 {
 		return ErrBase
@@ -99,7 +99,7 @@ func Check(n int) error {
 	return nil
 }
 
-// Validate の return ErrBase を nil にしても、テストがエラーを確かめないので生き残る。
+// Turning Validate's return ErrBase into nil survives, because the test does not check the error.
 func Validate(n int) error {
 	if n > 100 {
 		return ErrBase
@@ -107,16 +107,16 @@ func Validate(n int) error {
 	return nil
 }
 
-// Flags の a | b を a & b にすると、テストの入力 (1, 2) で値が変わり、検出される。
+// Turning a | b into a & b in Flags changes the value for the test's input (1, 2), so it is detected.
 func Flags(a, b uint) uint { return a | b }
 
-// Mask の a & b を a | b にしても、テストの入力 (3, 3) では値が変わらないので生き残る。
+// Turning a & b into a | b in Mask survives, because the value does not change for the test's input (3, 3).
 func Mask(a, b uint) uint { return a & b }
 
-// Double の a << 1 を a >> 1 にすると、テストの入力 2 で値が変わり、検出される。
+// Turning a << 1 into a >> 1 in Double changes the value for the test's input 2, so it is detected.
 func Double(a uint) uint { return a << 1 }
 
-// Total の sum += v を sum -= v にすると、テストの入力で値が変わり、検出される。
+// Turning sum += v into sum -= v in Total changes the value for the test's input, so it is detected.
 func Total(vs []int) int {
 	sum := 0
 	for _, v := range vs {
@@ -125,37 +125,37 @@ func Total(vs []int) int {
 	return sum
 }
 
-// Scaled の n *= k を n /= k にしても、テストの入力 k = 1 では値が変わらないので生き残る。
+// Turning n *= k into n /= k in Scaled survives, because the value does not change for the test's input k = 1.
 func Scaled(n, k int) int {
 	n *= k
 	return n
 }
 
-// SetBit の f |= 1 を f &= 1 にすると、テストの入力 2 で値が変わり、検出される。
+// Turning f |= 1 into f &= 1 in SetBit changes the value for the test's input 2, so it is detected.
 func SetBit(f uint) uint {
 	f |= 1
 	return f
 }
 
-// Both の a && b を a || b にすると、テストの入力 (true, false) で値が変わり、検出される。
+// Turning a && b into a || b in Both changes the value for the test's input (true, false), so it is detected.
 func Both(a, b bool) bool { return a && b }
 
-// Either の a || b を a && b にしても、テストの入力 (true, true) では値が変わらないので生き残る。
+// Turning a || b into a && b in Either survives, because the value does not change for the test's input (true, true).
 func Either(a, b bool) bool { return a || b }
 
-// Closed の !open を open にすると、テストの入力 false で値が変わり、検出される。
+// Turning !open into open in Closed changes the value for the test's input false, so it is detected.
 func Closed(open bool) bool { return !open }
 
-// Muted の !loud を loud にしても、テストが戻り値を確かめないので生き残る。
+// Turning !loud into loud in Muted survives, because the test does not check the return value.
 func Muted(loud bool) bool { return !loud }
 
-// Enabled の true を false にすると、テストが値を確かめるので検出される。
+// Turning Enabled's true into false is detected, because the test checks the value.
 func Enabled() bool { return true }
 
-// Verbose の false を true にしても、テストが値を確かめないので生き残る。
+// Turning Verbose's false into true survives, because the test does not check the value.
 func Verbose() bool { return false }
 
-// Positive の if の条件を true にしても false にしても、テストの入力 1 と -1 のどちらかで値が変わり、検出される。
+// Making Positive's if condition true or false changes the value for one of the test's inputs 1 and -1, so it is detected.
 func Positive(n int) bool {
 	if n > 0 {
 		return true
@@ -163,7 +163,7 @@ func Positive(n int) bool {
 	return false
 }
 
-// SumAll の for の条件を false にしても、テストが空の入力しか使わないので生き残る。
+// Making SumAll's for condition false survives, because the test uses only empty input.
 func SumAll(xs []int) int {
 	s := 0
 	for i := 0; i < len(xs); i++ {
@@ -172,27 +172,27 @@ func SumAll(xs []int) int {
 	return s
 }
 
-// Area の本体を 0 を返す文にすると、テストが値を確かめるので検出される。
+// Replacing Area's body with a statement returning 0 is detected, because the test checks the value.
 func Area(w, h int) int { return w * h }
 
-// Describe の本体を空の文字列を返す文にしても、テストが値を確かめないので生き残る。
+// Replacing Describe's body with a statement returning the empty string survives, because the test does not check the value.
 func Describe(n int) string { return "n" }
 
 var recorded []string
 
 func record(s string) { recorded = append(recorded, s) }
 
-// Record の record の呼び出しを消すと、テストが記録を確かめるので検出される。
+// Removing the call to record in Record is detected, because the test checks the record.
 func Record(s string) { record(s) }
 
 var notified int
 
 func notify() { notified++ }
 
-// Notify の notify の呼び出しを消しても、テストが通知を確かめないので生き残る。
+// Removing the call to notify in Notify survives, because the test does not check the notification.
 func Notify() { notify() }
 
-// FirstNegative の break を continue にすると最後の負の数を返すようになり、テストの入力 (1, -2, -3) で検出される。
+// Turning break into continue in FirstNegative returns the last negative number instead, detected with the test's input (1, -2, -3).
 func FirstNegative(xs []int) int {
 	found := 0
 	for _, x := range xs {
@@ -204,7 +204,7 @@ func FirstNegative(xs []int) int {
 	return found
 }
 
-// CountPositive の continue を break にしても、テストの入力 (1, 2, 0) では 0 以下の数が最後にしかないので生き残る。
+// Turning continue into break in CountPositive survives, because in the test's input (1, 2, 0) the only number at or below 0 is last.
 func CountPositive(xs []int) int {
 	n := 0
 	for _, x := range xs {
@@ -216,7 +216,7 @@ func CountPositive(xs []int) int {
 	return n
 }
 
-// ClearHigh の f &^= 8 を f &= 8 にしても、テストの入力 0 では値が変わらないので生き残る。
+// Turning f &^= 8 into f &= 8 in ClearHigh survives, because the value does not change for the test's input 0.
 func ClearHigh(f uint) uint {
 	f &^= 8
 	return f

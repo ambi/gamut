@@ -24,7 +24,7 @@ func TestLoad_PatternListsEveryPackageWithSources(t *testing.T) {
 			t.Errorf("%s: packages loaded together must share one FileSet", p.ImportPath)
 		}
 	}
-	// d はテストファイルしか持たないので対象にならない。
+	// d has only test files, so it is not a target.
 	if got := strings.Join(paths, " "); got != "multi/a multi/b multi/c" {
 		t.Fatalf("packages = %s, want multi/a multi/b multi/c", got)
 	}
@@ -64,7 +64,7 @@ func TestAll_JudgesEveryPackageOfPatternLikeSeparateRuns(t *testing.T) {
 		"a/a.go Max CONDITIONALS_NEGATION": run.Killed,
 		"b/b.go Scale ARITHMETIC_BASE":     run.Killed,
 		"b/b.go Neg INVERT_NEGATIVES":      run.Killed,
-		// テストファイルがないパッケージは、ビルドせずに到達なしとする。
+		// A package without test files counts as not reached, without a build.
 		"c/c.go Half ARITHMETIC_BASE": run.NotCovered,
 	}
 	got := map[string]run.Status{}
@@ -85,7 +85,7 @@ func TestAll_JudgesEveryPackageOfPatternLikeSeparateRuns(t *testing.T) {
 		t.Errorf("a package without test files must not be built, log:\n%s", log.String())
 	}
 
-	// パッケージごとに分けて実行した判定と一致する。
+	// The verdicts match those of running each package separately.
 	separate := map[string]verdict{}
 	for _, dir := range []string{"../../testdata/multi/a", "../../testdata/multi/b", "../../testdata/multi/c"} {
 		results, err := loadAndRun(t, dir, nil, opts)

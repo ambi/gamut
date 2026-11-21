@@ -5,42 +5,16 @@ depends_on: []
 created_at: 2026-11-20
 ---
 
-# 無効化コメントで変異を止める
+# Stop mutations with disable comments
 
-## 動機
+## Motivation
 
-速さのための近道（キャッシュの確認、早期の `return`）や防御のための分岐には、変異しても観測できないものがある。
-そのような箇所の変異体を、理由とともにその場で止める手段が要る。
+Shortcuts for speed and defensive branches often have mutations that cannot be observed, and such mutants need to be stopped in place with a reason.
 
-## 対象範囲
+## Summary
 
-- `//gamut:ignore [TYPE,...] [-- reason]` を、次の行または同じ行の変異体に適用する。
-- `//gamut:ignore-start` と `//gamut:ignore-end` で範囲に適用する。
-- 関数の宣言の直前に置いたコメントは、その関数全体に適用する。
-- 無効にした変異体は `IGNORED` として報告し、理由を `reason` に載せる。数えず、実行しない。
-- 理由のないコメントは警告する。
-
-## 対象外
-
-- 変異体ごとの受理（[012](012-accept-equivalent-mutants.md)）。ソースを変えずに記録したいときはそちらを使う。
-
-## 設計
-
-Go の指令コメントの慣習（`//go:`、`//nolint:`）に合わせ、`//` の直後に空白を置かない。
-`go/ast` のコメントの位置から行を求め、構文木の付属情報には頼らない。
-
-## 完了の条件
-
-- 各形式のコメントを持つ固定モジュールで、対象の変異体だけが `IGNORED` になる。
-
-## 検証
-
-- 単体テストと端から端までのテスト。
-
-## 要約
-
-- `mutant.Ignores` が対象ファイルの `//gamut:` で始まるコメントを読み、変異体を判定するものと止めたものに分ける。止めた変異体は列挙の直後に外すので、型検査も実行もせず、数えない。残りの番号は 1 から振り直す。
-- 「次の行または同じ行」は、同じ行にコードがあればその行、なければ次の行と定めた。関数全体は、コメントが関数の宣言の Doc に入っているときとした。Doc の中なら、説明の文の後ろに置いてもよい。
-- 対象範囲の「`IGNORED` として報告」は、状態を足さない形に変えた。gomutants の状態の名前に `IGNORED` がなく、状態を足すと gomutants の報告を読む検査が知らない状態に出会い、不変条件（足すのはフィールドだけ）に反するためである。止めた変異体は最上位の `ignored`（識別子、位置、演算子、理由）と `mutants_ignored` に入れ、要約に「N ignored by comments」を出す。mutation-testing-elements の形式では、015 で `Ignored` の状態にする。
-- 未知の演算子の名前は終了コード 1、理由のないコメント、対応しない `start` と `end`、未知の指令は警告にした。`-mutant` で止めた変異体を指定したら、コメントの位置を示して終了コード 1 にする。
-- 表の単体テスト（`TestIgnores_AppliesEachCommentForm`）と、`testdata/ignore` の端から端までのテスト（`TestIgnore_ReportsCommentedMutantsApart`）で、各形式が対象の変異体だけを止めることを表明した。
+- `mutant.Ignores` reads `//gamut:` comments and removes stopped mutants right after enumeration, so they are neither type-checked, run, nor counted; the rest are renumbered.
+- A comment applies to its own line when that line has code, otherwise the next line; in a function declaration's Doc it applies to the whole function; `ignore-start`/`ignore-end` cover ranges.
+- No status was added; stopped mutants are reported apart (later as `Ignored` in mutation-testing-elements).
+- Unknown mutator names exit with code 1; missing reasons, unmatched ranges, and unknown directives are warnings. Selecting a stopped mutant with `-mutant` points at the comment and exits with code 1.
+- `TestIgnores_AppliesEachCommentForm` and `TestIgnore_ReportsCommentedMutantsApart` assert each form.

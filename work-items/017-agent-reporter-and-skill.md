@@ -5,42 +5,16 @@ depends_on: [008]
 created_at: 2026-11-20
 ---
 
-# エージェント向けの報告と skill を用意する
+# Provide a report and skills for agents
 
-## 動機
+## Motivation
 
-コーディングエージェントが生き残りを埋めるには、変異体ごとに、分類、囲む関数のソース、到達したテスト、直し方の種類が要る。
+For a coding agent to fill survivors, it needs, per mutant, the class, the source of the enclosing function, the reaching tests, and the kind of fix.
 
-## 対象範囲
+## Summary
 
-- `--reporter agent` で、標準出力に JSON を 1 つ出す。進行状況は標準エラーへ出す。
-- 各項目：識別子、分類（not detected、not infected、not covered）、位置、変異の差分、囲む宣言のソース、到達したテスト（宣言の名前を含むテストを先に最大 10 件、総数も）、直し方の指針、重要領域かどうか。
-- 警告：変異箇所を子プロセスで実行するテスト（`exec.Command` で自分のバイナリを起動するもの）の検出、`t.Skip` されたテスト。
-- `skills/` に、生き残りを 1 関数ずつ埋めていく `mutation-test-loop` と、導入と CI の設定の `gamut` の skill を置く。
-
-## 対象外
-
-- 対話的な閲覧画面。
-
-## 設計
-
-skill の手順は、`--since` で生き残りを得る、テストを書く、`--mutant` で確かめ直す、等価なものは受理する、の繰り返しにする。
-直し方の指針は、Go のテストの書き方（表駆動、`t.Run`）に合わせて書く。
-
-## 完了の条件
-
-- 固定モジュールの報告が、上の項目をすべて持つ。
-- skill に従ってエージェントが固定モジュールの生き残りを 1 件埋められる（手で確かめる）。
-
-## 検証
-
-- 報告の形の単体テスト。
-
-## 要約
-
-- `-reporter agent` で、標準出力に JSON を 1 つ書く。生き残りごとに、識別子、分類（`no longer detected` を足した 4 つ）、位置、変異の前後の行、囲む宣言のソース（Doc を含む）、到達したテスト（宣言の名前を含むものを先に最大 10 件と総数）、直し方の指針、重要領域かを持つ。報告とモジュールのディレクトリから組み立てるので、変更のない再実行でも出せる。`text` と `-annotations` とは、標準出力を共有するので併用できない。
-- 指針は、分類と変異演算子に合わせ、Go のテストの書き方（表駆動、`t.Run`）で書いた。
-- 警告は、`t.Skip` を呼びうるテストと、テストバイナリ自身を `exec.Command` で起動するテストを、構文木で近似して挙げる。
-- skill は、利用者のエージェント向けとして `skills/gamut` と `skills/mutation-test-loop` に置いた。gamut の開発の skill（`.agents/skills/`）と分けた。
-- 単体テスト（`TestAgent_DescribesEachSurvivor`）と端から端までのテスト（`TestReporter_AgentWritesOneJSONDocument`）で、報告の項目、テストの並べ方、指針、警告を表明した。
-- `testdata/fixture` の写しで `mutation-test-loop` の手順を踏み、`Unused` の `not covered` の生き残りに表駆動のテストを足して `-mutant` で `KILLED` にした。`Limit` の境界の生き残りは、等しい入力を足しても `LIVED` のままで、`n == max` ではどちらも同じ値を返すので、手順 5 に従って理由とともに受理した。
+- `-reporter agent` writes one JSON document to stdout with, per survivor, the identifier, the class (four, adding `no longer detected`), the position, the line before and after, the enclosing declaration's source with its Doc, up to 10 reaching tests (those naming the declaration first) and their total, a hint, and whether it is critical. It is built from the report and the module directory, so unchanged reruns can produce it. It cannot be combined with `text` or `-annotations`, which also use stdout.
+- Hints follow the class and the mutator and the way Go tests are written (table-driven, `t.Run`).
+- Warnings approximate, from the syntax tree, tests that may call `t.Skip` and tests that start the test binary with `exec.Command`.
+- Skills for users' agents live in `skills/gamut` and `skills/mutation-test-loop`, apart from the skills for developing gamut in `.agents/skills/`.
+- Following `mutation-test-loop` on a copy of `testdata/fixture`, a table-driven test turned `Unused`'s `not covered` survivor `KILLED`, and `Limit`'s boundary survivor was accepted with a reason, since both sides return the same value at `n == max`.

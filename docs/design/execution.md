@@ -1,116 +1,116 @@
-# gamut の設計：実行
+# gamut design: execution
 
-この文書は、実行の流れ、テストバイナリの起動と使い回し、schemata の書き換え、変異の届き方の自己検査、cgo の扱いを定める。
-全体の目的とロードマップは [設計の概要](README.md) が定める。
+This document defines the flow of a run, starting and reusing test binaries, the schemata rewrite, the self-check that mutations reach the tests, and how cgo is handled.
+The [design overview](README.md) sets out the overall purpose and roadmap.
 
-## 実行の流れ
+## Flow of a run
 
-1. **読み込み**：引数のパターン（パッケージディレクトリか `<ディレクトリ>/...`）を絶対パスにし、最初のパターンのディレクトリで `go list -json -deps <パターン>...` を実行して対象パッケージのファイルを得て、`go list -export` で依存パッケージのエクスポートデータの場所を得る（「読み込み」）。ビルドタグ（`-tags`）は `go list` と `go test -c` の両方に渡す。対象のファイルは `go list` の `GoFiles` に従い、ビルドの条件を自前で評価しない。対象のファイルを `go/parser` で読み、`go/types` で型を検査する。cgo を使うパッケージの扱いは「cgo」で述べる。
-2. **列挙**：型情報を使って変異箇所を列挙する。テストが観測しないことの多いコード（arid。ログ出力など）の中は変異しない（[arid のコード](mutants.md#arid-のコード)）。生成されたファイル（`// Code generated ... DO NOT EDIT.`）は対象にしない。
-3. **構築可能性の判定**：変異体ごとに、演算子の字句だけを置き換えたファイルでパッケージを `go/types` で検査し直す。通らない変異体を `NOT VIABLE` とする。判定は鍵とともにキャッシュに記録し、鍵の変わった変異体だけを CPU の数まで並列に検査する（[変更のない再実行](reuse.md#変更のない再実行)）。
-4. **schemata の書き換え**：構築可能な変異体を埋め込んだソースを一時ディレクトリに作り、書き換え後のパッケージを `go/types` で検査する。エラーを出した箇所は schemata から外し（後述の「個別ビルド」へ回す）、エラーがなくなるまで繰り返す。
-5. **ビルド**：パッケージごとに `go test -c -overlay` でテストバイナリを 1 回だけビルドする。元のソースは書き換えない。判定を変えないフラグを足してビルドを短くする（「ビルドのフラグ」）。統合モードでは、逆依存パッケージのテストバイナリも同じ overlay でビルドする（[統合モード](selection.md#統合モード)）。
-6. **被覆の記録**：`-test.list` でテストの一覧を得て、変異を無効にしたまま、トップレベルのテストをワーカー数の組に分けて組ごとに 1 つのプロセスで実行し、テスト関数の先頭に差し込んだ境目でテストごとに振り分ける（[被覆の記録のまとめ方](reuse.md#被覆の記録のまとめ方)）。各テストについて、到達した変異箇所、変異後の値が元の値と異なった変異体、入った関数を記録する。前回の記録を戻せるテストは実行しない（[被覆の記録の再利用](reuse.md#被覆の記録の再利用)）。ここで失敗するテストがあれば、基準が壊れているので、そのテストの出力を見せて終了コード 4 で中断する。`-test.list` 自体の失敗（`TestMain` の準備の失敗など）も同じに扱う。
-7. **自己検査（forced fail）**：到達の記録があるテストのうち最も短い 1 件を、`GAMUT_MUTANT=-1` で 1 回だけ実行し、失敗することを確かめる。キャッシュから記録を戻したテストで検査できるなら、被覆の記録と並行させる。詳しくは「変異の届き方の自己検査」で述べる。
-8. **選択**：`-since` か `-mutant` を指定したら、判定する変異体を絞り、残りを `PENDING` にする（[判定する変異体の選択](selection.md#判定する変異体の選択)）。
-9. **再利用**：実行が要る変異体のうち、前回の判定の鍵が今と一致するものは、実行せずにキャッシュの判定を使う。詳しくは[判定の再利用](reuse.md#判定の再利用)で述べる。
-10. **実行**：変異体ごとに、到達したテストだけを、前回の検出テストを先にして順に実行し、最初の失敗で止める（[実行の順序](selection.md#実行の順序)）。テストプロセスは変異体の間で使い回し、どの変異体を有効にするかを命令で切り替える（「テストプロセスの使い回し」）。`-isolate` では、変異体ごとにプロセスを起動し、`GAMUT_MUTANT` で選び、`-test.run` と `-test.failfast` で絞る。
-11. **報告**：判定を JSON に書き、生き残りを分類ごとに標準出力へ並べる。
+1. **Load**: make the argument patterns (package directories or `<directory>/...`) absolute, run `go list -json -deps <patterns>...` in the directory of the first pattern to get the target packages' files, and get the locations of the dependencies' export data with `go list -export` ("Loading"). Build tags (`-tags`) go to both `go list` and `go test -c`. The target files follow `GoFiles` from `go list`; gamut never evaluates build constraints itself. The target files are parsed with `go/parser` and type-checked with `go/types`. "cgo" describes packages that use cgo.
+2. **Enumerate**: enumerate mutation sites using type information. Code tests rarely observe (arid code, such as logging) is not mutated ([arid code](mutants.md#arid-code)). Generated files (`// Code generated ... DO NOT EDIT.`) are skipped.
+3. **Check viability**: for each mutant, type-check the package again with `go/types` using the file with only the operator token replaced. Mutants that fail are `NOT VIABLE`. The results are cached with their keys, and only mutants whose keys changed are checked, in parallel up to the number of CPUs ([unchanged reruns](reuse.md#unchanged-reruns)).
+4. **Rewrite for schemata**: write source with the viable mutants embedded to a temporary directory and type-check the rewritten package with `go/types`. Sites that cause errors leave schemata (and go to the "standalone builds" below); repeat until no errors remain.
+5. **Build**: build one test binary per package with `go test -c -overlay`. The original source is never rewritten. Flags that do not change verdicts shorten the build ("Build flags"). In integration mode, the reverse dependencies' test binaries are built with the same overlay ([integration mode](selection.md#integration-mode)).
+6. **Record coverage**: get the list of tests with `-test.list`, and with every mutation disabled, split the top-level tests into as many groups as there are workers, run each group in one process, and attribute records to each test at the boundary inserted at the start of each test function ([combining coverage records](reuse.md#combining-coverage-records)). For each test, record the sites it reached, the mutants whose mutated value differed from the original, and the functions it entered. Tests whose previous records can be restored are not run ([reusing coverage records](reuse.md#reusing-coverage-records)). If a test fails here, the baseline is broken, so show that test's output and stop with exit code 4. A failure of `-test.list` itself (such as a failing `TestMain` setup) is handled the same way.
+7. **Self-check (forced fail)**: run the shortest test that has reach records once with `GAMUT_MUTANT=-1` and confirm that it fails. If a test whose records came from the cache can be used, run the check in parallel with coverage recording. "Self-check that mutations reach the tests" describes it.
+8. **Select**: with `-since` or `-mutant`, narrow the mutants to judge and mark the rest `PENDING` ([selecting mutants to judge](selection.md#selecting-mutants-to-judge)).
+9. **Reuse**: for mutants that need running, use the cached verdict without running when the previous key matches the current one. [Reusing verdicts](reuse.md#reusing-verdicts) describes it.
+10. **Run**: for each mutant, run only the tests that reached it, the previous killing test first, and stop at the first failure ([execution order](selection.md#execution-order)). Test processes are reused across mutants, and a command switches the active mutant ("Reusing test processes"). With `-isolate`, a process is started per mutant, selected by `GAMUT_MUTANT`, and narrowed with `-test.run` and `-test.failfast`.
+11. **Report**: write the verdicts as JSON and list the survivors by kind on stdout.
 
-手順 4 から 7 はパッケージごとに行い、手順 9 と 10 は全パッケージの変異体を 1 つの作業の列にする。詳しくは「複数のパッケージ」で述べる。
-無限ループ、`panic`、パッケージ変数の汚染が他の変異体に漏れないよう、落ちたか時間切れになったプロセスと、状態を汚したプロセスは捨てる。
-時間切れの上限は、テストのプロセスごとに、そのプロセスで実行するテストの被覆記録時の実行時間の合計に係数を掛け、下限を足して決める。
+Steps 4 to 7 run per package; steps 9 and 10 put the mutants of every package in one work queue. "Several packages" describes this.
+To keep infinite loops, `panic`, and polluted package variables from leaking into other mutants, a process that crashed or timed out, or that polluted its state, is thrown away.
+The timeout of each test process is the sum of the coverage-recording run times of the tests it runs, times a factor, plus a minimum.
 
-### 複数のパッケージ
+### Several packages
 
-- `go list` の出力のうち、`DepOnly` でなく、テスト以外の Go ファイルを持つパッケージを対象にする。テストファイルしか持たないパッケージは変異の対象がないので外す。補助ファイルのために列挙する標準パッケージも対象にしない。
-- 対象のパッケージは同じモジュールに属することを求める。報告の `files` の鍵と変異体の識別子はモジュール相対のパスなので、モジュールをまたぐと区別できない。
-- 全パッケージで 1 つの `token.FileSet` と、エクスポートデータの importer を共有する。gc の importer は並行に使えないので mutex で守り、読んだ `types.Package` は全パッケージで再利用する。
-- 対象パッケージ A が対象パッケージ B を import するとき、A の型検査は B の書き換え前のエクスポートデータを使い、A のテストバイナリは B の書き換え前の版にリンクされる。B の変異は B のテストだけで判定し、A のテストでは検出を試さない。逆依存のテストでの検出は統合モードで扱う。
-- schemata の書き換えとビルドとテストの一覧は、パッケージごとにワーカー数まで並列に行う。被覆の記録と変異体の実行は、全パッケージの分を 1 つの作業の列にまとめ、同じワーカーで回す。テストのプロセスの数はパッケージの数によらずワーカー数までになる。
-- 変異体の番号（`GAMUT_MUTANT`）はパッケージごとに 1 から振る。テストバイナリはパッケージごとに別なので衝突しない。
-- テストファイルを持たないパッケージは、ビルドせずに構築可能な変異体をすべて `NOT COVERED` とする。構築可能な変異体がないパッケージもビルドしない。
-- どれかのパッケージで基準のテストか自己検査が失敗したら、どのパッケージも判定せずに止める。一部のパッケージだけの報告は、全体の判定と見分けにくいためである。
+- Of the `go list` output, the targets are the packages that are not `DepOnly` and have non-test Go files. Packages with only test files have nothing to mutate and are dropped. Standard packages listed for the helper file are not targets either.
+- The target packages must belong to one module. The keys of the report's `files` and mutant identifiers are module-relative paths, so they cannot be told apart across modules.
+- All packages share one `token.FileSet` and one export-data importer. The gc importer is not safe for concurrent use, so a mutex guards it, and the `types.Package` values it reads are reused across packages.
+- When target package A imports target package B, A is type-checked against B's export data before the rewrite, and A's test binary links B's unrewritten version. B's mutations are judged only by B's tests; A's tests are not tried. Integration mode handles detection by the tests of reverse dependencies.
+- The schemata rewrite, the build, and listing tests run per package, in parallel up to the number of workers. Coverage recording and running mutants put the work of every package in one queue served by the same workers. The number of test processes stays at most the number of workers, however many packages there are.
+- Mutant numbers (`GAMUT_MUTANT`) start at 1 in each package. Each package has its own test binary, so they never collide.
+- A package without test files is not built, and all its viable mutants are `NOT COVERED`. A package without viable mutants is not built either.
+- If the baseline tests or the self-check fail in any package, no package is judged. A report of only some packages is hard to tell from a full one.
 
-### テストバイナリの起動
+### Starting test binaries
 
-- テストバイナリの実行（一覧、被覆の記録、自己検査、変異体の実行）にはすべて、利用者のテストのフラグ（`-test-flags`）を先に、gamut が実行ごとに決めるフラグを後に渡す。`-short` のような接頭辞なしの testing のフラグには `-test.` を補い、テストが自分で定義したフラグはそのまま渡す。gamut が決める `run`、`count`、`failfast`、`list`、`paniconexit0` は受け付けない。
-- Unix ではテストバイナリを新しいプロセスグループで起動し（`Setpgid`）、時間切れと取り消しではグループ全体へ `SIGKILL` を送る。テストが起動した子プロセスが残って CPU を使い続けたり、出力の管を握って待ちを延ばしたりしないためである。Windows ではテストバイナリだけを止める。止めた後に出力の管が閉じるのを待つ時間は 1 秒までとする（`WaitDelay`）。
-- 到達と感染の記録は、変異箇所ごとの `atomic.Bool` と、ファイルへの追記を守る 1 つの mutex で行う。`t.Parallel` のテストや多数のゴルーチンが同じプロセスで変異箇所を通っても記録は欠けない。
+- Every run of a test binary (listing, coverage recording, the self-check, running mutants) gets the user's test flags (`-test-flags`) first and the flags gamut chooses for that run after them. testing flags without the prefix, such as `-short`, get `-test.` added; flags a test defines itself are passed as they are. gamut rejects `run`, `count`, `failfast`, `list`, and `paniconexit0`, which it chooses itself.
+- On Unix, test binaries start in a new process group (`Setpgid`), and timeouts and cancellation send `SIGKILL` to the whole group, so child processes a test started neither keep using the CPU nor hold the output pipe and prolong the wait. On Windows, only the test binary is stopped. After stopping, gamut waits at most 1 second for the output pipe to close (`WaitDelay`).
+- Reach and infection are recorded with an `atomic.Bool` per site and one mutex that guards appending to the file. Records are complete even when `t.Parallel` tests or many goroutines pass sites in the same process.
 
-### 読み込み
+### Loading
 
-`go list -export -deps` を対象パッケージごと実行すると、編集したばかりの対象パッケージまでコンパイルしてビルドキャッシュに書くが、その結果はどこにも使わない（テストバイナリは書き換えたソースからコンパイルする）。
-そこで、依存の一覧（`-export` なし）と、前回の読み込みでエクスポートデータを求めたパッケージ（キャッシュに記録した hint）のエクスポートデータとを並行して求め、足りないものだけを後から求める。
+Running `go list -export -deps` over the target packages compiles even the target package just edited and writes it to the build cache, though the result is never used (the test binary compiles the rewritten source).
+So gamut asks for the list of dependencies (without `-export`) and, in parallel, for the export data of the packages whose export data the previous load needed (a hint recorded in the cache), and asks for anything missing afterwards.
 
-- エクスポートデータを求めるのは、対象パッケージ以外のすべてと、別の対象パッケージが import する対象パッケージである。
-- hint が古くても（消えたパッケージを含んでも）、足りないものを求め直すので、型検査の結果は変わらない。
-- `-since` の `git diff` と、外の依存の鍵のための `go list -deps -test` も、引数のパターンから求めたモジュールで読み込みと並行して始める。読み込みの結果のモジュールと違えば、捨てて求め直す。
+- Export data is needed for every package other than the targets, and for target packages that another target imports.
+- A stale hint (one listing a package that is gone) does not change the type-check results, since anything missing is asked for again.
+- The `git diff` for `-since` and `go list -deps -test` for the keys of external dependencies also start in parallel with loading, in the module found from the argument patterns. If the loaded module differs, their results are discarded and computed again.
 
-### ビルドのフラグ
+### Build flags
 
-テストバイナリのビルドに次のフラグを足す。利用者が `GOFLAGS` で同じフラグを指定していれば足さない。
+These flags are added to the test binary's build, unless the user already sets the same flag in `GOFLAGS`.
 
-| フラグ | 効果（idmagic の `usecases` の 1 行の編集後のビルド） | 判定を変えない理由 |
+| Flag | Effect on the build | Why verdicts do not change |
 | --- | --- | --- |
-| `-vet=off` | 約 20% 短い | `go test -c` が実行する `go vet` の一部の結果は、判定に使わない |
-| `-gcflags=<対象パッケージ>=-l` | 約 20% 短い | インライン化の有無はプログラムの意味を変えない。依存のパッケージのフラグは変えないので、依存はビルドキャッシュのものを使う。エクスポートデータに関数の本文が入らないので、本文だけの変更では外部テストのパッケージもコンパイルし直さない |
-| `-ldflags=-s -w` | 約 15〜20% 短い | シンボル表とデバッグ情報は、スタックトレースと `runtime.FuncForPC` が使う表（pclntab）と別である |
+| `-vet=off` | Skips the vet checks | The results of the `go vet` that `go test -c` runs are not used for verdicts |
+| `-gcflags=<target package>=-l` | Less compile work | Inlining does not change a program's meaning. Dependencies' flags are unchanged, so dependencies come from the build cache. Export data then holds no function bodies, so a change only to a body does not recompile the external test package either |
+| `-ldflags=-s -w` | Less link work | The symbol table and debug information are separate from the table stack traces and `runtime.FuncForPC` use (pclntab) |
 
-インライン化を止めると、エスケープ解析の結果が変わり、`testing.AllocsPerRun` で割り当ての数を表明するテストが通らなくなりうる。
-その場合は基準のテストの失敗として止まるので、`GOFLAGS=-gcflags=` などで上書きする。
+Disabling inlining changes escape analysis, which can break tests that assert the number of allocations with `testing.AllocsPerRun`.
+That stops the run as a failing baseline, so override it with `GOFLAGS=-gcflags=` or similar.
 
-### テストプロセスの使い回し
+### Reusing test processes
 
-パッケージの初期化（テストファイルのパッケージ変数を含む）が重いと、変異体ごとにプロセスを起動する時間が実行の大半を占める。
-idmagic の `usecases` のテストは、パッケージ変数の初期化で RSA の鍵を 2 つ作り、プロセス 1 つに 0.1〜0.18 秒かかる。
-そこで、1 つのテストプロセスで変異体を順に判定する。プロセスは gamut の 1 回の実行の間だけ動く。
+When package initialization (including package variables in test files) is heavy, starting a process per mutant takes most of the run.
+For instance, tests whose package variables create RSA keys take 0.1-0.18 seconds per process before any test runs.
+So one test process judges mutants one after another. Processes live only for one gamut run.
 
-- overlay で判定のテスト（`TestGamutServer`、ファイルは `gamut_server_test.go`）を足す。環境変数 `GAMUT_SERVE` があるときだけ働き、ないときは skip する。外部テストのパッケージに置き、内部テストは対象パッケージから公開した関数として呼ぶ。main パッケージは内部テストのパッケージに置き、外部テストもあれば使い回さない。
-- 判定のテストは、標準入力から「変異体の番号 テスト名...」の行を受け取り、選択を切り替え（`GamutSetActive`）、テストを `t.Run("g", func(t) { t.Run(name, fn) })` で順に呼ぶ。外側の `t.Run` は並列のサブテストが終わるまで戻らないので、`t.Parallel` のテストも次の変異体へ持ち越さない。
-- 結果（「run <名前>」「pass」「fail <名前>」）はファイル記述子 3 に書く。テストの出力と混ざらないためである。
-- 変異体を検出したら、検出したテストを変異なしでもう一度実行する。通らなければ、前の変異体か今の変異体がプロセスの状態を汚したので、プロセスを捨て、今の変異体を新しいプロセスで判定し直す。
-- プロセスが落ちたら（`panic`、`os.Exit`）、そのとき実行していたテストが検出したとして、プロセスを捨てる。時間切れのプロセスも捨てる。
-- 被覆の記録をまとめて測るプロセスも判定のテストで起動し、「cover テスト名...」の命令で測る。測り終えたら記録を止め（`GamutCoverStop`）、そのまま判定に使う。
-- 使い回すのはパッケージ自身のテストバイナリだけで、`Test` で始まり `*testing.T` を 1 つ取るテストだけを呼ぶ。`Example`、`Fuzz`、逆依存パッケージのテストを含む変異体は、変異体ごとにプロセスを起動する。
-- `-isolate` で、すべての変異体を変異体ごとのプロセスで判定する。
+- The overlay adds a judging test (`TestGamutServer`, in the file `gamut_server_test.go`). It works only when the environment variable `GAMUT_SERVE` is set and skips otherwise. It lives in the external test package and calls internal tests through functions exported from the target package. For a main package it lives in the internal test package, and if the package also has external tests, processes are not reused.
+- The judging test reads lines "mutant-number test-name..." from stdin, switches the selection (`GamutSetActive`), and calls the tests in order with `t.Run("g", func(t) { t.Run(name, fn) })`. The outer `t.Run` does not return until parallel subtests finish, so even `t.Parallel` tests do not carry over to the next mutant.
+- Results ("run <name>", "pass", "fail <name>") are written to file descriptor 3 so they do not mix with the tests' output.
+- When a mutant is detected, the detecting test runs once more without mutations. If it fails, the previous or the current mutant polluted the process's state, so the process is thrown away and the current mutant is judged again in a new process.
+- When a process crashes (`panic`, `os.Exit`), the test running at the time counts as detecting, and the process is thrown away. A process that timed out is thrown away too.
+- The process that records coverage in bulk is also started with the judging test and records with the command "cover test-name...". When done it stops recording (`GamutCoverStop`) and goes on to judge.
+- Only the package's own test binary is reused, and only tests starting with `Test` that take one `*testing.T` are called. Mutants involving `Example`, `Fuzz`, or tests of reverse dependencies get a process per mutant.
+- `-isolate` judges every mutant in its own process.
 
-生き残ったときは汚れを確かめない。
-汚れは次に検出した変異体の確認で見つかり、その変異体を新しいプロセスで判定し直す。
-生き残りの判定が汚れた状態から出た可能性は残るが、汚れはテストを失敗させる向きに働くことが多いので、確認は検出の側に置いた。
+Pollution is not checked after a survivor.
+It is found when the next detected mutant is checked, and that mutant is judged again in a new process.
+A survivor may still come from a polluted state, but pollution tends to make tests fail, so the check sits on the detection side.
 
-テスト自身が状態を残す場合は、この確認では足りない。
-パッケージ変数を戻さずに切り替えるテストは、前の実行の状態が残ったプロセスでは、切り替えを消した変異体でも通り（誤った `LIVED`）、切り替えを残した変異体で失敗する（誤った `KILLED`。確認の再実行も状態がまた切り替わって通る）。
-そこで、判定のテストのプロセスで被覆を測るとき、各テストを同じプロセスでもう一度実行し、2 回目に失敗するテストを「繰り返し実行できない」とする。
+This check is not enough when a test itself leaves state behind.
+A test that flips a package variable without restoring it passes, in a process left with the previous run's state, even for a mutant that removed the flip (a false `LIVED`), and fails for a mutant that kept it (a false `KILLED`; the confirming rerun flips the state again and passes).
+So when coverage is recorded in the judging test's process, each test runs a second time in the same process, and a test that fails the second time is "unrepeatable".
 
-- 繰り返し実行できないテストを含む変異体は、プロセスを使い回さずに変異体ごとのプロセスで判定する。
-- この印は被覆の記録とともにキャッシュに残し（`unrepeatable`）、記録を戻した実行でも使う。
-- テストの名前を、報告の `unrepeatable_tests`、要約、エージェント向けの報告の警告に出す。
-- 2 回目の実行は被覆の記録の後に足すだけなので、被覆の記録の時間はテストの実行の分だけ延びる。idmagic の `usecases`（135 件）では、延びは測定の揺れ（270〜380 ミリ秒）に収まった。
-- 2 回とも通るが状態によって結果が変わるテストと、判定のテストのプロセスで被覆を測れなかったテスト（`go test` の別のプロセスで測ったもの）は見つけない。
+- Mutants involving an unrepeatable test are judged in a process per mutant, not a reused one.
+- The mark is kept in the cache with the coverage records (`unrepeatable`) and used in runs that restore the records.
+- The test names appear in the report's `gamut.unrepeatableTests`, the summary, and the warnings of the report for agents.
+- The second run only follows coverage recording, so recording takes longer by the tests' run time, without starting another process.
+- Tests that pass both times but whose result depends on state, and tests whose coverage could not be recorded in the judging test's process (recorded in a separate `go test` process), are not found.
 
-### macOS の初回起動の検査
+### The macOS first-launch check
 
-macOS は、新しい実行ファイルが初めて起動されるとき、syspolicyd で XProtect の検査を行う。
-idmagic の `usecases` のテストバイナリ（14 MiB）で約 0.35 秒、空のプログラムでも約 0.2 秒かかり、検査の結果はファイルごとに記録される。
-コードを変えるたびに新しいテストバイナリができるので、1 回の実行につき 1 回かかる。素の `go test` も同じである。
-同じバイナリを同時に複数起動しても、待つのは 1 回分なので、gamut の起動の仕方では減らせない。
-システムの設定でターミナルを開発ツールに加えると検査を省けるが、そのターミナルから起動するすべての実行ファイルの検査を止めるので、gamut からは勧めない。
+macOS runs an XProtect check through syspolicyd the first time a new executable launches.
+It takes a few tenths of a second even for an empty program, and the result is recorded per file.
+Every code change makes a new test binary, so it costs once per run. Plain `go test` pays the same.
+Launching the same binary several times at once still waits only once, so how gamut launches cannot reduce it.
+Adding the terminal to developer tools in the system settings skips the check, but it disables the check for every executable launched from that terminal, so gamut does not recommend it.
 
-### 時間切れの既定値
+### Default timeouts
 
-既定は係数 5、下限 2 秒である。
-2026-11-20 に Apple Silicon の macOS で fixture のテストバイナリを短いテスト 1 件で 300 回起動したところ、起動から終了までは中央値 3 ms、99 パーセンタイル 8 ms、最大 264 ms（最初の 1 回）だった。
-並列数を 8 にしても中央値 5 ms、最大 9 ms だった。
-短いテストでの揺らぎは下限の 2 秒に比べて十分小さいので、既定値は変えない。
-被覆の記録の実行時間は、プロセスの起動と記録の処理を含むので、変異体の実行より長めに出る。上限は安全側に倒れる。
+The defaults are a factor of 5 and a minimum of 2 seconds.
+On 2026-11-20, launching the fixture's test binary 300 times with one short test on Apple Silicon macOS took a median of 3 ms from start to exit, 8 ms at the 99th percentile, and 264 ms at most (the first launch).
+With 8 in parallel the median was 5 ms and the maximum 9 ms.
+The jitter for short tests is small next to the 2-second minimum, so the defaults stay.
+Coverage-recording run times include starting the process and processing the records, so they come out longer than running a mutant. The limit errs on the safe side.
 
-## schemata の書き換え
+## Schemata rewrite
 
-変異箇所を持つ式を、引数で被演算子を受け取る即時に呼ぶ関数リテラルで包む。
+An expression with a mutation site is wrapped in a function literal that is called immediately and takes the operands as arguments.
 
 ```go
-// 元: if a.Count(x) < limit {
+// original: if a.Count(x) < limit {
 if func(l int, r int) bool {
 	if gamutCovering {
 		gamutHit(4)
@@ -127,58 +127,58 @@ if func(l int, r int) bool {
 }(a.Count(x), limit) {
 ```
 
-- 被演算子は引数として 1 回だけ、左から右へ評価する。元の式と同じく、有効にした変異の演算だけを計算する。
-- 定数の被演算子と型のない `nil` は、引数にせず本文へそのまま埋め込む。型推論と定数の扱いを元の式と同じにするためである。
-- 引数の型は `go/types` の型を、そのファイルの import 名で書く。書けない型（import されていないパッケージの型、別パッケージの非公開の型）を持つ箇所は schemata にしない。
-- 入れ子の変異箇所は、内側から書き換えた字句を外側の引数に入れる。被演算子を 1 回しか書かないので、入れ子が深くても字句は増えない。
-- `x++` は `func() { if gamutActive == 7 { x-- } else { x++ } }()` という式文に置き換える。`for` の後処理文にも置ける。
-- 選択の変数と被覆の記録の関数は、overlay で足す 1 ファイル（`gamut_schemata.go`）に置く。対象パッケージに同じ名前があれば中断する。
+- Operands are evaluated once, left to right, as arguments. Like the original expression, only the operation of the active mutation is computed.
+- Constant operands and untyped `nil` are embedded in the body instead of passed as arguments, so type inference and constant handling stay as in the original expression.
+- Argument types are the `go/types` types written with the file's import names. Sites with types that cannot be written (types of packages the file does not import, unexported types of other packages) stay out of schemata.
+- For nested sites, the inner rewrite goes into the outer arguments. Each operand is written once, so deep nesting does not grow the text.
+- `x++` becomes the expression statement `func() { if gamutActive == 7 { x-- } else { x++ } }()`, which also fits in the post statement of a `for`.
+- The selection variable and the coverage-recording functions live in one file the overlay adds (`gamut_schemata.go`). If the target package declares the same names, the run stops.
 
-書き換え後のパッケージが型検査を通らない箇所（たとえば名前付きの `bool` 型への代入、定数の文脈）は、エラーの位置を含む最も内側の箇所から順に schemata から外す。
-外した変異体は、演算子の字句だけを置き換えたファイルを overlay で渡す個別ビルドで判定する。
-個別ビルドの変異体は到達の記録を持たないので、全テストを実行する。
+Sites where the rewritten package fails to type-check (assignment to a named `bool` type, constant contexts, and so on) leave schemata one at a time, starting from the innermost site containing the error's position.
+Mutants that leave are judged by standalone builds, which pass a file with only the operator token replaced through the overlay.
+Standalone mutants have no reach records, so all tests run.
 
-### 感染の記録
+### Recording infection
 
-被覆の記録の実行では、各変異体の変異後の値を計算し、元の値と比べる。
-異なれば、その変異体はそのテストで「感染した」と記録する。
-変異後の演算が `panic` しうる整数の除算は、除数が 0 なら比べずに感染とみなす。
-到達したが一度も感染しなかった変異体は、実行せずに生き残り（理由 `not infected`）と判定する。
-この判定は weak mutation の考え方による。値が変わらない以上、どのテストも失敗しえない。
+Coverage-recording runs compute each mutant's mutated value and compare it with the original.
+If they differ, the mutant is recorded as "infected" by that test.
+Integer division, whose mutated operation can `panic`, counts as infected without comparing when the divisor is 0.
+A mutant that was reached but never infected is judged a survivor (reason `not infected`) without running.
+This follows the idea of weak mutation: as long as the value does not change, no test can fail.
 
-## 変異の届き方の自己検査
+## Self-check that mutations reach the tests
 
-schemata の書き換えがテストバイナリに入っていない、または `GAMUT_MUTANT` が子プロセスへ渡っていないと、すべての変異体が `LIVED` か `NOT COVERED` になり、テストの弱さと見分けが付かない。
-そこで判定の前に、変異を強制的に失敗させる実行（forced fail）で、変異がテストに届くことを確かめる。
+If the schemata rewrite is missing from the test binary, or `GAMUT_MUTANT` does not reach the child process, every mutant becomes `LIVED` or `NOT COVERED`, indistinguishable from weak tests.
+So before judging, a run that forces mutations to fail (forced fail) confirms that mutations reach the tests.
 
-- 補助ファイルの `gamutHit` は、`gamutActive` が `-1`（`schemata.ForcedFail`）なら `panic("gamut: forced fail")` する。各変異箇所の書き換えには字句を足さない。
-- `gamutHit` は被覆の記録中にだけ呼ばれるので、検査は `GAMUT_COVER` と `GAMUT_MUTANT=-1` を両方渡して実行する。
-- 実行するのは、到達の記録があるテストのうち最も短い 1 件だけである。到達が記録された以上、同じバイナリで `panic` しないなら選択の変数が読まれていない。全テストを実行する必要はない。
-- テストが通るか時間切れになったら、判定せずに終了コード 5 で止める。到達のあるテストが 1 件もなければ、検査を飛ばしたことを警告して続ける。
-- 個別ビルドの変異体は変異を直接書き込むので、届かない経路がなく、検査しない。
-- 対象のコードが `recover` で `panic` を握りつぶすと、選択が届いていても検査が失敗しうる。その場合のエラーメッセージはこの可能性も挙げる。
+- The helper file's `gamutHit` calls `panic("gamut: forced fail")` when `gamutActive` is `-1` (`schemata.ForcedFail`). The rewrite of each site adds no text.
+- `gamutHit` is called only while recording coverage, so the check runs with both `GAMUT_COVER` and `GAMUT_MUTANT=-1`.
+- It runs only the shortest test that has reach records. Once reach is recorded, a binary that does not `panic` is not reading the selection variable; there is no need to run every test.
+- If the test passes or times out, gamut stops without judging, with exit code 5. If no test has reach records, it warns that the check was skipped and continues.
+- Standalone mutants write the mutation directly, so there is no path for it to miss, and they are not checked.
+- If the target code swallows `panic` with `recover`, the check can fail even though the selection arrives. The error message mentions this possibility too.
 
 ## cgo
 
-cgo を使うパッケージ（`CgoFiles` を持つもの）は、`import "C"` を持たないファイル（`GoFiles`）だけを変異の対象にする。
+In packages that use cgo (those with `CgoFiles`), only the files without `import "C"` (`GoFiles`) are mutated.
 
-- 型の検査には、cgo の前処理の後のファイルが要る。cgo のパッケージがあるときだけ、`go list -e -compiled` で `CompiledGoFiles` を求め、そのうち `GoFiles` にないもの（cgo が生成したファイル）を、生成されたファイルと同じく型の検査にだけ使う。
-- `import "C"` を持つファイルは変異しない。前処理の後のファイルは生成されたコードで、位置と識別子を元のソースに戻す手間が大きい。
-- ビルドは `go test -c -overlay` に任せるので、overlay は `GoFiles` の書き換えだけを持てばよい。
-- 等価の自動検出は、`go tool compile` に cgo の生成物を渡す手順が要るので、cgo のパッケージでは行わない（`Direct` を偽にする）。
-- C コンパイラがないなどで前処理に失敗すると、`go list -e -compiled` は `CompiledGoFiles` を空にする。そのパッケージは飛ばし、警告と報告の `skipped_packages`、要約に理由を出して、ほかのパッケージの判定を続ける。すべて飛ばしたら誤りにする。
-- 飛ばした cgo のパッケージを別の対象パッケージが import すると、そのエクスポートデータも求められないので、型の検査が誤りになる。
+- Type-checking needs the files after cgo preprocessing. Only when there are cgo packages, gamut gets `CompiledGoFiles` with `go list -e -compiled` and uses the ones not in `GoFiles` (files cgo generated) only for type-checking, like generated files.
+- Files with `import "C"` are not mutated. Preprocessed files are generated code, and mapping positions and identifiers back to the original source is costly.
+- The build is left to `go test -c -overlay`, so the overlay only needs the rewrites of `GoFiles`.
+- Equivalent-mutant detection would need to pass cgo's output to `go tool compile`, so it is skipped for cgo packages (`Direct` is false).
+- When preprocessing fails, for instance without a C compiler, `go list -e -compiled` leaves `CompiledGoFiles` empty. That package is skipped with the reason in a warning, the report's `gamut.skippedPackages`, and the summary, and the other packages are judged. If every package is skipped, it is an error.
+- If another target package imports a skipped cgo package, its export data cannot be obtained either, so type-checking fails.
 
-## 採らなかった案
+## Rejected ideas
 
-| 案 | 採らない理由 |
+| Idea | Why not |
 | --- | --- |
-| 変異体ごとに overlay でビルドする | 変異体の数だけコンパイルとリンクを繰り返し、結果が共有のビルドキャッシュにたまる。この方式では idmagic の 563 体のパッケージで 352 秒、2.6 GiB だった |
-| 元の値と変異後の値を両方計算する選択関数（`sel(id, a+b, a-b)`）で包む | 副作用のある被演算子を 2 回評価し、元のプログラムにない `panic`（0 除算）を起こす |
-| 被演算子を関数リテラルの本文に 2 回書く | 入れ子の変異箇所で字句が指数的に増える |
-| 変異体ごとにプロセスを分ける（`-isolate` として残す） | パッケージの初期化が重いと、起動の時間が実行の大半を占める。idmagic の `usecases` の初回で、使い回す方式の 6.5 秒に対して 36.5 秒だった。状態の漏れは汚れの確認で捉える |
-| 生き残った変異体の後にも汚れを確かめる | 変異体ごとに検出したテストを実行し直すので、生き残りの多いパッケージで実行が倍近くになる。汚れは次の検出の確認で見つかる |
-| インライン化をすべてのパッケージで止める（`-gcflags=all=-l`） | 依存のパッケージがすべてビルドキャッシュに当たらなくなり、初回が遅く、キャッシュも増える |
-| 最適化も止める（`-gcflags=<対象>=-N -l`） | ビルドはインライン化の停止だけと変わらず、テストが遅くなる |
-| macOS で開発ツールの設定を勧める | 初回起動の検査（約 0.35 秒）は消えるが、そのターミナルから起動するすべての実行ファイルの検査を止める |
-| `golang.org/x/tools/go/packages` で読み込む | 依存が増える。`go list -export` とエクスポートデータの importer で足りる |
+| Build each mutant with an overlay | Compiling and linking repeat once per mutant, and the results pile up in the shared build cache, growing it by gigabytes for a package of a few hundred mutants |
+| Wrap in a selection function that computes both values (`sel(id, a+b, a-b)`) | It evaluates operands with side effects twice and causes `panic`s the original program does not have (division by zero) |
+| Write the operands twice in the function literal's body | Nested sites make the text grow exponentially |
+| A process per mutant (kept as `-isolate`) | With heavy package initialization, startup takes most of the run and makes it several times slower than reuse. State leaks are caught by the pollution check |
+| Check for pollution after survivors too | Each mutant reruns its detecting test, nearly doubling the run on packages with many survivors. Pollution is found by the check after the next detection |
+| Disable inlining in every package (`-gcflags=all=-l`) | No dependency hits the build cache anymore, so the first run is slow and the cache grows |
+| Also disable optimization (`-gcflags=<target>=-N -l`) | The build is no faster than disabling inlining alone, and tests get slower |
+| Recommend the developer-tools setting on macOS | It removes the first-launch check but disables the check for every executable launched from that terminal |
+| Load with `golang.org/x/tools/go/packages` | It adds a dependency. `go list -export` and the export-data importer are enough |

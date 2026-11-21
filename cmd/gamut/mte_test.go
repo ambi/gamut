@@ -8,8 +8,8 @@ import (
 	"testing"
 )
 
-// TestReporter_WritesMutationTestingElements は、-o と -reporter json が mutation-testing-elements の形式を書き、
-// -reporter html がそれを埋め込んだ HTML を -report-dir に書くことを確かめる。
+// TestReporter_WritesMutationTestingElements checks that -o and -reporter json write mutation-testing-elements format,
+// and that -reporter html writes the HTML embedding it to -report-dir.
 func TestReporter_WritesMutationTestingElements(t *testing.T) {
 	dir := t.TempDir()
 	output := filepath.Join(t.TempDir(), "report.json")
@@ -21,7 +21,7 @@ func TestReporter_WritesMutationTestingElements(t *testing.T) {
 	if stdout.Len() != 0 {
 		t.Errorf("text was not requested, but the summary was written:\n%s", stdout.String())
 	}
-	// -o があれば json はそこへ書き、-report-dir には書かない。
+	// With -o, json goes there and not to -report-dir.
 	if _, err := os.Stat(filepath.Join(dir, "mutation.json")); err == nil {
 		t.Errorf("-reporter json with -o also wrote %s", filepath.Join(dir, "mutation.json"))
 	}
@@ -49,7 +49,7 @@ func TestReporter_WritesMutationTestingElements(t *testing.T) {
 		t.Errorf("the HTML does not embed the report:\n%.400s", html)
 	}
 
-	// -o がなければ、json は -report-dir に書く。
+	// Without -o, json goes to -report-dir.
 	if code := realMain([]string{"-q", "-no-cache", "-workers", "2", "-reporter", "json", "-report-dir", dir, "../../testdata/fixture"}, io.Discard, io.Discard); code != 0 {
 		t.Fatalf("-reporter json without -o: exit %d", code)
 	}

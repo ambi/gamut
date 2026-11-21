@@ -4,5 +4,5 @@ package run
 
 import "os/exec"
 
-// isolate は、プロセスグループを持たない環境では何もしない。取り消しではテストバイナリだけを止める。
+// isolate does nothing where there are no process groups. Cancellation stops only the test binary.
 func isolate(*exec.Cmd) {}

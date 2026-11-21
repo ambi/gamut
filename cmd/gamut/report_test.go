@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-// mteReport は、テストが読む mutation-testing-elements の報告の部分である。
+// mteReport is the part of the mutation-testing-elements report the tests read.
 type mteReport struct {
 	SchemaVersion string `json:"schemaVersion"`
 	Files         map[string]struct {
@@ -71,7 +71,7 @@ type mteMutant struct {
 	} `json:"gamut"`
 }
 
-// readMTE は、path の mutation-testing-elements の報告を読む。
+// readMTE reads the mutation-testing-elements report at path.
 func readMTE(t *testing.T, path string) *mteReport {
 	t.Helper()
 	data, err := os.ReadFile(path)
@@ -85,7 +85,7 @@ func readMTE(t *testing.T, path string) *mteReport {
 	return &rep
 }
 
-// mutants は、報告の変異体を、テストが比べやすい形にして並べる。
+// mutants lists the report's mutants in a form easy for tests to compare.
 func (r *mteReport) mutants() []mutation {
 	var out []mutation
 	for _, path := range slices.Sorted(maps.Keys(r.Files)) {
@@ -107,7 +107,7 @@ func (r *mteReport) mutants() []mutation {
 	return out
 }
 
-// readReport は、path の報告の変異体を読む。
+// readReport reads the mutants of the report at path.
 func readReport(t *testing.T, path string) []mutation {
 	t.Helper()
 	return readMTE(t, path).mutants()

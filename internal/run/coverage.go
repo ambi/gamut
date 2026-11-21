@@ -24,43 +24,43 @@ import (
 	"github.com/ambi/gamut/internal/schemata"
 )
 
-// binary は、対象パッケージの書き換えをリンクした 1 つのテストバイナリである。
+// binary is one test binary linking the rewrite of the target package.
 type binary struct {
-	// pkg は、テストを持つパッケージの import パスである。prefix はテストの名前の前に付ける文字列で、パッケージ自身なら空である。
+	// pkg is the import path of the package holding the tests. prefix is put before test names, and is empty for the package itself.
 	pkg    string
 	prefix string
 	dir    string
 	path   string
-	// revdep は逆依存パッケージのものなら、その情報を持つ。パッケージ自身なら nil である。
+	// revdep holds the reverse dependency's information for a reverse dependency, and is nil for the package itself.
 	revdep *RevDep
-	// key は、逆依存パッケージのテストの鍵である。
+	// key is the test key of the reverse dependency.
 	key   string
 	names []string
 	tests []*testCase
-	// lazy は、全テストの被覆の記録を戻せるので、テストの一覧を記録から取り、要るまでビルドしないことを表す。
+	// lazy means the coverage records of every test can be restored, so the test list comes from the records and the build waits until needed.
 	lazy bool
-	// built は、テストバイナリをビルドしたかである。
+	// built reports whether the test binary has been built.
 	built bool
-	// batchable は、1 つのプロセスでまとめて被覆を記録できるテストの、テストバイナリの中での名前である。
+	// batchable are the names, within the test binary, of the tests whose coverage can be recorded together in one process.
 	batchable map[string]bool
 }
 
 type testCase struct {
 	bin *binary
-	// name は報告とキャッシュで使う名前で、local はテストバイナリの中での名前である。
+	// name is the name used in reports and the cache, and local the name within the test binary.
 	name, local string
 	duration    time.Duration
 	hits        map[int]bool
 	infected    map[int]bool
-	// entered は、入った関数の番号（schemata.Result.Funcs の番号）である。
+	// entered are the numbers of the functions entered (the numbers of schemata.Result.Funcs).
 	entered map[int]bool
-	// key はテストの鍵である。
+	// key is the test's key.
 	key string
-	// measured は、今回の実行で被覆を測ったかである。偽ならキャッシュの記録から戻した。
+	// measured reports whether coverage was measured in this run. When false, it was restored from the cache records.
 	measured bool
-	// unrepeatable は、同じプロセスで 2 回目に失敗したかである。そのようなテストを含む変異体は、プロセスを使い回さずに判定する。
+	// unrepeatable reports whether the test failed on its second run in the same process. Mutants involving such tests are judged without reusing processes.
 	unrepeatable bool
-	// deep は、深さの制限（Options.MaxDepth）を超えて到達した変異箇所の番号である。到達には数えない。
+	// deep are the numbers of the mutation sites reached beyond the depth limit (Options.MaxDepth). They do not count as reached.
 	deep map[int]bool
 }
 
@@ -71,7 +71,7 @@ func (t *testCase) markDeep(site int) {
 	t.deep[site] = true
 }
 
-// deepOnly は、深さの制限を超えてだけ到達した変異箇所の数を返す。
+// deepOnly returns the number of mutation sites reached only beyond the depth limit.
 func (t *testCase) deepOnly() int {
 	n := 0
 	for site := range t.deep {
@@ -87,7 +87,7 @@ func newTestCase(b *binary, local, key string) *testCase {
 		hits: map[int]bool{}, infected: map[int]bool{}, entered: map[int]bool{}}
 }
 
-// test は、名前 name のテストを返す。なければ nil を返す。
+// test returns the test named name, or nil when there is none.
 func (u *unit) test(name string) *testCase {
 	for _, t := range u.tests {
 		if t.name == name {
@@ -97,8 +97,8 @@ func (u *unit) test(name string) *testCase {
 	return nil
 }
 
-// standaloneTests は、到達の記録を持たない個別ビルドの変異体で実行するテストを返す。
-// パッケージ自身の全テストと、対象パッケージの変異箇所に到達した逆依存パッケージのテストバイナリの全テストである。
+// standaloneTests returns the tests run for standalone-built mutants without reach records.
+// They are every test of the package itself, and every test of the reverse dependency test binaries that reached a mutation site of the target package.
 func (u *unit) standaloneTests() []*testCase {
 	var out []*testCase
 	for i, b := range u.bins {
@@ -109,8 +109,8 @@ func (u *unit) standaloneTests() []*testCase {
 	return out
 }
 
-// prepare は、パッケージの schemata を書き換え、テストバイナリをビルドし、テストの一覧を得る。
-// 逆依存パッケージのテストバイナリも、同じ書き換えでビルドする。
+// prepare does the schemata rewrite of the package, builds the test binary, and gets the test list.
+// The test binaries of reverse dependencies are built with the same rewrite.
 func prepare(ctx context.Context, u *unit, opts Options, logf func(string, ...any)) error {
 	pkg := u.Pkg
 	sch, err := schemata.Build(pkg, u.Mutants)
@@ -159,7 +159,7 @@ func prepare(ctx context.Context, u *unit, opts Options, logf func(string, ...an
 	switch {
 	case !pkg.HasTests:
 	case u.ownRestorable(own, opts.Cache):
-		// 全テストの記録を戻せるなら、被覆を測るか変異体を実行するまでビルドしない。
+		// When every test's record can be restored, do not build until coverage is measured or a mutant is run.
 		own.lazy = true
 	default:
 		if err := u.buildOwn(ctx, logf); err != nil {
@@ -193,7 +193,7 @@ func prepare(ctx context.Context, u *unit, opts Options, logf func(string, ...an
 	return errors.Join(errs...)
 }
 
-// buildOwn は、パッケージ自身のテストバイナリをビルドする。
+// buildOwn builds the test binary of the package itself.
 func (u *unit) buildOwn(ctx context.Context, logf func(string, ...any)) error {
 	own := u.bins[0]
 	start := time.Now()
@@ -206,9 +206,9 @@ func (u *unit) buildOwn(ctx context.Context, logf func(string, ...any)) error {
 	return nil
 }
 
-// ownRestorable は、パッケージ自身のテストバイナリの全テストの被覆の記録を戻せるかを返す。
-// 戻せるなら、テストの一覧を記録から取る。テストの一覧を得るにはビルドが要るので、
-// 記録のテストの集合が、テストファイルのトップレベルのテスト関数の集合と一致し、どのテストの鍵も記録と同じときに限る。
+// ownRestorable reports whether the coverage records of every test of the package's own test binary can be restored.
+// If so, the test list comes from the records. Getting the test list otherwise needs a build, so this holds only
+// when the set of recorded tests equals the set of top-level test functions in the test files and every test's key equals its record's.
 func (u *unit) ownRestorable(own *binary, store *cache.Store) bool {
 	if store == nil || u.Keys == nil {
 		return false
@@ -229,8 +229,8 @@ func (u *unit) ownRestorable(own *binary, store *cache.Store) bool {
 	return true
 }
 
-// sameTestSet は、記録のテストの集合が、テストファイルのトップレベルのテスト関数の集合と一致するかを返す。
-// 一致すれば、テストバイナリを起動して一覧を得る代わりに、それを一覧にする。
+// sameTestSet reports whether the set of recorded tests equals the set of top-level test functions in the test files.
+// If so, that set becomes the list instead of starting the test binary to get one.
 func (u *unit) sameTestSet(own *binary, store *cache.Store) bool {
 	if store == nil || u.Keys == nil {
 		return false
@@ -249,10 +249,10 @@ func (u *unit) sameTestSet(own *binary, store *cache.Store) bool {
 	return true
 }
 
-// build は、逆依存パッケージのテストバイナリ bins を、対象パッケージの書き換えを当ててビルドする。
-// パッケージごとに go コマンドを起動すると、依存グラフの読み込みを毎回やり直し、並列度もワーカー数に縛られる。
-// そこで go test -c -o <dir>/ に複数のパッケージをまとめて渡し、go コマンドに全 CPU で並列にビルドさせる。
-// 出力の名前は import パスの最後の要素で決まるので、同じ名前のパッケージは別の回に分ける。
+// build builds the reverse dependency test binaries bins with the target package's rewrite applied.
+// Starting the go command per package would reload the dependency graph every time and tie the parallelism to the number of workers.
+// So several packages are passed together to go test -c -o <dir>/, letting the go command build in parallel on every CPU.
+// The output names come from the last element of the import path, so packages with the same name go into separate rounds.
 func (u *unit) build(ctx context.Context, bins []*binary, logf func(string, ...any)) error {
 	var batches [][]*binary
 	for _, b := range bins {
@@ -306,7 +306,7 @@ func (u *unit) build(ctx context.Context, bins []*binary, logf func(string, ...a
 	if len(jobs) == 0 {
 		return nil
 	}
-	// 最初の組（最も大きい）で共通の依存をビルドキャッシュに載せる。残りの組はほぼリンクだけなので、CPU の数まで同時に走らせる。
+	// The first (largest) batch puts the shared dependencies in the build cache. The remaining batches are mostly linking, so they run at once, up to the number of CPUs.
 	if err := buildBatch(jobs[0]); err != nil {
 		return err
 	}
@@ -316,9 +316,9 @@ func (u *unit) build(ctx context.Context, bins []*binary, logf func(string, ...a
 	return errors.Join(errs...)
 }
 
-// restorable は、逆依存パッケージのテストバイナリ b の全テストの被覆の記録を戻せるかを返す。
-// 戻せるなら、テストの一覧を記録から取る。鍵がパッケージごとなので、鍵が同じならテストの一覧も同じである。
-// ビルドは、被覆を測るか変異体を実行するときまで遅らせる。どのテストも到達しないパッケージは、ビルドされないままになる。
+// restorable reports whether the coverage records of every test of the reverse dependency test binary b can be restored.
+// If so, the test list comes from the records. The key is per package, so the same key means the same test list.
+// The build is delayed until coverage is measured or a mutant is run. A package that no test reaches is never built.
 func (u *unit) restorable(b *binary, store *cache.Store) bool {
 	if store == nil || u.Keys == nil || b.key == "" {
 		return false
@@ -337,7 +337,7 @@ func (u *unit) restorable(b *binary, store *cache.Store) bool {
 	return true
 }
 
-// buildLazy は、tests が使う、まだビルドしていないテストバイナリをビルドする。
+// buildLazy builds the test binaries tests uses that are not built yet.
 func buildLazy(ctx context.Context, units []*unit, tests func(u *unit) []*testCase, opts Options, logf func(string, ...any)) error {
 	errs := make([]error, len(units))
 	parallel(len(units), opts.Workers, func(i int) {
@@ -364,7 +364,7 @@ func buildLazy(ctx context.Context, units []*unit, tests func(u *unit) []*testCa
 	return errors.Join(errs...)
 }
 
-// writeOverlay は、files を work の下に書き、それらで元のファイルを置き換える overlay のファイルのパスを返す。
+// writeOverlay writes files under work and returns the path of the overlay file that replaces the original files with them.
 func writeOverlay(work, name string, files map[string][]byte) (string, error) {
 	srcDir := filepath.Join(work, name+"-src")
 	if err := os.MkdirAll(srcDir, 0o700); err != nil {
@@ -391,14 +391,14 @@ var (
 	goFlags   string
 )
 
-// buildFlags は、パッケージ importPath のテストバイナリのビルドに足すフラグを返す。どれも判定の結果を変えず、ビルドを短くする。
-//   - -vet=off：go test -c は go vet の一部を実行するが、判定には使わない（idmagic の 1 パッケージで約 20%）。
-//   - -gcflags=<importPath>=-l：書き換えたパッケージは変異体の数だけ分岐を持ち大きいので、そのパッケージだけインライン化をしない（同じく約 20%）。
-//     依存のパッケージのフラグは変えないので、依存はビルドキャッシュのものをそのまま使う。
-//   - -ldflags=-s -w：テストバイナリはシンボル表とデバッグ情報（DWARF）を使わないので、リンクを短くする（同じく約 20%）。
-//     スタックトレースと runtime.FuncForPC は別の表（pclntab）を使うので、変わらない。
+// buildFlags returns the flags added to the build of the test binary of the package importPath. None of them changes the verdicts, and all shorten the build.
+//   - -vet=off: go test -c runs part of go vet, which judging does not use (about 20% for one package of idmagic).
+//   - -gcflags=<importPath>=-l: the rewritten package is large, with a branch per mutant, so inlining is turned off for that package only (also about 20%).
+//     The flags of dependencies do not change, so dependencies come from the build cache as is.
+//   - -ldflags=-s -w: test binaries use neither the symbol table nor debug information (DWARF), so linking gets shorter (also about 20%).
+//     Stack traces and runtime.FuncForPC use another table (pclntab), so they are unchanged.
 //
-// 利用者が GOFLAGS で同じフラグを指定していれば、上書きしないよう足さない。
+// When the user sets the same flag in GOFLAGS, it is not added, so as not to override it.
 func buildFlags(importPath string) []string {
 	buildOnce.Do(func() {
 		if out, err := exec.Command("go", "env", "GOFLAGS").Output(); err == nil {
@@ -418,7 +418,7 @@ func buildFlags(importPath string) []string {
 	return flags
 }
 
-// goTestC は、overlay を当てて dir のパッケージのテストバイナリを bin へビルドする。
+// goTestC builds the test binary of the package in dir to bin with the overlay applied.
 func goTestC(ctx context.Context, dir, importPath string, tags []string, overlay, bin string) error {
 	args := append([]string{"test", "-c", "-o", bin, "-overlay", overlay}, buildFlags(importPath)...)
 	if len(tags) > 0 {
@@ -433,14 +433,14 @@ func goTestC(ctx context.Context, dir, importPath string, tags []string, overlay
 	return nil
 }
 
-// testCommand は、テストバイナリを起動するコマンドを作る。
-// 利用者のフラグを先に、gamut が実行ごとに決めるフラグを後に置く。
-// テストバイナリは新しいプロセスグループで起動し、取り消しや時間切れではテストが起動した子プロセスごと止める。
+// testCommand builds the command that starts a test binary.
+// The user's flags come first, and the flags gamut sets per run after them.
+// The test binary starts in a new process group, so cancellation or a timeout stops it together with the child processes the test started.
 func testCommand(ctx context.Context, dir, bin string, flags, env []string, args ...string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, bin, append(slices.Clone(flags), args...)...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), env...)
-	// 止めた後も、孫プロセスが出力の管を握ったまま残ることがあるので、待つ時間に上限を置く。
+	// Even after stopping, a grandchild process may keep holding the output pipe, so the wait is bounded.
 	cmd.WaitDelay = time.Second
 	isolate(cmd)
 	return cmd
@@ -454,7 +454,7 @@ func listTests(ctx context.Context, dir, bin string, flags []string) ([]string, 
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		// TestMain の準備が失敗しても、一覧を得られない。
+		// A failing setup in TestMain also prevents getting the list.
 		return nil, fmt.Errorf("%w: listing tests in %s failed: %w\n%s%s", ErrBaseline, dir, err, out, stderr.Bytes())
 	}
 	var names []string
@@ -468,8 +468,8 @@ func listTests(ctx context.Context, dir, bin string, flags []string) ([]string, 
 	return names, nil
 }
 
-// cover は、全パッケージのテストの被覆を、キャッシュから戻せるものは戻し、残りを 1 つの作業の列で測り、記録を書き戻す。
-// p が nil でなければ、被覆を測ったプロセスを変異体の判定のために p に残す。
+// cover restores from the cache the test coverage of every package it can, measures the rest in one work queue, and writes the records back.
+// When p is not nil, the processes that measured coverage are left in p for judging mutants.
 func cover(ctx context.Context, active []*unit, opts Options, p *pool, logf func(string, ...any)) error {
 	var measure []*testCase
 	restored := 0
@@ -488,7 +488,7 @@ func cover(ctx context.Context, active []*unit, opts Options, p *pool, logf func
 	if err := buildLazy(ctx, active, func(*unit) []*testCase { return measure }, opts, logf); err != nil {
 		return err
 	}
-	// 記録を戻したテストに到達のあるパッケージは、自己検査をいま始め、被覆の測定と重ねる。
+	// Packages whose restored tests have reach start the self-check now, overlapping it with coverage measurement.
 	early := make([]bool, len(active))
 	probes := make([]*testCase, len(active))
 	for i, u := range active {
@@ -567,10 +567,10 @@ func cover(ctx context.Context, active []*unit, opts Options, p *pool, logf func
 	return nil
 }
 
-// coverBatches は、パッケージ自身のテストのうちまとめて測れるものを、ワーカー数の組に分け、組ごとに 1 つのプロセスで実行して、
-// テストの関数の先頭に差し込んだ境目で記録を振り分ける。振り分けられなかったテストを返し、それらは 1 件ずつ測る。
-// テスト 1 件につき 1 プロセスを起動する代わりに、組の数だけ起動する。
-// p が nil でなく、組のテストをすべて判定のテストから呼べるなら、組を判定のテストのプロセスで測り、そのプロセスを判定に使い回す。
+// coverBatches splits the package's own tests that can be measured together into as many chunks as workers, runs each chunk in one process,
+// and splits the records at the boundaries inserted at the start of the test functions. It returns the tests it could not split, which are measured one by one.
+// Instead of one process per test, it starts one per chunk.
+// When p is not nil and the judging test can call every test of a chunk, the chunk is measured in a judging test process, which is then reused for judging.
 func coverBatches(ctx context.Context, active []*unit, measure []*testCase, opts Options, p *pool) []*testCase {
 	type chunk struct {
 		unit  *unit
@@ -625,8 +625,8 @@ func coverBatches(ctx context.Context, active []*unit, measure []*testCase, opts
 
 var passLine = regexp.MustCompile(`(?m)^--- (?:PASS|SKIP): (\S+) \(([0-9.]+)s\)`)
 
-// coverChunk は、tests を 1 つのプロセスで -test.parallel=1 で実行し、記録を境目 "t <名前>" で振り分ける。
-// プロセスが失敗したか、境目のないテストがあれば偽を返し、tests の記録を空に戻す。
+// coverChunk runs tests in one process with -test.parallel=1 and splits the record at the boundaries "t <name>".
+// If the process fails or a test has no boundary, it returns false and empties the records of tests.
 func coverChunk(ctx context.Context, tests []*testCase, path string, opts Options) bool {
 	b := tests[0].bin
 	quoted := make([]string, len(tests))
@@ -649,7 +649,7 @@ func coverChunk(ctx context.Context, tests []*testCase, path string, opts Option
 	return splitRecords(tests, path, durations, time.Since(start))
 }
 
-// coverEnv は、被覆を path に記録させる環境変数に、extra と深さの制限を足して返す。
+// coverEnv returns the environment variables that record coverage to path, plus extra and the depth limit.
 func (o Options) coverEnv(path string, extra ...string) []string {
 	env := append([]string{"GAMUT_COVER=" + path}, extra...)
 	if o.MaxDepth > 0 {
@@ -658,9 +658,9 @@ func (o Options) coverEnv(path string, extra ...string) []string {
 	return env
 }
 
-// coverServed は、tests を判定のテストのプロセスで変異なしで実行して被覆を記録し、記録を境目で振り分ける。
-// 成功したら、そのプロセスは被覆の記録を止めて、変異体の判定のために p に戻る。テストの変数の初期化を、被覆と判定で 1 回にする。
-// 失敗したら、プロセスを捨てて偽を返す。
+// coverServed runs tests without mutations in a judging test process to record coverage, and splits the record at the boundaries.
+// On success, the process stops recording coverage and goes back to p for judging mutants, so the tests' variables are initialized once for both coverage and judging.
+// On failure, it throws the process away and returns false.
 func coverServed(ctx context.Context, tests []*testCase, path string, opts Options, p *pool) bool {
 	b := tests[0].bin
 	start := time.Now()
@@ -684,9 +684,9 @@ func coverServed(ctx context.Context, tests []*testCase, path string, opts Optio
 	return true
 }
 
-// splitRecords は、path の記録を境目 "t <名前>" で tests に振り分け、所要時間を durations から（なければ elapsed を等分して）入れる。
-// 最初の境目より前の記録（パッケージの初期化）は、どのテストにも現れるものとして全テストに足す。
-// 境目のないテストがあれば偽を返し、tests の記録を空に戻す。
+// splitRecords splits the record at path among tests at the boundaries "t <name>", and sets durations from durations (or, when missing, an equal share of elapsed).
+// Records before the first boundary (package initialization) appear for every test, so they are added to all tests.
+// If a test has no boundary, it returns false and empties the records of tests.
 func splitRecords(tests []*testCase, path string, durations map[string]time.Duration, elapsed time.Duration) bool {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -747,10 +747,10 @@ func splitRecords(tests []*testCase, path string, durations map[string]time.Dura
 	return true
 }
 
-// probeRevDeps は、逆依存パッケージのテストバイナリごとに、測るテストをまとめて 1 つのプロセスで実行し、
-// 変異箇所への到達も関数への入りも記録されなければ、それらのテストを空の記録として 1 件ずつの測定から外す。
-// 逆依存パッケージの多くは対象パッケージの変異箇所に到達しないので、テストの数だけのプロセスの起動を 1 回にできる。
-// まとめた実行が失敗したら、1 件ずつ測る（基準のテストの失敗は、そこでテストごとに報告する）。
+// probeRevDeps runs, per reverse dependency test binary, the tests to measure together in one process,
+// and when neither reach of a mutation site nor entry into a function is recorded, takes those tests out of one-by-one measurement with empty records.
+// Most reverse dependencies reach no mutation site of the target package, so one process start replaces one per test.
+// If the combined run fails, the tests are measured one by one (where a baseline test failure is reported per test).
 func probeRevDeps(ctx context.Context, measure []*testCase, opts Options) []*testCase {
 	byBin := map[*binary][]*testCase{}
 	var bins []*binary
@@ -796,18 +796,18 @@ func probeRevDeps(ctx context.Context, measure []*testCase, opts Options) []*tes
 	return out
 }
 
-// dirWork は、被覆の記録のファイルを置くディレクトリを返す。
+// dirWork returns the directory for the coverage record files.
 func (b *binary) dirWork() string { return filepath.Dir(b.path) }
 
-// plan は、u のすべてのテストを作り、キャッシュの記録を戻せるテストは戻し、測り直すテストに measured を立てて返す。
+// plan creates every test of u, restores those whose cache records can be restored, sets measured on those to measure again, and returns them.
 //
-// 記録を戻すのは、次をすべて満たすテストである。
-//   - 記録したときと、パッケージの外の依存、初期化の宣言、全変異箇所の書き換えの段階が同じである。
-//   - テストの鍵が同じである。
-//   - 記録にある、入った関数と到達した変異箇所を囲む宣言が、どれも今もそのままある（依存を含めて変わらない）。
-//   - 記録にある変異箇所と変異体が今もある。
+// A test's record is restored when all of the following hold.
+//   - The dependencies outside the package, the initialization declarations, and the rewrite level of every mutation site are the same as when recorded.
+//   - The test's key is the same.
+//   - Every entered function and every declaration enclosing a reached mutation site in the record still exists unchanged (dependencies included).
+//   - The mutation sites and mutants in the record still exist.
 //
-// 識別子で変異体を指定したときは、指定した変異体の変異箇所に到達していたテストも測り直す。
+// When mutants are selected by identifier, tests that reached the mutation sites of the selected mutants are measured again too.
 func (u *unit) plan(opts Options) []*testCase {
 	selected := map[string]bool{}
 	if opts.Select != nil {
@@ -844,7 +844,7 @@ func (u *unit) plan(opts Options) []*testCase {
 	return u.tests
 }
 
-// restorer は、キャッシュの被覆の記録を今の書き換えの番号へ写す。
+// restorer maps the cached coverage records onto the numbers of the current rewrite.
 type restorer struct {
 	ok      bool
 	reaches map[string]bool
@@ -862,7 +862,7 @@ func (u *unit) restorer(cov *cache.Coverage) *restorer {
 	for _, s := range u.sch.Sites {
 		key := s.Mutants[0].SiteKey
 		if _, dup := r.sites[key]; dup {
-			// 同じ鍵の箇所が 2 つあれば（同じ形の init が 2 つあるときなど）、記録を区別できない。
+			// Two sites with the same key (such as two init functions of the same shape) make the records indistinguishable.
 			return r
 		}
 		r.sites[key] = s
@@ -929,7 +929,7 @@ func (r *restorer) restore(t *testCase, rec *cache.TestRecord) {
 	}
 }
 
-// saveCoverage は、今回のすべてのテストの被覆をキャッシュへ書く。戻したテストの記録は、戻したものと同じ内容で書き直す。
+// saveCoverage writes the coverage of every test of this run to the cache. Restored tests' records are written back with the same contents.
 func (u *unit) saveCoverage(store *cache.Store) {
 	if store == nil || u.Keys == nil {
 		return
@@ -977,7 +977,7 @@ func (u *unit) saveCoverage(store *cache.Store) {
 	}
 }
 
-// coverTest は、変異を無効にしたまま t を別のプロセスで実行し、到達、感染、入った関数を記録する。
+// coverTest runs t in its own process with mutations disabled, and records reach, infection, and entered functions.
 func coverTest(ctx context.Context, t *testCase, path string, opts Options) error {
 	b := t.bin
 	start := time.Now()
@@ -1012,18 +1012,18 @@ func coverTest(ctx context.Context, t *testCase, path string, opts Options) erro
 	return nil
 }
 
-// selfCheck は、パッケージ自身のテストのうち到達の記録がある最も短い 1 件を forced fail で実行し、失敗することを確かめる。
-// 到達が記録されたのに失敗しないなら、GAMUT_MUTANT がテストのプロセスで読まれていない。
+// selfCheck runs, with forced fail, the shortest of the package's own tests that has reach records, and checks that it fails.
+// If it passes although reach was recorded, the test process does not read GAMUT_MUTANT.
 func selfCheck(ctx context.Context, u *unit, opts Options) error {
 	if !u.bins[0].built {
-		// ビルドしなかったのは、被覆を測るテストも実行する変異体もないときである。
-		// 判定はすべて、同じ環境で自己検査を通った前回の実行の記録から来る。
+		// Nothing was built only when there is neither a test to measure nor a mutant to run.
+		// Every verdict then comes from the records of a previous run that passed the self-check in the same environment.
 		return nil
 	}
 	return selfCheckWith(ctx, u, shortestReaching(u.bins[0].tests, func(*testCase) bool { return true }), opts)
 }
 
-// shortestReaching は、tests のうち ok を満たし、到達の記録がある最も短いテストを返す。
+// shortestReaching returns the shortest test in tests that satisfies ok and has reach records.
 func shortestReaching(tests []*testCase, ok func(*testCase) bool) *testCase {
 	var probe *testCase
 	for _, t := range tests {
@@ -1034,7 +1034,7 @@ func shortestReaching(tests []*testCase, ok func(*testCase) bool) *testCase {
 	return probe
 }
 
-// selfCheckWith は、probe を forced fail で実行し、失敗することを確かめる。probe が nil なら、検査を飛ばしたことを警告する。
+// selfCheckWith runs probe with forced fail and checks that it fails. When probe is nil, it warns that the check was skipped.
 func selfCheckWith(ctx context.Context, u *unit, probe *testCase, opts Options) error {
 	own := u.bins[0]
 	pkgPath := u.Pkg.ImportPath
@@ -1048,7 +1048,7 @@ func selfCheckWith(ctx context.Context, u *unit, probe *testCase, opts Options) 
 	runCtx, cancel := context.WithTimeout(ctx, limit)
 	defer cancel()
 	start := time.Now()
-	// gamutHit は被覆の記録中にだけ呼ばれるので、記録を有効にして forced fail を渡す。
+	// gamutHit is called only while recording coverage, so enable recording and pass forced fail.
 	env := []string{"GAMUT_COVER=" + filepath.Join(u.work, "forced-fail"), "GAMUT_MUTANT=" + strconv.Itoa(schemata.ForcedFail)}
 	cmd := testCommand(runCtx, own.dir, own.path, opts.TestFlags, env, "-test.run", "^"+regexp.QuoteMeta(probe.local)+"$", "-test.count=1", "-test.paniconexit0")
 	out, err := cmd.CombinedOutput()

@@ -2,14 +2,14 @@ package main
 
 import "runtime/debug"
 
-// version は、実行中の gamut の版を返す。
+// version returns the version of the running gamut.
 func version() string {
 	info, _ := debug.ReadBuildInfo()
 	return versionOf(info)
 }
 
-// versionOf は、ビルド情報から版を返す。go install で版を指定して入れたならその版（v0.1.0 など）、
-// 手元でビルドしたなら devel と、分かればコミットと手元の変更の有無を返す。
+// versionOf returns the version from the build info: the version given to go install (such as v0.1.0),
+// or for a local build, devel with the commit and whether there are local changes when known.
 func versionOf(info *debug.BuildInfo) string {
 	if info == nil {
 		return "devel"

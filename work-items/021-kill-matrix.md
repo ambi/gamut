@@ -5,41 +5,16 @@ depends_on: [004]
 created_at: 2026-11-20
 ---
 
-# kill matrix で検出しないテストと包含されるテストを報告する
+# Report tests that detect nothing and subsumed tests with a kill matrix
 
-## 動機
+## Motivation
 
-通常の実行は最初の失敗で止まるので、変異体を検出しうるテストの全体は分からない。
-全件を記録すると、何も検出しないテスト（表明のないテスト）、ほかのテストに包含されるテスト、同じものを検出するテストの組が分かる。
+A normal run stops at the first failure, so the full set of tests that can detect a mutant is unknown. Recording all of them reveals tests that detect nothing, subsumed tests, and duplicates.
 
-## 対象範囲
+## Summary
 
-- `--kill-matrix` で、感染したテストを 1 件ずつ別のプロセスで実行し、変異体ごとに検出したテストをすべて記録する。
-- 報告：何も検出しないテスト、包含されるテスト（包含する側のテストとともに）、重複の組。
-- 時間切れの変異体と実行しなかった変異体は計算から除き、除いた数を報告する。
-- 結果はキャッシュに残し、通常の実行でも再利用する。
-
-## 対象外
-
-- テストの削除の提案。包含は今の変異体に対するもので、将来の故障に対するものではないので、見直しの候補として出すだけにする。
-
-## 設計
-
-テストを 1 件ずつ実行するのは、`-test.failfast` を外しても Go のテストバイナリはテスト関数の失敗を名前で報告するので 1 プロセスでも足りるかを、`-test.json` 相当の出力（`-test.v=test2json`）で確かめてから決める。
-1 プロセスで全テストを流して失敗したテストの名前を集められれば、プロセスの起動は変異体ごとに 1 回で済む。
-
-## 完了の条件
-
-- 表明のないテスト、包含されるテスト、重複するテストを持つ固定モジュールで、それぞれが報告される。
-
-## 検証
-
-- 端から端までのテスト。
-
-## 要約
-
-- 設計の確かめ：テストバイナリは `-test.failfast` を外せば失敗したテストをすべて `--- FAIL:` の行で名前とともに出すので、テストを 1 件ずつ別のプロセスで実行せず、変異体ごとに 1 つのプロセスで感染したテストを流す形にした（`run.(*unit).executeAll`）。panic で落ちたときは、結果の行のない実行中のテストを検出したテストとし、始まっていないテストを新しいプロセスで実行し直す。
-- kill matrix の実行ではテストプロセスを使い回さない。idmagic の `usecases` で 6.9 秒が 44.4 秒になり、判定は通常の実行と同じだった。包含されるテストが 58 件、重複の組が 4 つ見つかり、何も検出しないテストはなかった。
-- キャッシュの記録に `matrix` と `killers` を足した。通常の実行は kill matrix の判定を再利用でき、kill matrix の実行は通常の実行の `KILLED` を実行し直す。
-- 報告の変異体に `killers`、報告に `kill_matrix`（何も検出しないテスト、包含されるテストと含む側、重複の組、計算に使った数と除いた数）を足し、要約に節を設けた。
-- 固定モジュール `testdata/killmatrix`（表明のないテスト、panic で知らせるテスト、包含されるテスト、重複するテスト）の端から端までのテスト（`TestKillMatrix`）で、それぞれが報告されること、panic の後のテストも記録されること、通常の実行の後でも検出したテストがすべてそろうことを表明した。
+- Without `-test.failfast`, a test binary prints every failing test as `--- FAIL:`, so each mutant runs its infected tests in one process (`run.(*unit).executeAll`). After a panic, the running test without a result counts as a detector and the unstarted tests run again in a new process.
+- Kill matrix runs do not reuse test processes. On idmagic's `usecases` it took 44.4 s instead of 6.9 s with the same verdicts, and found 58 subsumed tests and 4 duplicate groups.
+- Cache records got `matrix` and `killers`: normal runs reuse kill matrix verdicts, and kill matrix runs rerun normal `KILLED` verdicts.
+- The report got `killers` per mutant and `kill_matrix` (tests detecting nothing, subsumed tests and their subsumers, duplicate groups, counts used and excluded), with a section in the summary.
+- `TestKillMatrix` (`testdata/killmatrix`) asserts each case, including tests after a panic.

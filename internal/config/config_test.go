@@ -118,7 +118,7 @@ func TestFind_ReadsTheFileAtTheModuleRoot(t *testing.T) {
 	}
 }
 
-// TestSchema_MatchesTheConfig は、JSON Schema の項目が、設定の構造体の項目と一致することを確かめる。
+// TestSchema_MatchesTheConfig checks that the JSON Schema's keys match the fields of the config struct.
 func TestSchema_MatchesTheConfig(t *testing.T) {
 	data, err := os.ReadFile("../../schema/gamut.schema.json")
 	if err != nil {
@@ -163,7 +163,7 @@ func TestSchema_MatchesTheConfig(t *testing.T) {
 	}
 }
 
-// TestSchema_ListsEveryMutator は、JSON Schema の mutators の候補が、gamut の変異演算子と一致することを確かめる。
+// TestSchema_ListsEveryMutator checks that the JSON Schema's choices for mutators match gamut's mutators.
 func TestSchema_ListsEveryMutator(t *testing.T) {
 	data, err := os.ReadFile("../../schema/gamut.schema.json")
 	if err != nil {

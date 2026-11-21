@@ -19,13 +19,13 @@ func TestDetector_ComparesCompiledCode(t *testing.T) {
 
 import "strconv"
 
-// Scale は x * 1 と x / 1 が同じコードになる。
+// Scale compiles to the same code with x * 1 and x / 1.
 func Scale(x int) int { return x * 1 }
 
-// Shift は x + 0 と x - 0 が同じコードになる。
+// Shift compiles to the same code with x + 0 and x - 0.
 func Shift(x int) int { return x + 0 }
 
-// Name は x + 2 と x - 2 が違うコードになる。
+// Name compiles to different code with x + 2 and x - 2.
 func Name(x int) string { return strconv.Itoa(x + 2) }
 `,
 		"other.go": "package eq\n\nfunc Other(a, b int) bool { return a < b }\n",

@@ -11,23 +11,23 @@ import (
 	"strings"
 )
 
-// Quick は、変更のない再実行で、読み込みも型検査もビルドも省くための、前回の実行の入力の指紋と報告である。
-// 入力のファイルの大きさと更新時刻、ディレクトリの中身の一覧が前回と同じなら、前回の報告をそのまま返す。
+// Quick is the fingerprint of the previous run's inputs and its report, for skipping loading, type-checking, and building on an unchanged rerun.
+// When the sizes and modification times of the input files and the listings of the directories match the previous run, the previous report is returned as is.
 type Quick struct {
-	// Fingerprint は、Files、Dirs、Trees の状態の指紋である。
+	// Fingerprint is the fingerprint of the state of Files, Dirs, and Trees.
 	Fingerprint string `json:"fingerprint"`
-	// Files は状態を比べるファイル、Dirs は直下のファイルの一覧と状態を比べるディレクトリ、
-	// Trees は下のすべてのディレクトリを比べる木（<ディレクトリ>/... のパターンの根）である。
+	// Files are the files whose state is compared, Dirs the directories whose file listing and states are compared,
+	// and Trees the trees whose every directory is compared (the roots of <directory>/... patterns).
 	Files []string `json:"files,omitempty"`
 	Dirs  []string `json:"dirs,omitempty"`
 	Trees []string `json:"trees,omitempty"`
-	// Report は、前回の実行の JSON の報告である。
+	// Report is the previous run's JSON report.
 	Report json.RawMessage `json:"report"`
 }
 
-// Fingerprint は、files の状態、dirs の直下のファイルの一覧と状態と下位ディレクトリの名前、trees の下のすべてのファイルの一覧と状態の指紋を返す。
-// 状態は大きさと更新時刻で、中身は読まない。ないファイルも「ない」という状態として含める。
-// 木の下の、名前が . で始まるディレクトリと node_modules は、go のパターンが見ないので含めない。
+// Fingerprint returns the fingerprint of the states of files, the file listings, states, and subdirectory names of dirs, and the listings and states of every file under trees.
+// The state is size and modification time; contents are not read. A missing file is included with the state "missing".
+// Directories under the trees whose names start with . and node_modules are left out, as go patterns skip them.
 func Fingerprint(files, dirs, trees []string) (string, error) {
 	h := sha256.New()
 	stat := func(path string) {
@@ -55,7 +55,7 @@ func Fingerprint(files, dirs, trees []string) (string, error) {
 			case e.Type().IsRegular():
 				stat(filepath.Join(d, e.Name()))
 			case e.IsDir():
-				// 新しい testdata などのディレクトリを捉える。
+				// Catches new directories such as testdata.
 				writeString(h, filepath.Join(d, e.Name())+"/")
 			}
 		}
@@ -88,34 +88,34 @@ func Fingerprint(files, dirs, trees []string) (string, error) {
 	return digest(h), nil
 }
 
-// Quick は、実行の引数と設定の鍵 key の前回の Quick を返す。なければ nil を返す。
+// Quick returns the previous Quick for the key key of the run's arguments and settings, or nil.
 func (s *Store) Quick(key string) *Quick {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.quick[key]
 }
 
-// PutQuick は、key の Quick を置き換える。
+// PutQuick replaces the Quick of key.
 func (s *Store) PutQuick(key string, q *Quick) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.quick[key] = q
 }
 
-// QuickKey は、実行の引数と設定から Quick の鍵を作る。
+// QuickKey builds the key of a Quick from the run's arguments and settings.
 func QuickKey(parts ...string) string {
 	return hashStrings(parts)
 }
 
-// LoadHint は、読み込みの鍵 key の、前回の読み込みでエクスポートデータを求めたパッケージの import パスを返す。
-// 読み込みは、これを依存の一覧と並行して求める（load.WithHint）。
+// LoadHint returns, for the load key key, the import paths of the packages whose export data the previous load requested.
+// Loading requests them alongside the dependency list (load.WithHint).
 func (s *Store) LoadHint(key string) []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.loadHints[key]
 }
 
-// PutLoadHint は、key の読み込みの hint を置き換える。
+// PutLoadHint replaces the load hint of key.
 func (s *Store) PutLoadHint(key string, hint []string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

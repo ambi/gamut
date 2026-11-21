@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// TestArid_FlagsAndCount は、arid の既定の規則、-arid-call、-arid-package、-no-arid と、報告の arid の数を確かめる。
+// TestArid_FlagsAndCount checks the default arid rules, -arid-call, -arid-package, -no-arid, and the arid count in the report.
 func TestArid_FlagsAndCount(t *testing.T) {
 	dir := t.TempDir()
 	write(t, dir, "go.mod", "module ar\n\ngo 1.27.4\n")
@@ -38,7 +38,7 @@ func F(n int) int {
 		}
 		return got, rep.Gamut.Counts.Arid
 	}
-	// 既定：log.Println の引数（+）と文の削除を除く。audit.Record の引数（-）と文の削除、本体の * と RETURN_ZERO は残る。
+	// Default: the argument of log.Println (+) and its statement removal are excluded. The argument of audit.Record (-), its statement removal, the body's *, and RETURN_ZERO remain.
 	got, arid := types()
 	if got["ARITHMETIC_BASE"] != 2 || got["STATEMENT_REMOVE"] != 1 || arid != 2 {
 		t.Errorf("default: %v, arid %d; want 2 arithmetic, 1 statement removal, 2 arid", got, arid)

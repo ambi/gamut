@@ -14,10 +14,10 @@ import (
 	"github.com/ambi/gamut/internal/run"
 )
 
-// MTEReport は、mutation-testing-elements のスキーマ 2（mutation-testing-report-schema）の報告である。gamut の機械向けの報告はこれだけである。
-// このスキーマを読む HTML の閲覧画面やダッシュボードで、gamut の判定を表示できる。
-// gamut 固有の情報は、スキーマが禁じない追加のフィールド gamut にまとめる。スキーマが将来フィールドを足しても衝突しないためである。
-// 外向きの形なので、内部の Report の形とは切り離し、ここで写す。
+// MTEReport is a report in version 2 of the mutation-testing-elements schema (mutation-testing-report-schema). It is gamut's only machine-readable report.
+// HTML viewers and dashboards that read this schema can show gamut's verdicts.
+// Information particular to gamut goes in the extra field gamut, which the schema allows, so future schema fields cannot collide with it.
+// It is the external shape, kept apart from the internal Report and mapped here.
 type MTEReport struct {
 	SchemaVersion string                  `json:"schemaVersion"`
 	Thresholds    MTEThresholds           `json:"thresholds"`
@@ -28,32 +28,32 @@ type MTEReport struct {
 	Gamut         *MTEGamut               `json:"gamut,omitempty"`
 }
 
-// MTEGamut は、報告の全体についての gamut 固有の情報である。
+// MTEGamut is the information particular to gamut about the whole report.
 type MTEGamut struct {
 	GoModule string `json:"goModule"`
-	// Package は、1 パッケージならその import パス、複数なら実行時に指定したパターンである。
+	// Package is the import path for one package, or the patterns given to the run for several.
 	Package  string   `json:"package"`
 	Packages []string `json:"packages,omitempty"`
-	// MutationScore は、検出した変異体の、検出したものと生き残り（Survived、NoCoverage）の和に対する百分率である。閾値はこれに当てる。
+	// MutationScore is the percentage of detected mutants among detected mutants plus survivors (Survived, NoCoverage). The thresholds apply to it.
 	MutationScore float64 `json:"mutationScore"`
-	// TestEfficacy は、到達した変異体のうち検出したものの百分率、MutationsCoverage は、判定した変異体のうち到達したものの百分率である。
+	// TestEfficacy is the percentage of reached mutants that were detected, and MutationsCoverage the percentage of judged mutants that were reached.
 	TestEfficacy      float64 `json:"testEfficacy"`
 	MutationsCoverage float64 `json:"mutationsCoverage"`
-	// ThresholdBreak は、点数がこれ未満なら品質の条件を満たさない閾値である。0 なら使わない。
+	// ThresholdBreak is the threshold below which the score fails the quality gate. 0 disables it.
 	ThresholdBreak float64   `json:"thresholdBreak,omitempty"`
 	ElapsedTime    float64   `json:"elapsedTime"`
 	Counts         MTECounts `json:"counts"`
-	// StaleAccepted は、もう要らない受理である。
+	// StaleAccepted are the acceptances no longer needed.
 	StaleAccepted []MTEStaleAcceptance `json:"staleAccepted,omitempty"`
-	// UnrepeatableTests は、同じプロセスで 2 回目に失敗したテストである。それが到達する変異体は、プロセスを使い回さずに判定した。
+	// UnrepeatableTests are the tests that failed on their second run in the same process. Mutants they reach were judged without reusing processes.
 	UnrepeatableTests []string `json:"unrepeatableTests,omitempty"`
-	// MaxDepthExcluded は、-max-depth を超えてだけ変異箇所に到達したので到達から除いたテストと、到達（テストと箇所の組）の数である。
+	// MaxDepthExcluded counts the tests removed from reach because they reached mutation sites only beyond -max-depth, and the reaches (pairs of a test and a site).
 	MaxDepthExcluded *MTEMaxDepthExcluded `json:"maxDepthExcluded,omitempty"`
 	SkippedPackages  []MTESkippedPackage  `json:"skippedPackages,omitempty"`
 	KillMatrix       *MTEKillMatrix       `json:"killMatrix,omitempty"`
 }
 
-// MTECounts は、状態ごとの変異体の数である。Total と点数は、Pending と Ignored（受理、等価、無効化コメント）を含めない。
+// MTECounts are the numbers of mutants per status. Total and the score leave out Pending and Ignored (accepted, equivalent, disable comment).
 type MTECounts struct {
 	Total        int `json:"total"`
 	Killed       int `json:"killed"`
@@ -62,33 +62,33 @@ type MTECounts struct {
 	CompileError int `json:"compileError"`
 	Timeout      int `json:"timeout"`
 	Pending      int `json:"pending,omitempty"`
-	// Arid は、テストが観測しないことの多いコード（ログ出力など）の中なので作らなかった変異体の数である。
+	// Arid is the number of mutants not created because they are in code tests rarely observe (such as logging).
 	Arid       int `json:"arid,omitempty"`
 	Ignored    int `json:"ignored,omitempty"`
 	Equivalent int `json:"equivalent,omitempty"`
 	Accepted   int `json:"accepted,omitempty"`
 }
 
-// MTEStaleAcceptance は、もう要らない受理である。Why は detected（テストが検出するようになった）か missing（変異体がなくなった）である。
+// MTEStaleAcceptance is an acceptance no longer needed. Why is detected (a test now detects it) or missing (the mutant is gone).
 type MTEStaleAcceptance struct {
 	ID     string `json:"id"`
 	Reason string `json:"reason"`
 	Why    string `json:"why"`
 }
 
-// MTEMaxDepthExcluded は、-max-depth で到達から除いたテストと到達の数である。
+// MTEMaxDepthExcluded counts the tests and reaches removed by -max-depth.
 type MTEMaxDepthExcluded struct {
 	Tests   int `json:"tests"`
 	Reaches int `json:"reaches"`
 }
 
-// MTESkippedPackage は、判定できずに飛ばしたパッケージと理由である。
+// MTESkippedPackage is a package skipped because it cannot be judged, with the reason.
 type MTESkippedPackage struct {
 	Package string `json:"package"`
 	Reason  string `json:"reason"`
 }
 
-// MTEKillMatrix は、-kill-matrix のときの、テストの見直しの候補である。
+// MTEKillMatrix are the candidates for reviewing tests under -kill-matrix.
 type MTEKillMatrix struct {
 	Mutants               int              `json:"mutants"`
 	Excluded              int              `json:"excluded"`
@@ -97,58 +97,58 @@ type MTEKillMatrix struct {
 	DuplicateTests        [][]string       `json:"duplicateTests"`
 }
 
-// MTESubsumption は、Test が検出する変異体をすべて By のどれかも検出することである。
+// MTESubsumption means some test in By detects every mutant Test detects.
 type MTESubsumption struct {
 	Test string   `json:"test"`
 	By   []string `json:"by"`
 }
 
-// MTEMutantGamut は、変異体についての gamut 固有の情報である。値のないフィールドは省く。
+// MTEMutantGamut is the information particular to gamut about a mutant. Fields without values are omitted.
 type MTEMutantGamut struct {
-	// Original は置き換える前の字句である。
+	// Original is the text before replacement.
 	Original string `json:"original,omitempty"`
-	// Mode は、schemata に埋め込んで判定したか（schemata）、個別にビルドしたか（standalone）である。
+	// Mode is whether the mutant was judged embedded in the schemata (schemata) or built standalone (standalone).
 	Mode   string `json:"mode,omitempty"`
 	Cached bool   `json:"cached,omitempty"`
-	// Critical は、重要領域の変異体かである。
+	// Critical reports whether the mutant is in a critical region.
 	Critical bool `json:"critical,omitempty"`
-	// PreviouslyKilledBy は、前回の検出テストが消えたので再検査し、今回は検出されなかったときの、前回の検出テストである。
+	// PreviouslyKilledBy is the previous detecting test, when that test is gone, the mutant was rechecked, and this time it was not detected.
 	PreviouslyKilledBy string `json:"previouslyKilledBy,omitempty"`
-	// AcceptedStatus は、受理した変異体（status は Ignored）の判定した状態である。
+	// AcceptedStatus is the judged status of an accepted mutant (whose status is Ignored).
 	AcceptedStatus string `json:"acceptedStatus,omitempty"`
 }
 
-// MTEThresholds は閾値（整数の百分率）である。
+// MTEThresholds are the thresholds (integer percentages).
 type MTEThresholds struct {
 	High int `json:"high"`
 	Low  int `json:"low"`
 }
 
-// MTEFramework は報告を作ったツールである。
+// MTEFramework is the tool that made the report.
 type MTEFramework struct {
 	Name    string `json:"name"`
 	Version string `json:"version,omitempty"`
 }
 
-// MTEFile は 1 ファイルの変異体である。
+// MTEFile holds the mutants of one file.
 type MTEFile struct {
 	Language string      `json:"language"`
 	Source   string      `json:"source"`
 	Mutants  []MTEMutant `json:"mutants"`
 }
 
-// MTETestFile は、テストの一覧である。gamut はテストのファイルを記録しないので、すべてのテストを名前のないファイルに入れる。
+// MTETestFile is the list of tests. gamut does not record test files, so every test goes in one unnamed file.
 type MTETestFile struct {
 	Tests []MTETest `json:"tests"`
 }
 
-// MTETest は 1 件のテストである。識別子にはテストの名前を使う。
+// MTETest is one test, identified by its name.
 type MTETest struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
 }
 
-// MTEMutant は 1 体の変異体である。
+// MTEMutant is one mutant.
 type MTEMutant struct {
 	ID           string          `json:"id"`
 	MutatorName  string          `json:"mutatorName"`
@@ -161,22 +161,22 @@ type MTEMutant struct {
 	Gamut        *MTEMutantGamut `json:"gamut,omitempty"`
 }
 
-// MTELocation は、変異した字句の範囲である。行と列は 1 から数え、end は含まない。
+// MTELocation is the range of the mutated text. Lines and columns count from 1, and end is exclusive.
 type MTELocation struct {
 	Start MTEPosition `json:"start"`
 	End   MTEPosition `json:"end"`
 }
 
-// MTEPosition は行と列である。
+// MTEPosition is a line and a column.
 type MTEPosition struct {
 	Line   int `json:"line"`
 	Column int `json:"column"`
 }
 
-// MTE は、報告を mutation-testing-elements の形式にする。各ファイルの中身を moduleDir から読む。
+// MTE turns the report into mutation-testing-elements format, reading each file's contents from moduleDir.
 //
-// 状態の対応は、KILLED→Killed、LIVED→Survived、NOT COVERED→NoCoverage、NOT VIABLE→CompileError、TIMED OUT→Timeout、
-// PENDING→Pending である。数えない変異体（無効化コメントで止めたもの、受理したもの、EQUIVALENT）は Ignored にし、理由を statusReason に入れる。
+// Statuses map as KILLED→Killed, LIVED→Survived, NOT COVERED→NoCoverage, NOT VIABLE→CompileError, TIMED OUT→Timeout,
+// and PENDING→Pending. Uncounted mutants (stopped by disable comments, accepted, EQUIVALENT) become Ignored, with the reason in statusReason.
 func (r *Report) MTE(moduleDir string) (*MTEReport, error) {
 	out := &MTEReport{SchemaVersion: "2", ProjectRoot: moduleDir, Files: map[string]*MTEFile{}, Framework: &MTEFramework{Name: "gamut", Version: r.Version}}
 	t := Thresholds{High: 80, Low: 60}
@@ -270,8 +270,8 @@ func mteStatus(m Mutation) (string, string) {
 	return "RuntimeError", m.Status
 }
 
-// span は、line:column から字句 token の終わりまでの範囲を返す。列はバイトで数える。
-// 字句が複数行にわたるなら（分岐の本体など）、終わりは最後の改行の後ろの行と列にする。空の字句も 1 字の範囲にする。
+// span returns the range from line:column to the end of the text token, counting columns in bytes.
+// For multi-line text (such as a branch body), the end is the line and column after the last newline. Empty text also gets a one-character range.
 func span(line, column int, token string) MTELocation {
 	start := MTEPosition{line, column}
 	if n := strings.Count(token, "\n"); n > 0 {
@@ -280,7 +280,7 @@ func span(line, column int, token string) MTELocation {
 	return MTELocation{Start: start, End: MTEPosition{line, column + max(1, len(token))}}
 }
 
-// mteGamut は、報告の全体についての gamut 固有の情報を写す。
+// mteGamut maps the information particular to gamut about the whole report.
 func (r *Report) mteGamut(thresholdBreak float64) *MTEGamut {
 	g := &MTEGamut{
 		GoModule: r.GoModule, Package: r.Package, Packages: r.Packages,
@@ -310,11 +310,11 @@ func (r *Report) mteGamut(thresholdBreak float64) *MTEGamut {
 	return g
 }
 
-// viewerScript は、HTML の報告が読み込む閲覧画面のスクリプトである。報告のスキーマと同じ版に固定する。
+// viewerScript is the viewer script the HTML report loads, pinned to the same version as the report schema.
 const viewerScript = "https://cdn.jsdelivr.net/npm/mutation-testing-elements@3.9.0/dist/mutation-test-elements.js"
 
-// WriteHTML は、報告を埋め込んだ 1 つの HTML を書く。閲覧画面のスクリプトは同梱せず、固定した版を読み込む。
-// encoding/json は < と > をエスケープするので、埋め込んだソースの "</script>" で script 要素が閉じない。
+// WriteHTML writes one HTML file embedding the report. The viewer script is not bundled; a pinned version is loaded.
+// encoding/json escapes < and >, so "</script>" in embedded source does not close the script element.
 func WriteHTML(w io.Writer, out *MTEReport) error {
 	data, err := json.Marshal(out)
 	if err != nil {

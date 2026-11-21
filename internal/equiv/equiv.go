@@ -1,8 +1,8 @@
-// Package equiv は、生き残った変異体のコンパイル結果を元のコンパイル結果と比べ、同じなら等価な変異体とする。
+// Package equiv compares a surviving mutant's compiled code with the original's, and treats it as equivalent when they are the same.
 //
-// 比べるのは go tool compile -S のアセンブリで、位置の注記を除く。コンパイラは定数の畳み込みと不要な分岐の除去を行うので、
-// x * 1 を x / 1 にする変異体のように、どの入力でも観測できない変異体を、テストを実行せずに見分けられる。
-// go build ではなく go tool compile を直接呼ぶので、変異体ごとのコンパイル結果を共有のビルドキャッシュへ書かない。
+// It compares the assembly of go tool compile -S without position notes. The compiler folds constants and removes dead branches,
+// so mutants that no input can observe, such as one turning x * 1 into x / 1, are told apart without running tests.
+// It calls go tool compile directly rather than go build, so per-mutant compile results never go to the shared build cache.
 package equiv
 
 import (
@@ -23,10 +23,10 @@ import (
 	"github.com/ambi/gamut/internal/run"
 )
 
-// ErrUnsupported は、パッケージを go tool compile で直接コンパイルできないことを表す。
+// ErrUnsupported means go tool compile cannot compile the package directly.
 var ErrUnsupported = errors.New("the package has embedded or assembly files, which need more than its Go files to compile")
 
-// Detector は、1 つのパッケージの変異体のコンパイル結果を、元のコンパイル結果と比べる。並行に使える。
+// Detector compares the compiled code of one package's mutants with the original's. It is safe for concurrent use.
 type Detector struct {
 	pkg       *load.Package
 	work      string
@@ -34,7 +34,7 @@ type Detector struct {
 	base      []byte
 }
 
-// New は、pkg を元のソースでコンパイルし、比べる元にする。作業ファイルは work の下に置く。
+// New compiles pkg from its original source as the base for comparison. Work files go under work.
 func New(ctx context.Context, pkg *load.Package, work string) (*Detector, error) {
 	if !pkg.Direct {
 		return nil, fmt.Errorf("%s: %w", pkg.ImportPath, ErrUnsupported)
@@ -54,8 +54,8 @@ func New(ctx context.Context, pkg *load.Package, work string) (*Detector, error)
 	return d, nil
 }
 
-// Equivalent は、変異体 m を当てたパッケージのコンパイル結果が、元と同じかを返す。
-// 変異体がコンパイルできなければ、等価ではないとする。
+// Equivalent reports whether the package compiled with the mutant m matches the original.
+// A mutant that does not compile is not equivalent.
 func (d *Detector) Equivalent(ctx context.Context, m *mutant.Mutant) (bool, error) {
 	original := m.OriginalText
 	src := m.File.Src
@@ -74,7 +74,7 @@ func (d *Detector) Equivalent(ctx context.Context, m *mutant.Mutant) (bool, erro
 	return bytes.Equal(out, d.base), nil
 }
 
-// compile は、パッケージのファイルを一時ディレクトリに書き、file だけを src に置き換えてコンパイルし、正規化したアセンブリを返す。
+// compile writes the package's files to a temporary directory, replaces only file with src, compiles, and returns the normalized assembly.
 func (d *Detector) compile(ctx context.Context, file *load.File, src []byte) ([]byte, error) {
 	dir, err := os.MkdirTemp(d.work, "c-")
 	if err != nil {
@@ -108,11 +108,11 @@ func (d *Detector) compile(ctx context.Context, file *load.File, src []byte) ([]
 	return positions.ReplaceAll(out, nil), nil
 }
 
-// positions は、アセンブリの命令に付く位置の注記（"(file.go:12)"）である。変異で字句の長さが変わっても、行は変わらないが、
-// 比べるのはコードだけにする。
+// positions matches the position notes on assembly instructions ("(file.go:12)"). A mutation that changes the text's length keeps the lines,
+// but only the code is compared.
 var positions = regexp.MustCompile(`\([^()\n]*\.go:\d+\)`)
 
-// langVersion は、go.mod の go の版（"1.27.4"）から、-lang の値（"go1.27"）を作る。
+// langVersion makes the -lang value ("go1.27") from the go version in go.mod ("1.27.4").
 func langVersion(v string) string {
 	if v == "" {
 		return ""
@@ -124,17 +124,17 @@ func langVersion(v string) string {
 	return "go" + parts[0] + "." + parts[1]
 }
 
-// Stats は、Mark の結果の数である。
+// Stats are the counts from Mark.
 type Stats struct {
-	// Checked はコンパイルして比べた変異体、Reused はキャッシュの比較を使った変異体、Equivalent は等価とした変異体の数である。
+	// Checked, Reused, and Equivalent count the mutants compiled and compared, those using a cached comparison, and those found equivalent.
 	Checked, Reused, Equivalent int
-	// Skipped は、直接コンパイルできないので比べなかったパッケージの import パスである。
+	// Skipped are the import paths of packages not compared because they cannot be compiled directly.
 	Skipped []string
 }
 
-// Mark は、targets の判定 results のうち LIVED の変異体を比べ、コンパイル結果が元と同じものを EQUIVALENT にする。
-// store があれば、構築可能性と同じ鍵（囲む宣言、依存、外の依存）で比較を記録し、鍵の変わらない変異体はコンパイルし直さない。
-// results[i] は targets[i] の判定である。作業ファイルは work の下に置く。
+// Mark compares the LIVED mutants in results of targets and makes those whose compiled code matches the original EQUIVALENT.
+// With store, comparisons are recorded under the same keys as viability (enclosing declaration, dependencies, external dependencies), and mutants with unchanged keys are not recompiled.
+// results[i] are the verdicts of targets[i]. Work files go under work.
 func Mark(ctx context.Context, targets []run.Target, results [][]*run.Result, store *cache.Store, workers int, work string) (Stats, error) {
 	type job struct {
 		target int

@@ -5,38 +5,15 @@ depends_on: [018]
 created_at: 2026-11-20
 ---
 
-# 不要かもしれないコードを報告する
+# Report possibly unneeded code
 
-## 動機
+## Motivation
 
-コードを削除する変異（文の削除、条件の定数化）が生き残るとき、テストの不足か、コードが不要かのどちらかである。
-生き残りを関数ごとに並べ、「コードを消すか、それを必要とするテストを足すか」を問えば、不要なコードを見つける手がかりになる。
+When a code-removing mutation survives, either a test is missing or the code is not needed. Listing such survivors per function and asking "remove the code, or add a test that needs it?" helps find unneeded code.
 
-## 対象範囲
+## Summary
 
-- `--reporter simplify` で、[018](018-more-mutators.md) の削除の変異（`STATEMENT_REMOVE`、`CONDITIONS_CONSTANT`）の生き残りを、囲む関数ごとに、消える字句とともに並べる。
-- 感染しない生き残りには「値を変える入力でテストが到達しない」と注記する。入力の不足の方が多いためである。
-- 受理と無効化した変異体は除く。
-
-## 対象外
-
-- 自動での削除。
-
-## 設計
-
-点数と品質の条件には影響させない。
-
-## 完了の条件
-
-- 不要な分岐を持つ固定モジュールで、その分岐が候補として報告される。
-
-## 検証
-
-- 端から端までのテスト。
-
-## 要約
-
-- `-reporter simplify` を足した（`internal/report/simplify.go`）。`STATEMENT_REMOVE` と `CONDITIONS_CONSTANT` の、受理していない `not detected` の生き残りを、ファイルと囲む関数ごとに、消える字句（複数行の文は最初の行）と識別子とともに並べる。
-- 対象範囲では、感染しない生き残りに注記して並べるとしていたが、idmagic の `usecases` で測ると、511 体のうち `not infected` が 254 体、`NOT COVERED` が 170 体で、候補が埋もれた。そこでこの 2 つは数だけを出し、要約の該当する組を見るよう案内する形に変えた。
-- `agent` とは、どちらも標準出力に書くので併用できない。
-- 単体テスト（`TestWriteSimplify`）で選び方と表示を、端から端までのテスト（`TestSimplifyReporter`、固定モジュール `testdata/simplify`）で、不要な分岐（`n == 0` の定数化）と見られない呼び出し（`touch()` の削除）が候補になり、検出された変異体と到達しない関数が候補にならないことを表明した。
+- `-reporter simplify` (`internal/report/simplify.go`) lists unaccepted `not detected` survivors of `STATEMENT_REMOVE` and `CONDITIONS_CONSTANT` per file and enclosing function, with the removed text (the first line of multi-line statements) and the identifier.
+- The plan listed `not infected` survivors with a note, but on idmagic's `usecases` 254 of 511 were `not infected` and 170 `NOT COVERED`, burying the candidates, so those two are only counted.
+- It cannot be combined with `agent`, which also writes to stdout.
+- `TestWriteSimplify` and `TestSimplifyReporter` (`testdata/simplify`) assert the selection and display.

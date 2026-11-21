@@ -15,19 +15,19 @@ import (
 	"github.com/ambi/gamut/internal/load"
 )
 
-// TestMarks は、テストファイルの書き換えである。トップレベルのテスト関数の先頭に、記録の境目を書く呼び出しを差し込む。
-// 1 つのプロセスで全テストを実行しても、到達と感染をテストごとに振り分けられるようにする。
+// TestMarks is the rewrite of the test files. It inserts, at the start of each top-level test function, a call that writes a boundary in the record.
+// Reach and infection can then be attributed to each test even when one process runs every test.
 type TestMarks struct {
-	// Files は、テストファイルの絶対パスから書き換え後の内容への対応である。
+	// Files maps the absolute paths of the test files to their rewritten contents.
 	Files map[string][]byte
-	// Batchable は、1 つのプロセスでまとめて被覆を記録できるテストの名前である。-test.parallel=1 で実行することを前提にする。
-	// 本文の文として Parallel を呼ぶテストは、再開の直後にも境目を書くので含める。
-	// そのうえで本文の中（サブテスト）でも Parallel を呼ぶテストは、サブテストの間に別の並列のテストが再開しうるので含めない。
+	// Batchable are the names of the tests whose coverage can be recorded together in one process. It assumes running with -test.parallel=1.
+	// Tests that call Parallel as a statement of their body are included, because a boundary is also written right after they resume.
+	// Tests that also call Parallel deeper in their body (in subtests) are not included, because another parallel test may resume between the subtests.
 	Batchable map[string]bool
 }
 
-// MarkTests は、pkg のテストファイルを書き換える。行は変えない。
-// 外部テスト（package <名前>_test）は、対象パッケージを import しているファイルだけ書き換え、公開した補助関数を呼ぶ。
+// MarkTests rewrites pkg's test files without changing lines.
+// For external tests (package <name>_test), only files that import the target package are rewritten, and they call the exported helper function.
 func MarkTests(pkg *load.Package) (*TestMarks, error) {
 	marks := &TestMarks{Files: map[string][]byte{}, Batchable: map[string]bool{}}
 	fset := token.NewFileSet()
@@ -63,7 +63,7 @@ func MarkTests(pkg *load.Package) (*TestMarks, error) {
 			top := 0
 			for _, st := range fd.Body.List {
 				if isParallelCall(st) {
-					// 並列のテストは Parallel で止まり、ほかのテストの後に再開する。再開した所を境目にする。
+					// A parallel test pauses at Parallel and resumes after the other tests. Where it resumes becomes a boundary.
 					top++
 					inserts = append(inserts, insert{offset: fset.Position(st.End()).Offset, text: ";" + text})
 				}
@@ -88,7 +88,7 @@ func MarkTests(pkg *load.Package) (*TestMarks, error) {
 	return marks, nil
 }
 
-// importName は、外部テストのファイル f が対象パッケージを import する名前を返す。
+// importName returns the name under which the external test file f imports the target package.
 func importName(f *ast.File, pkg *load.Package) (string, bool) {
 	for _, spec := range f.Imports {
 		path, err := strconv.Unquote(spec.Path.Value)
@@ -106,7 +106,7 @@ func importName(f *ast.File, pkg *load.Package) (string, bool) {
 	return "", false
 }
 
-// isTestName は、name が go test の実行するテスト関数の名前の形かを返す。
+// isTestName reports whether name has the form of a test function name go test runs.
 func isTestName(name string) bool {
 	for _, prefix := range []string{"Test", "Fuzz", "Example"} {
 		if rest, ok := strings.CutPrefix(name, prefix); ok {
@@ -116,7 +116,7 @@ func isTestName(name string) bool {
 	return false
 }
 
-// isParallelCall は、文が X.Parallel() の呼び出しだけからなるかを返す。
+// isParallelCall reports whether the statement is just a call to X.Parallel().
 func isParallelCall(st ast.Stmt) bool {
 	es, ok := st.(*ast.ExprStmt)
 	if !ok {
@@ -130,7 +130,7 @@ func isParallelCall(st ast.Stmt) bool {
 	return ok && sel.Sel.Name == "Parallel"
 }
 
-// countParallel は、本文の中の Parallel というメソッドの呼び出しの数を返す。
+// countParallel returns the number of calls to a method named Parallel in the body.
 func countParallel(body *ast.BlockStmt) int {
 	n := 0
 	ast.Inspect(body, func(node ast.Node) bool {
@@ -144,7 +144,7 @@ func countParallel(body *ast.BlockStmt) int {
 	return n
 }
 
-// startsLower は、s が小文字で始まるかを返す。
+// startsLower reports whether s starts with a lowercase letter.
 func startsLower(s string) bool {
 	r, _ := utf8.DecodeRuneInString(s)
 	return unicode.IsLower(r)

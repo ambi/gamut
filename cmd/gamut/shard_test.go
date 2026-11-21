@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-// TestShard_MergeEqualsOneRun は、2 つのシャードで実行してまとめた報告とキャッシュが、1 回で実行したものと一致することを確かめる。
+// TestShard_MergeEqualsOneRun checks that the report and cache merged from two shards match those of one run.
 func TestShard_MergeEqualsOneRun(t *testing.T) {
 	dir := "../../testdata/fixture"
 	whole, _ := mustGamut(t, "-no-cache", dir)
@@ -41,7 +41,7 @@ func TestShard_MergeEqualsOneRun(t *testing.T) {
 		}
 		caches = append(caches, cachePath)
 	}
-	// まとめるのはシャードのキャッシュだけで、シャードの報告は読まない。
+	// Only the shards' caches are merged; their reports are not read.
 	merged, mergedCache := filepath.Join(tmp, "merged.json"), filepath.Join(tmp, "merged-cache.json")
 	var stdout, stderr strings.Builder
 	args := []string{"merge", "-o", merged, "-cache-out", mergedCache, caches[0], caches[1]}
@@ -54,12 +54,12 @@ func TestShard_MergeEqualsOneRun(t *testing.T) {
 	if !strings.Contains(stdout.String(), "killed") {
 		t.Errorf("merge prints no summary:\n%s", stdout.String())
 	}
-	// まとめたキャッシュで実行し直すと、判定をすべて再利用する。
+	// Running again with the merged cache reuses every verdict.
 	_, log := mustGamut(t, "-cache", mergedCache, dir)
 	if !strings.Contains(log, " 0 to execute") {
 		t.Errorf("the merged cache is not reused:\n%s", log)
 	}
-	// 判定を実行していないキャッシュはまとめられない。
+	// A cache without executed verdicts cannot be merged.
 	empty := filepath.Join(tmp, "empty.json")
 	if err := os.WriteFile(empty, []byte(`{"version":3}`), 0o600); err != nil {
 		t.Fatal(err)
@@ -75,7 +75,7 @@ func TestShard_MergeEqualsOneRun(t *testing.T) {
 	}
 }
 
-// TestTimeBudget_LeavesTheRestPending は、予算を超えると新しい変異体を始めずに PENDING にし、キャッシュに書かず、次の実行で判定することを確かめる。
+// TestTimeBudget_LeavesTheRestPending checks that past the budget no new mutant starts, the rest are PENDING and not cached, and the next run judges them.
 func TestTimeBudget_LeavesTheRestPending(t *testing.T) {
 	dir := "../../testdata/fixture"
 	cachePath := filepath.Join(t.TempDir(), "cache.json")

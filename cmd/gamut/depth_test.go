@@ -9,8 +9,8 @@ import (
 	"time"
 )
 
-// TestMaxDepth は、-max-depth を付けると、深い呼び出しの先でしか変異箇所に到達しないテストを、到達したテストから除くことを確かめる。
-// サブテストの関数から数えることと、除いた数を報告することも、被覆の記録をキャッシュから戻した実行で確かめる。
+// TestMaxDepth checks that -max-depth removes from the reaching tests those that reach a mutation site only through deep calls.
+// It also checks, in a run restoring coverage records from the cache, that depth counts from subtest functions and that the removed count is reported.
 func TestMaxDepth(t *testing.T) {
 	for _, tc := range []struct {
 		args     []string
@@ -26,7 +26,7 @@ func TestMaxDepth(t *testing.T) {
 			cachePath := filepath.Join(t.TempDir(), "cache.json")
 			for _, run := range []string{"measuring", "restoring"} {
 				if run == "restoring" {
-					// 中身を変えずに更新時刻だけを変え、変更のない再実行の近道を外す。被覆の記録は戻る。
+					// Change only the modification time to skip the unchanged-rerun shortcut. Coverage records are restored.
 					later := time.Now().Add(time.Minute)
 					if err := os.Chtimes(filepath.Join(dir, "depth_test.go"), later, later); err != nil {
 						t.Fatal(err)

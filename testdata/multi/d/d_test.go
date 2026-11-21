@@ -1,4 +1,4 @@
-// Package d はテストファイルだけを持ち、変異の対象にならない。
+// Package d has only test files and is not a mutation target.
 package d
 
 import "testing"

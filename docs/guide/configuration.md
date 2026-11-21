@@ -1,13 +1,13 @@
-# gamut の手引き：設定と変異演算子
+# gamut guide: configuration and mutators
 
-この文書は、設定ファイル、変異演算子、無効化コメント、等価な変異体の受理と自動検出を説明する。
+This document covers the config file, mutators, disable comments, and accepting and detecting equivalent mutants.
 
-## 設定ファイル
+## Config file
 
-フラグの既定値は、モジュールのルートの `gamut.json` で変えられる。
-コマンドラインのフラグは設定ファイルより優先する。
-未知の項目があれば終了コード 1 で止まる。
-形式は [schema/gamut.schema.json](../../schema/gamut.schema.json) が定める。
+`gamut.json` at the module root changes the defaults of the flags.
+Command-line flags take precedence over the config file.
+An unknown key stops gamut with exit code 1.
+[schema/gamut.schema.json](../../schema/gamut.schema.json) defines the format.
 
 ```json
 {
@@ -23,33 +23,33 @@
 }
 ```
 
-## 変異演算子
+## Mutators
 
-既定の変異演算子は `ARITHMETIC_BASE`、`CONDITIONALS_BOUNDARY`、`CONDITIONALS_NEGATION`、`INCREMENT_DECREMENT`、`INVERT_NEGATIVES`、`RETURN_ZERO`（戻り値を持つ関数の本体を、ゼロ値を返す文にする。`error` は `nil`）、`STATEMENT_REMOVE`（値を返さない呼び出しの文を実行しない。ログ出力を除く）である。
-名前は、Gremlins と gomutants に同じ演算子があればそれに合わせる。
-次は既定で無効で、`-only` で選んだときだけ使う。既定の集合の決め方は [設計](../design/mutants.md#既定の集合) が定める。
-ログ出力、メトリクス、エラーメッセージ、`String()` の本体など、テストが観測しないことの多いコードは変異しない。規則は [設計](../design/mutants.md#arid-のコード) が定め、設定の `arid` か `-arid-call`、`-arid-package` で足せる。
+The default mutators are `ARITHMETIC_BASE`, `CONDITIONALS_BOUNDARY`, `CONDITIONALS_NEGATION`, `INCREMENT_DECREMENT`, `INVERT_NEGATIVES`, `RETURN_ZERO` (replaces the body of a function with results by a statement returning zero values, `nil` for `error`), and `STATEMENT_REMOVE` (skips a call statement that returns no value, except logging).
+Names follow Gremlins and gomutants where they have the same mutator.
+The following are off by default and used only when chosen with `-only`. The [design](../design/mutants.md#the-default-set) defines how the default set is chosen.
+Code that tests rarely observe, such as logging, metrics, error messages, and the bodies of `String()`, is left unmutated. The [design](../design/mutants.md#arid-code) defines the rules, and you can add to them with the config's `arid` or with `-arid-call` and `-arid-package`.
 
-| 名前 | 変異 |
+| Name | Mutation |
 | --- | --- |
-| `INVERT_BITWISE` | `&`↔`\|`、`^`→`&`、`&^`→`&`、`<<`↔`>>` |
-| `INVERT_ASSIGNMENTS` | `+=`↔`-=`、`*=`↔`/=`、`%=`→`*=` |
-| `INVERT_BITWISE_ASSIGNMENTS` | `&=`↔`\|=`、`^=`→`&=`、`&^=`→`&=`、`<<=`↔`>>=` |
+| `INVERT_BITWISE` | `&`↔`\|`, `^`→`&`, `&^`→`&`, `<<`↔`>>` |
+| `INVERT_ASSIGNMENTS` | `+=`↔`-=`, `*=`↔`/=`, `%=`→`*=` |
+| `INVERT_BITWISE_ASSIGNMENTS` | `&=`↔`\|=`, `^=`→`&=`, `&^=`→`&=`, `<<=`↔`>>=` |
 | `INVERT_LOOP_CTRL` | `break`↔`continue` |
-| `INVERT_LOGICAL` | `&&`↔`\|\|`（短絡評価を保つ） |
+| `INVERT_LOGICAL` | `&&`↔`\|\|` (keeping short-circuit evaluation) |
 | `REMOVE_LOGICAL_NOT` | `!x`→`x` |
 | `BOOLEAN_LITERAL` | `true`↔`false` |
-| `CONDITIONS_CONSTANT` | `if` の条件を `true`／`false`、`for` の条件を `false`、`&&` の被演算子を `true`、`\|\|` の被演算子を `false` に |
-| `REMOVE_SELF_ASSIGNMENTS` | `x += y`→`x = y`（複合代入すべて） |
-| `INTEGER_INCREMENT`、`INTEGER_DECREMENT` | 整数のリテラルを 1 増やす、1 減らす（`make` の容量を除く） |
-| `FLOAT_INCREMENT`、`FLOAT_DECREMENT` | 浮動小数点数のリテラルを 1 増やす、1 減らす |
-| `BRANCH_IF`、`BRANCH_ELSE`、`BRANCH_CASE` | `if`、`else`、`switch` の `case` の本体を実行しない |
-| `ERRORF_WRAP` | `fmt.Errorf` の `%w` を `%v` にする |
-| `RETURN_ERROR_NIL` | `return` の `error` 型の結果を `nil` にする |
+| `CONDITIONS_CONSTANT` | An `if` condition to `true`/`false`, a `for` condition to `false`, an operand of `&&` to `true`, an operand of `\|\|` to `false` |
+| `REMOVE_SELF_ASSIGNMENTS` | `x += y`→`x = y` (every compound assignment) |
+| `INTEGER_INCREMENT`, `INTEGER_DECREMENT` | Add 1 to or subtract 1 from an integer literal (except the capacity of `make`) |
+| `FLOAT_INCREMENT`, `FLOAT_DECREMENT` | Add 1 to or subtract 1 from a floating-point literal |
+| `BRANCH_IF`, `BRANCH_ELSE`, `BRANCH_CASE` | Skip the body of an `if`, an `else`, or a `case` of a `switch` |
+| `ERRORF_WRAP` | Turn `%w` in `fmt.Errorf` into `%v` |
+| `RETURN_ERROR_NIL` | Turn a `return`'s result of type `error` into `nil` |
 
-## 無効化コメント
+## Disable comments
 
-変異しても観測できない箇所は、理由とともにコメントで止める。
+Stop mutations that cannot be observed with a comment that gives the reason.
 
 ```go
 return a * b //gamut:ignore -- the product is only a cache key
@@ -57,7 +57,7 @@ return a * b //gamut:ignore -- the product is only a cache key
 //gamut:ignore CONDITIONALS_BOUNDARY -- equal values never reach here
 if a < b {
 
-// Fast は Slow と同じ結果を返す近道である。
+// Fast is a shortcut that returns the same result as Slow.
 //
 //gamut:ignore -- a fast path with the same result as Slow
 func Fast(a, b int) bool {
@@ -67,26 +67,26 @@ func Fast(a, b int) bool {
 //gamut:ignore-end
 ```
 
-行末のコメントはその行、単独の行のコメントは次の行、関数の宣言の直前のコメントは関数全体、`ignore-start` と `ignore-end` はその間を止める。
-演算子を省けばすべての演算子を止める。
-理由のないコメントは警告する。
-規則は [設計](../design/mutants.md#無効化コメント) が定める。
+A comment at the end of a line stops that line, a comment on a line of its own stops the next line, a comment right before a function declaration stops the whole function, and `ignore-start` and `ignore-end` stop everything between them.
+Without a mutator name, the comment stops every mutator.
+A comment without a reason gets a warning.
+The [design](../design/mutants.md#disable-comments) defines the rules.
 
-## 等価な変異体
+## Equivalent mutants
 
-どの入力でも観測できない変異体（等価な変異体）は、ソースを変えずに、モジュールのルートの `gamut.accepted.json` に受理として記録できる。
+A mutant that no input can observe (an equivalent mutant) can be recorded as accepted in `gamut.accepted.json` at the module root, without changing the source.
 
 ```console
-# 報告の id を渡して受理する。
+# Accept by passing the id from the report.
 gamut accept -reason 'equivalent: callers read only the sign' 'pkg/file.go::ARITHMETIC_BASE::Double::1a2b3c4d5e'
-# テストが検出するようになった受理と、変異体がなくなった受理を、判定してから消す。
+# Judge, then remove acceptances that a test now detects and those whose mutant is gone.
 gamut accept -prune ./path/to/module/...
 ```
 
-受理した変異体は引き続き判定するが、報告では `Ignored`（`statusReason` は `accepted: <理由>`）にして数と点数に含めず、要約の直す一覧にも並べない。
-要らなくなった受理は、要約と報告の `gamut.staleAccepted` に並ぶ。
-規則は [設計](../design/mutants.md#等価な変異体の受理) が定める。
+Accepted mutants are still judged, but the report marks them `Ignored` (with `statusReason` `accepted: <reason>`), leaves them out of the counts and the score, and the summary does not list them among those to fix.
+Acceptances no longer needed are listed in the summary and in the report's `gamut.staleAccepted`.
+The [design](../design/mutants.md#accepting-equivalent-mutants) defines the rules.
 
-`-detect-equivalent` は、生き残りごとに変異を当てたパッケージをコンパイルし、機械語が元と同じもの（`x * 1` を `x / 1` にする変異体など）を `EQUIVALENT` にする。
-`go tool compile` を直接呼ぶので、共有のビルドキャッシュは増えない。
-規則は [設計](../design/mutants.md#等価な変異体の自動検出) が定める。
+`-detect-equivalent` compiles the mutated package for each survivor and reports `EQUIVALENT` for those whose machine code equals the original's (such as a mutant turning `x * 1` into `x / 1`).
+It calls `go tool compile` directly, so the shared build cache does not grow.
+The [design](../design/mutants.md#detecting-equivalent-mutants) defines the rules.

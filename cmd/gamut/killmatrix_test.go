@@ -11,8 +11,8 @@ import (
 	"time"
 )
 
-// TestKillMatrix は、-kill-matrix が、検出したテストをすべて記録し、検出しないテスト、包含されるテスト、重複するテストを報告することを確かめる。
-// panic で落ちるテストの後のテストも記録されること、キャッシュの判定を通常の実行と kill matrix で正しく使い分けることも確かめる。
+// TestKillMatrix checks that -kill-matrix records every detecting test and reports tests that detect nothing, subsumed tests, and duplicate tests.
+// It also checks that tests after a crashing test are recorded, and that cached verdicts are used correctly between normal runs and the kill matrix.
 func TestKillMatrix(t *testing.T) {
 	dir := copyModule(t, "../../testdata/killmatrix")
 	cachePath := filepath.Join(t.TempDir(), "cache.json")
@@ -27,7 +27,7 @@ func TestKillMatrix(t *testing.T) {
 	}
 	gamutRun := func(args ...string) (map[string][]string, *matrix, string) {
 		t.Helper()
-		// 中身を変えずに更新時刻だけを変え、変更のない再実行の近道を外す。
+		// Change only the modification time, not the contents, to skip the unchanged-rerun shortcut.
 		later := time.Now().Add(time.Minute)
 		if err := os.Chtimes(filepath.Join(dir, "calc_test.go"), later, later); err != nil {
 			t.Fatal(err)
@@ -50,7 +50,7 @@ func TestKillMatrix(t *testing.T) {
 		if err := json.Unmarshal(data, &rep); err != nil {
 			t.Fatal(err)
 		}
-		// kill matrix のときの killedBy は、検出したテストのすべてである。
+		// Under the kill matrix, killedBy lists every detecting test.
 		killers := map[string][]string{}
 		for _, m := range readReport(t, reportPath) {
 			killers[m.Original] = m.Killers
@@ -59,11 +59,11 @@ func TestKillMatrix(t *testing.T) {
 	}
 	want := map[string][]string{"+": {"TestAdd", "TestAddAgain", "TestBoth", "TestPanicky"}, "-": {"TestBoth"}}
 
-	// 通常の実行は最初の検出で止めるので、kill matrix を出さない。
+	// A normal run stops at the first detection, so it reports no kill matrix.
 	if _, m, _ := gamutRun(); m != nil {
 		t.Errorf("a normal run reported a kill matrix: %+v", m)
 	}
-	// 通常の実行の KILLED は再利用せず、kill matrix のために実行し直す。2 回目は kill matrix の判定を再利用する。
+	// KILLED from a normal run is not reused but run again for the kill matrix. The second time reuses the kill matrix verdict.
 	for _, run := range []string{"after a normal run", "reusing the matrix"} {
 		killers, m, summary := gamutRun("-kill-matrix")
 		if !maps.EqualFunc(killers, want, slices.Equal) {

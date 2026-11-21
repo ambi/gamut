@@ -2,12 +2,12 @@ package mutant
 
 import "slices"
 
-// Info は、変異演算子の説明である。-list-mutators の出力と手引き（docs/guide/configuration.md）の一覧のもとになる。
+// Info describes a mutator. It is the source of the -list-mutators output and of the list in the guide (docs/guide/configuration.md).
 type Info struct {
 	Type        Type
 	Description string
 	Example     string
-	// Default は、既定の集合に入るかである。
+	// Default reports whether the mutator is in the default set.
 	Default bool
 }
 
@@ -39,7 +39,7 @@ var infos = map[Type]Info{
 	ReturnErrorNil:           {Description: "Return nil in place of an error", Example: "return nil, err -> return nil, nil"},
 }
 
-// Infos は、すべての変異演算子の説明を、Known の順に返す。
+// Infos returns the descriptions of every mutator in the order of Known.
 func Infos() []Info {
 	out := make([]Info, 0, len(Known))
 	for _, t := range Known {

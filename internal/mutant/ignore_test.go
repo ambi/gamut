@@ -13,7 +13,7 @@ func TestIgnores_AppliesEachCommentForm(t *testing.T) {
 	cases := []struct {
 		name string
 		src  string
-		// ignored は「行 演算子 理由」の並びである。
+		// ignored lists "line mutator reason".
 		ignored  []string
 		warnings int
 	}{
@@ -24,7 +24,7 @@ func TestIgnores_AppliesEachCommentForm(t *testing.T) {
 			src:     "package m\n\nfunc F(a, b int) bool {\n\t//gamut:ignore CONDITIONALS_BOUNDARY -- equal values never reach here\n\treturn a < b\n}\n",
 			ignored: []string{"5 CONDITIONALS_BOUNDARY equal values never reach here"}},
 		{name: "a comment before a function covers the whole function",
-			src: "package m\n\n// F は速さのための近道である。\n//gamut:ignore -- a fast path with the same result\nfunc F(a, b int) int {\n\tif a < b {\n\t\treturn a + b\n\t}\n\treturn a - b\n}\n\nfunc G(a, b int) int { return a * b }\n",
+			src: "package m\n\n// F is a shortcut for speed.\n//gamut:ignore -- a fast path with the same result\nfunc F(a, b int) int {\n\tif a < b {\n\t\treturn a + b\n\t}\n\treturn a - b\n}\n\nfunc G(a, b int) int { return a * b }\n",
 			ignored: []string{
 				"6 CONDITIONALS_BOUNDARY a fast path with the same result",
 				"6 CONDITIONALS_NEGATION a fast path with the same result",
@@ -46,7 +46,7 @@ func TestIgnores_AppliesEachCommentForm(t *testing.T) {
 			src:      "package m\n\n//gamut:ignore-end\n//gamut:ignoer -- typo\nfunc F(a, b int) int { return a + b }\n",
 			warnings: 2},
 		{name: "a plain comment mentioning the directive is not one",
-			src: "package m\n\n// gamut:ignore は、空白を挟むと指令にならない。\nfunc F(a, b int) int { return a + b }\n"},
+			src: "package m\n\n// gamut:ignore with a space in between is not a directive.\nfunc F(a, b int) int { return a + b }\n"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

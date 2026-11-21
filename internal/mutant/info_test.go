@@ -25,7 +25,7 @@ func TestInfos_DescribeEveryKnownOperator(t *testing.T) {
 	}
 }
 
-// TestInfos_MatchTheGuide は、手引きの変異演算子の説明が、すべての演算子の名前を挙げることを確かめる。
+// TestInfos_MatchTheGuide checks that the guide's description of mutators names every mutator.
 func TestInfos_MatchTheGuide(t *testing.T) {
 	data, err := os.ReadFile("../../docs/guide/configuration.md")
 	if err != nil {

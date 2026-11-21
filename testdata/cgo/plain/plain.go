@@ -1,5 +1,5 @@
-// Package plain は cgo を使わない。cgo のパッケージを飛ばしても判定する。
+// Package plain does not use cgo. It is judged even when the cgo package is skipped.
 package plain
 
-// Half は n を 2 で割る。
+// Half divides n by 2.
 func Half(n int) int { return n / 2 }

@@ -1,14 +1,14 @@
-// Package b は、対象パッケージ a を import する。
+// Package b imports the target package a.
 package b
 
 import "multi/a"
 
-// Scale は v を k 倍し、負なら 0 にする。
+// Scale multiplies v by k, giving 0 when negative.
 func Scale(v, k int) int {
 	return a.Max(v*k, 0)
 }
 
-// Neg は v の符号を反転する。
+// Neg flips the sign of v.
 func Neg(v int) int {
 	return -v
 }

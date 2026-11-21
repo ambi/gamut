@@ -49,7 +49,7 @@ func TestAccept_RecordsSurvivorsAndPrunesStaleOnes(t *testing.T) {
 		t.Errorf("accept output %q", out.String())
 	}
 
-	// 受理した生き残りは、Ignored として数から外れるが、判定した状態を保ち、要約の直す一覧に並ばない。
+	// Accepted survivors leave the counts as Ignored but keep their judged status and are not listed among those to fix.
 	second, log := runAccepting(t, "-cache", cachePath, dir)
 	if second.Gamut.Counts.Total != first.Gamut.Counts.Total-1 || second.Gamut.Counts.Accepted != 1 {
 		t.Errorf("total %d (was %d), accepted %d, want one fewer and 1", second.Gamut.Counts.Total, first.Gamut.Counts.Total, second.Gamut.Counts.Accepted)
@@ -66,7 +66,7 @@ func TestAccept_RecordsSurvivorsAndPrunesStaleOnes(t *testing.T) {
 		t.Errorf("stale %+v, want only the gone ID as missing", stale)
 	}
 
-	// テストを強めて検出されるようになると、消してよい受理として挙がる。
+	// Once a stronger test detects it, it is listed as an acceptance that can be removed.
 	write(t, dir, "acc_test.go", "package acc\n\nimport \"testing\"\n\nfunc TestAll(t *testing.T) {\n\tif Double(2) != 4 || Inc(1) != 2 {\n\t\tt.Fatal(\"wrong\")\n\t}\n}\n")
 	third, log := runAccepting(t, "-cache", cachePath, dir)
 	if len(third.Gamut.StaleAccepted) != 2 || !strings.Contains(log, "accepted but now detected (1)") || !strings.Contains(log, "accepted but gone (1)") {

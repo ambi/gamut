@@ -1,37 +1,37 @@
 ---
 name: gamut
-description: Go のミューテーションテストツール gamut を導入し、実行し、設定し、CI に組み込む。gamut を入れて、ミューテーションテストを回して、CI で品質の条件を付けて、と頼まれたときに使う。生き残りを直す作業は mutation-test-loop を使う。
+description: Install, run, configure, and wire into CI gamut, the mutation testing tool for Go. Use when asked to add gamut, run mutation testing, or put a quality gate in CI. For fixing survivors, use mutation-test-loop.
 ---
 
-# gamut の導入と実行
+# Setting up and running gamut
 
-## 導入
+## Install
 
 ```console
 go install github.com/ambi/gamut/cmd/gamut@latest
 ```
 
-gamut は、パッケージの全変異体を 1 回のビルドに埋め込み、変異体ごとに到達したテストだけを実行する。
-判定と被覆の記録は作業ディレクトリの `.gamut/` に保存し、次の実行では変わった箇所だけをやり直す。
-`.gamut/` はリポジトリに入れない（`.gitignore` に足す）。
+gamut embeds every mutant of a package in one build and, per mutant, runs only the tests that reached it.
+Verdicts and coverage records are saved in `.gamut/` in the working directory, and the next run redoes only what changed.
+Keep `.gamut/` out of the repository (add it to `.gitignore`).
 
-## 実行
+## Run
 
 ```console
-gamut ./...                       # モジュール全体
-gamut -since main ./...           # main からの差分に交わる変異体だけ
-gamut -mutant '<id>' ./path/to/pkg  # 1 体だけ、キャッシュを使わずに
-gamut -reporter agent ./path/to/pkg # エージェント向けの JSON を標準出力に
+gamut ./...                       # the whole module
+gamut -since main ./...           # only mutants intersecting the diff from main
+gamut -mutant '<id>' ./path/to/pkg  # one mutant, ignoring the cache
+gamut -reporter agent ./path/to/pkg # JSON for agents on stdout
 gamut -reporter html ./...        # .gamut/report/mutation.html
 ```
 
-要約の判定の状態は、`KILLED`（検出した）、`LIVED`（生き残り。`not detected` か `not infected`）、`NOT COVERED`（どのテストも到達しない）、`NOT VIABLE`（型検査を通らない）、`TIMED OUT`、`PENDING`（`-since` の外）、`EQUIVALENT`（機械語が元と同じ）である。
-`-o report.json` の JSON は mutation-testing-elements の形式で、状態は `Killed`、`Survived`（分類は `statusReason`）、`NoCoverage`、`CompileError`、`Timeout`、`Pending`、`Ignored`（受理、等価、無効化コメント）になる。gamut 固有の情報は `gamut` のオブジェクトにある。
-生き残りを直すときは mutation-test-loop の skill に従う。
+The statuses in the summary are `KILLED` (detected), `LIVED` (survived: `not detected` or `not infected`), `NOT COVERED` (no test reaches it), `NOT VIABLE` (fails type-checking), `TIMED OUT`, `PENDING` (outside `-since`), and `EQUIVALENT` (machine code equals the original's).
+The JSON from `-o report.json` is in mutation-testing-elements format, with the statuses `Killed`, `Survived` (classified by `statusReason`), `NoCoverage`, `CompileError`, `Timeout`, `Pending`, and `Ignored` (accepted, equivalent, disable comment). Information particular to gamut is in the `gamut` object.
+To fix survivors, follow the mutation-test-loop skill.
 
-## 設定
+## Configure
 
-モジュールのルートの `gamut.json` に置く。コマンドラインのフラグが優先する。未知の項目は終了コード 1 になる。
+Put settings in `gamut.json` at the module root. Command-line flags take precedence. An unknown key gives exit code 1.
 
 ```json
 {
@@ -42,21 +42,21 @@ gamut -reporter html ./...        # .gamut/report/mutation.html
 }
 ```
 
-- `critical` の glob に当たるファイルと、関数の宣言の Doc の `//gamut:critical` は重要領域で、受理していない生き残りがあれば終了コード 2 になる。
-- `thresholds.break` は、点数（検出した変異体の、検出したものと生き残りの和に対する割合）の下限である。
-- 観測できない箇所は、行に `//gamut:ignore [TYPE,...] -- <理由>` を書いて止める。どの入力でも区別できない変異体は、ソースを変えずに `gamut accept -reason '<理由>' '<id>'` で受理する。
+- Files matching a `critical` glob, and functions with `//gamut:critical` in the Doc of their declaration, are critical regions: an unaccepted survivor there gives exit code 2.
+- `thresholds.break` is the minimum score (detected mutants as a share of detected mutants plus survivors).
+- Stop mutations that cannot be observed by writing `//gamut:ignore [TYPE,...] -- <reason>` on the line. Accept a mutant that no input can tell apart with `gamut accept -reason '<reason>' '<id>'`, without changing the source.
 
-## 終了コード
+## Exit codes
 
-| コード | 意味 | 対処 |
+| Code | Meaning | What to do |
 | --- | --- | --- |
-| 0 | 判定を終え、品質の条件を満たした | |
-| 1 | 引数、設定、読み込み、ビルドの誤り | メッセージに従って直す |
-| 2 | 品質の条件を満たさない | 要約と報告の生き残りを mutation-test-loop で扱う |
-| 4 | 変異なしでテストが失敗する | gamut ではなくテストを直す |
-| 5 | 変異がテストに届かない（自己検査の失敗） | 対象のコードが `recover` で `panic` を握りつぶしていないかを確かめる |
+| 0 | Judging finished and the quality gate passed | |
+| 1 | An error in the arguments, the configuration, loading, or building | Fix it as the message says |
+| 2 | The quality gate failed | Handle the survivors in the summary and the report with mutation-test-loop |
+| 4 | Tests fail without mutations | Fix the tests, not gamut |
+| 5 | Mutations do not reach the tests (the self-check failed) | Check whether the target code swallows `panic` with `recover` |
 
-## CI（GitHub Actions）
+## CI (GitHub Actions)
 
 ```yaml
 - uses: actions/checkout@v6
@@ -69,8 +69,8 @@ gamut -reporter html ./...        # .gamut/report/mutation.html
     args: ./...
 ```
 
-`version` は Action が入れる gamut の版である。Action の参照と同じ版に固定する。
+`version` is the gamut version the Action installs. Pin it to the same version as the Action's ref.
 
-Pull Request では基準のコミットからの差分だけを判定し、生き残りをその行に注釈として出す。
-`.gamut/` は Actions のキャッシュに保存し、品質の条件で失敗しても保存する。
-全体を判定するときは `since: none` を渡す。
+On a pull request it judges only the diff from the base commit and annotates the survivors on their lines.
+It saves `.gamut/` to the Actions cache, even when the quality gate fails.
+To judge everything, pass `since: none`.

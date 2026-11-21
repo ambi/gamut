@@ -5,42 +5,15 @@ depends_on: []
 created_at: 2026-11-20
 ---
 
-# 変異がテストに届くことを判定の前に自己検査する
+# Self-check that mutations reach the tests before judging
 
-## 動機
+## Motivation
 
-schemata の書き換えがテストバイナリに入っていない、または `GAMUT_MUTANT` が子プロセスへ渡っていないと、すべての変異体が `LIVED` か `NOT COVERED` になり、テストの弱さと見分けが付かない。
-gamut は今、変異を無効にした状態で全テストが通ること（基準）だけを確かめている。
+If the schemata rewrite is missing from the test binary, or `GAMUT_MUTANT` does not reach the test process, every mutant becomes `LIVED` or `NOT COVERED`, indistinguishable from weak tests.
 
-## 対象範囲
+## Summary
 
-- 補助ファイルに、`GAMUT_MUTANT=-1` のとき、到達した変異箇所で `panic("gamut: forced fail")` する分岐を足す。
-- 被覆の記録の後、到達のあるテストを 1 件以上選んで forced fail で実行し、失敗することを確かめる。失敗しなければ判定せずに終了コード 4 で止める。
-- 到達のあるテストが 1 件もないときは、検査を飛ばしたことを警告する。
-
-## 対象外
-
-- 個別ビルドの変異体の検査。個別ビルドは変異を直接書き込むので、届かない経路がない。
-
-## 設計
-
-全テストではなく、到達の記録があるテストのうち最も短い 1 件で足りる。
-到達が記録された以上、同じバイナリで forced fail が `panic` しないなら、選択の変数が読まれていない。
-`gamutHit` の中で分岐すれば、各変異箇所の書き換えに字句を足さずに済む。
-
-## 完了の条件
-
-- 補助ファイルの `gamutActive` を読まないように壊した書き換えで、gamut が終了コード 4 と原因の説明を出して止まる。
-- 通常の実行では、forced fail の検査が 1 回のプロセス起動で終わる。
-
-## 検証
-
-- 書き換えを壊す差し替え口（テスト専用）を使った端から端までのテスト。
-- `mise run verify`。
-
-## 要約
-
-- 補助ファイルの `gamutHit` が、`GAMUT_MUTANT=-1`（`schemata.ForcedFail`）のとき `panic("gamut: forced fail")` する。`gamutHit` は被覆の記録中にだけ呼ばれるので、検査は `GAMUT_COVER` も渡して実行する。
-- 被覆の記録の後、到達のあるテストのうち最も短い 1 件を 1 プロセスで実行する。通るか時間切れなら `run.ErrSelfCheck` を返し、`cmd/gamut` が終了コード 4 にする。到達のあるテストがなければ `Options.Warn` へ警告して続ける。
-- 対象のコードが `recover` で `panic` を握りつぶすと誤って止まりうる。エラーメッセージでこの可能性を挙げるにとどめた。
-- 端から端までのテストは、テスト専用の差し替え口 `run.IgnoreSelection`（`export_test.go`）で `gamutActive` を 0 に固定した補助ファイルを使う。
+- The helper's `gamutHit` panics with `gamut: forced fail` when `GAMUT_MUTANT=-1` (`schemata.ForcedFail`). It is called only while recording coverage, so the check also passes `GAMUT_COVER`.
+- After coverage recording, the shortest test with reach runs once in one process. If it passes or times out, `run.ErrSelfCheck` makes `cmd/gamut` exit with a dedicated code; with no reaching test, a warning goes to `Options.Warn`.
+- Code that swallows `panic` with `recover` can trip the check; the error message names that possibility.
+- The end-to-end test uses the test-only hook `run.IgnoreSelection`, which pins `gamutActive` to 0.

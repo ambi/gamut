@@ -1,8 +1,8 @@
-// Package reuse は、判定の再利用を確かめる固定モジュールである。
-// Score は補助関数 Clamp を呼び、Twice はほかの宣言を参照しない。
+// Package reuse is a fixed module for checking the reuse of verdicts.
+// Score calls the helper Clamp, and Twice refers to no other declaration.
 package reuse
 
-// Clamp は v を lo から hi に収める。
+// Clamp limits v to between lo and hi.
 func Clamp(v, lo, hi int) int {
 	if v < lo {
 		return lo
@@ -13,7 +13,7 @@ func Clamp(v, lo, hi int) int {
 	return v
 }
 
-// Score は、0 以上の v を 2 倍して 100 で頭打ちにし、負の v には 0 を返す。
+// Score doubles a non-negative v capped at 100, and returns 0 for a negative v.
 func Score(v int) int {
 	if v >= 0 {
 		return Clamp(v*2, 0, 100)
@@ -21,7 +21,7 @@ func Score(v int) int {
 	return 0
 }
 
-// Twice は v の 2 倍を返す。
+// Twice returns twice v.
 func Twice(v int) int {
 	return v + v
 }

@@ -5,43 +5,22 @@ depends_on: [007, 014]
 created_at: 2026-11-20
 ---
 
-# GitHub の注釈と Action を用意する
+# Provide GitHub annotations and an Action
 
-## 動機
+## Motivation
 
-Pull Request では、差分の生き残りがその行に注釈として出ると直しやすい。
+On a pull request, survivors of the diff are easiest to fix when they appear as annotations on their lines.
 
-## 対象範囲
+## Completion criteria
 
-- `--annotations github` で、報告対象の生き残りを `::warning file=,line=,col=,title=` で出す。題名に分類を、本文に変異と直し方の指針を入れる。受理の命令も添える。
-- リポジトリのルートに `action.yml` を置く。入力は `since`（既定は Pull Request の基準のコミット）、`args`、`working-directory`、`cache`、`version`。
-- Action は `.gamut/` を Actions のキャッシュに保存し、Pull Request では基準のブランチのキャッシュを読む。
-- 浅いチェックアウトでは基準のコミットを取得する。
+- A unit test checks that the annotations follow GitHub's format.
+- Running the Action on a pull request of a public repository puts annotations on the lines.
 
-## 対象外
+## Progress
 
-- GitHub 以外の CI。
+It stays `in_progress` until the check on a pull request of a public repository is done; publishing and opening a pull request are the user's decisions.
 
-## 設計
-
-キャッシュの鍵はモジュール相対のパスを使うので、チェックアウト先のディレクトリが変わっても再利用できる（[004](004-result-cache.md)）。
-品質の条件で失敗しても、キャッシュは保存する。判定は有効だからである。
-
-## 完了の条件
-
-- 注釈の出力が GitHub の書式に従うことを単体テストで確かめる。
-- 公開リポジトリの Pull Request で Action を動かし、注釈が付くことを確かめる。
-
-## 検証
-
-- 単体テストと、公開リポジトリでの実地の確認。
-
-## 経過
-
-公開リポジトリの Pull Request での確認が残るので、`in_progress` のままにしている。
-gamut にはまだリモートのリポジトリがなく、公開と Pull Request の作成は利用者の判断を要する。
-
-- `-annotations github` は、受理していない生き残りを、重要領域なら `::error`、ほかは `::warning` で書く。題名に分類と演算子、本文に変異、直し方の指針、受理の命令を入れ、本文と属性を GitHub の規則でエスケープする。ファイルは `git rev-parse --show-toplevel` からのリポジトリ相対にする。単体テスト（`TestWriteGitHubAnnotations`）で書式とエスケープを確かめた。
-- `action.yml` は複合 Action で、`since`、`args`、`working-directory`、`cache`、`version` を受け取る。Actions のキャッシュは `actions/cache/restore@v6` と `actions/cache/save@v6` で、品質の条件で失敗しても保存してから gamut の終了コードで終える。
-- 実行の段のスクリプトは shellcheck を通し、手元で、浅いクローンから基準のコミットを取得して `-since` で判定すること、`since: none` の全体の実行で注釈が出て `-fail-on-survived` の終了コード 2 を出力に書くことを確かめた。
-- 残り：公開リポジトリの Pull Request で Action を動かし、注釈がその行に付くこと、キャッシュの保存と復元を確かめる。`go install github.com/ambi/gamut/cmd/gamut@latest` が動くには、024 の公開が要る。
+- `-annotations github` writes unaccepted survivors as `::error` in critical regions and `::warning` elsewhere, with the class and mutator in the title and the mutation, a hint, and the accept command in the message, escaped by GitHub's rules. Files are relative to `git rev-parse --show-toplevel`. `TestWriteGitHubAnnotations` checks the format and escaping.
+- `action.yml` is a composite Action with the inputs `since`, `args`, `working-directory`, `cache`, and `version`. It saves `.gamut/` with `actions/cache` even when the quality gate fails, then exits with gamut's code.
+- The run step passes shellcheck. Locally it fetched the base commit from a shallow clone and judged with `-since`, and a full run with `since: none` printed annotations and exit code 2 under `-fail-on-survived`.
+- Remaining: run the Action on a pull request of a public repository and check the annotations and the cache save and restore.

@@ -9,9 +9,9 @@ import (
 	"time"
 )
 
-// TestUnrepeatable_TestsAreJudgedInFreshProcesses は、同じプロセスで 2 回目に失敗するテストを見つけて警告し、
-// それが到達する変異体を使い回さないプロセスで判定することを確かめる。判定は -isolate と同じになり、実行ごとに揺れない。
-// 被覆を測る実行、被覆の記録をキャッシュから戻す実行、キャッシュなしの実行のどれでも同じである。
+// TestUnrepeatable_TestsAreJudgedInFreshProcesses checks that tests failing on their second run in the same process are found and warned about,
+// and that mutants they reach are judged in processes that are not reused. Verdicts then match -isolate and do not vary between runs.
+// This holds for a run that measures coverage, one that restores coverage records from the cache, and one without a cache.
 func TestUnrepeatable_TestsAreJudgedInFreshProcesses(t *testing.T) {
 	dir := copyModule(t, "../../testdata/unrepeatable")
 	isolated, _ := mustGamut(t, "-no-cache", "-isolate", dir)
@@ -26,12 +26,12 @@ func TestUnrepeatable_TestsAreJudgedInFreshProcesses(t *testing.T) {
 		{"without a cache", []string{"-no-cache"}},
 	} {
 		if run.name == "restoring coverage" {
-			// 中身を変えずに更新時刻だけを変え、変更のない再実行の近道を外す。
+			// Change only the modification time to skip the unchanged-rerun shortcut.
 			later := time.Now().Add(time.Minute)
 			if err := os.Chtimes(filepath.Join(dir, "unrepeatable_test.go"), later, later); err != nil {
 				t.Fatal(err)
 			}
-			// 判定の記録だけを消し、被覆の記録は戻るが変異体は実行し直すようにする。
+			// Remove only the verdict records, so coverage records are restored but mutants run again.
 			dropVerdicts(t, cachePath)
 		}
 		reportPath := filepath.Join(t.TempDir(), "r.json")
@@ -62,7 +62,7 @@ func TestUnrepeatable_TestsAreJudgedInFreshProcesses(t *testing.T) {
 	}
 }
 
-// dropVerdicts は、キャッシュファイルから判定の記録を消す。被覆の記録は残す。
+// dropVerdicts removes the verdict records from the cache file, keeping coverage records.
 func dropVerdicts(t *testing.T, path string) {
 	t.Helper()
 	data, err := os.ReadFile(path)

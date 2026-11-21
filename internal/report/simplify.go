@@ -10,11 +10,11 @@ import (
 	"github.com/ambi/gamut/internal/run"
 )
 
-// removals は、コードを消す変異演算子である。その生き残りは、テストの不足か、コードが不要かのどちらかである。
+// removals are the mutators that remove code. Their survivors mean either missing tests or unneeded code.
 var removals = []string{string(mutant.StatementRemove), string(mutant.ConditionsConstant)}
 
-// WriteSimplify は、コードを消す変異の生き残りを、囲む関数ごとに、不要かもしれないコードの候補として書く。
-// 受理した変異体と無効化コメントで止めた変異体は含めない。点数と品質の条件には影響しない。
+// WriteSimplify writes the survivors of code-removing mutations, per enclosing function, as candidates for unneeded code.
+// Accepted mutants and mutants stopped by disable comments are left out. It does not affect the score or the quality gate.
 func WriteSimplify(w io.Writer, r *Report) {
 	type group struct {
 		file, scope string
@@ -27,8 +27,8 @@ func WriteSimplify(w io.Writer, r *Report) {
 			if !m.survivor() || !slices.Contains(removals, m.Type) {
 				continue
 			}
-			// テストが到達しないコードと、到達しても値が変わらないコード（エラーの分岐に入る入力がないなど）は、
-			// 消せるかより入力のないことが問題であることが多いので、数だけを出す。
+			// For code no test reaches, and code reached without changing a value (such as an error branch no input enters),
+			// the missing input is usually the problem rather than whether the code can go, so only the count is printed.
 			switch {
 			case m.Status == string(run.NotCovered):
 				uncovered++
@@ -37,7 +37,7 @@ func WriteSimplify(w io.Writer, r *Report) {
 				uninfected++
 				continue
 			}
-			// 識別子（file::TYPE::scope::hash）の scope は、メソッドなら T.M の形で、囲む関数を表す。
+			// The scope of an identifier (file::TYPE::scope::hash) names the enclosing function, in the form T.M for a method.
 			scope := ""
 			if parts := strings.Split(m.ID, "::"); len(parts) >= 4 {
 				scope = parts[len(parts)-2]
@@ -49,7 +49,7 @@ func WriteSimplify(w io.Writer, r *Report) {
 				g = &group{file: f.Path, scope: scope}
 				groups = append(groups, g)
 			}
-			// 複数行の文は、最初の行だけを出す。
+			// Print only the first line of a multi-line statement.
 			original, rest, multiline := strings.Cut(strings.TrimSpace(m.Original), "\n")
 			if multiline && rest != "" {
 				original = strings.TrimSpace(original) + " …"

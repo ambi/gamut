@@ -1,8 +1,8 @@
-// Package calc は、kill matrix の端から端までのテストが使う。テストは、表明のないもの、包含されるもの、重複するものを持つ。
+// Package calc is used by the kill matrix end-to-end test. Its tests include one without assertions, subsumed ones, and duplicates.
 package calc
 
-// Add は和を返す。
+// Add returns the sum.
 func Add(a, b int) int { return a + b }
 
-// Sub は差を返す。
+// Sub returns the difference.
 func Sub(a, b int) int { return a - b }

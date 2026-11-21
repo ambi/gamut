@@ -64,7 +64,7 @@ func TestReturns(t *testing.T) {
 }
 
 func TestStatements(t *testing.T) {
-	// パッケージ変数を戻してから使う。戻さないと、2 回目の実行（go test -count=2 や、gamut の使い回すテストプロセス）で結果が変わる。
+	// Reset the package variable before use. Otherwise a second run (go test -count=2, or gamut's reused test process) gives different results.
 	recorded = nil
 	Record("a")
 	if len(recorded) != 1 {

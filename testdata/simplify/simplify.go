@@ -1,11 +1,11 @@
-// Package simplify は、不要な分岐と、結果を誰も見ない呼び出しを持つ。-reporter simplify が候補として挙げる。
+// Package simplify has an unneeded branch and a call whose result nobody looks at. -reporter simplify lists them as candidates.
 package simplify
 
 var touched int
 
 func touch() { touched++ }
 
-// Abs は絶対値を返す。n == 0 の分岐は、最後の return と同じ値を返すので要らない。
+// Abs returns the absolute value. The n == 0 branch returns the same as the last return, so it is not needed.
 func Abs(n int) int {
 	touch()
 	if n < 0 {
@@ -17,5 +17,5 @@ func Abs(n int) int {
 	return n
 }
 
-// Reset はテストが呼ばない。その文の削除は候補ではなく、到達しない数に入る。
+// Reset is not called by tests. Its statement removal is not a candidate but counts as not reached.
 func Reset() { touch() }

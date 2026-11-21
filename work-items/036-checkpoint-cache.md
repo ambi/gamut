@@ -5,39 +5,14 @@ depends_on: [004]
 created_at: 2026-11-21
 ---
 
-# 実行中の判定を、一定の間隔でキャッシュに書き出す
+# Write verdicts to the cache at an interval during the run
 
-## 動機
+## Motivation
 
-判定は 1 体終わるたびにメモリに記録し、終了時と取り消し（`SIGINT`、`SIGTERM`）のときに書き出す。
-メモリ不足や CI の時間切れで `SIGKILL` を受けると、それまでの判定がすべて失われ、次の実行は最初からやり直す。
+Verdicts were written only at exit and on cancellation, so a `SIGKILL` from running out of memory or a CI timeout lost them all and the next run started over.
 
-## 対象範囲
+## Summary
 
-- 実行中、一定の間隔（既定は 10 秒）で、判定と被覆の記録をキャッシュファイルに書き出す。
-- `-checkpoint-interval` で間隔を変え、0 で止める。
-
-## 対象外
-
-- 1 体ごとの書き出し。キャッシュファイル全体を書き直すので、変異体の数だけ書くと重い。
-
-## 設計
-
-書き出しは、今の書き込みと同じく、同じディレクトリの一時ファイルに書いてから改名する。
-途中で止まっても、前のファイルか新しいファイルのどちらかが残る。
-書き出しの間も判定は進むので、書き出しはキャッシュの写しを取ってから行う。
-
-## 完了の条件
-
-- 実行の途中で `SIGKILL` を送っても、送る前の間隔までに終わった判定が次の実行で再利用される。
-- 書き出しの有無で、判定と最終のキャッシュファイルが一致する。
-
-## 検証
-
-- 遅いテストを持つ固定モジュールで、実行の途中で `SIGKILL` を送る端から端までのテスト。
-
-## 要約
-
-- キャッシュがあるとき、`-checkpoint-interval`（既定 10 秒、0 で止める）ごとに、終了時と同じ書き込み（一時ファイルに書いてから改名）でキャッシュを書き出す。書き出しは `Store` の mutex の中でキャッシュを写して行うので、判定と並行に動く。終了時は、書き出しを止めてから最後の書き込みをする。
-- 端から端までのテスト（`TestCheckpoint_SurvivesSIGKILL`）は、テストの中で gamut をビルドし、`testdata/slow`（判定に 200 ミリ秒かかるテスト）を判定する子プロセスに、判定が 2 体以上記録された時点で `SIGKILL` を送る。次の実行で判定が再利用されること、書き出しを止めると再利用されないことを表明した。キャッシュの環境の鍵が gamut の実行ファイルの中身を含むので、次の実行も同じ実行ファイルで行う。
-- 書き出しの有無で判定が変わらないことを、`-race` 付きでも確かめた（`TestCheckpoint_KeepsVerdicts`）。
+- With a cache, the cache is written every `-checkpoint-interval` (10 s by default, 0 disables) by the same write as at exit (a temporary file, then a rename). The copy is taken under the `Store`'s mutex, so writing runs alongside judging. At exit, checkpointing stops before the final write.
+- `TestCheckpoint_SurvivesSIGKILL` builds gamut, judges `testdata/slow` (200 ms per test) in a child process, sends `SIGKILL` once two verdicts are recorded, and asserts that the next run reuses them and that nothing is reused with checkpointing off. The next run uses the same executable, since the environment key includes its contents.
+- `TestCheckpoint_KeepsVerdicts` checks, also with `-race`, that checkpointing does not change verdicts.

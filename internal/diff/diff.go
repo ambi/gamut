@@ -1,6 +1,6 @@
-// Package diff は、git の差分から、作業ツリーのファイルの中で変わった字句の区間を求める。
-// 差分は行の単位で得るが、Go のファイルは変わった行を字句に分けて前後で突き合わせ、変わった字句だけを区間にする。
-// コメントと空白だけの変更は区間を作らない。
+// Package diff finds, from git's diff, the token ranges changed in the files of the working tree.
+// The diff comes per line, but for Go files the changed lines are split into tokens and matched before and after, so only changed tokens become ranges.
+// Changes to comments and whitespace alone make no ranges.
 package diff
 
 import (
@@ -18,26 +18,26 @@ import (
 	"strings"
 )
 
-// span は、ファイルの中のバイトの区間 [Start, End) である。Start == End は、その位置で字句が消えたことを表す。
+// span is the byte range [Start, End) in a file. Start == End means tokens were removed at that position.
 type span struct{ start, end int }
 
-// Changes は、差分の新しい側（作業ツリー）で変わった区間である。パスはどれも、シンボリックリンクを解決した絶対パスである。
+// Changes are the ranges changed on the new side of the diff (the working tree). Every path is absolute with symbolic links resolved.
 type Changes struct {
-	// Base は、差分の古い側のコミットである。
+	// Base is the commit on the old side of the diff.
 	Base string
-	// Renames は、名前を変えたファイルの新しいパスから古いパスへの対応である。
+	// Renames maps the new paths of renamed files to their old paths.
 	Renames map[string]string
 
 	spans map[string][]span
-	// paths は、差分が触れたファイル（消えたファイルと名前を変える前のファイルを含む）である。
+	// paths are the files the diff touches (including removed files and files before renaming).
 	paths map[string]bool
 }
 
-// ErrGit は、git がないか、参照を解決できないなど、差分を得られなかったことを表す。
+// ErrGit means the diff could not be obtained, for example because git is missing or the ref cannot be resolved.
 var ErrGit = errors.New("cannot compute the diff")
 
-// Since は、dir を含むリポジトリで、ref と HEAD の merge-base から作業ツリーまでの差分を求める。
-// 追跡していないファイル（無視するものを除く）は、全体が新しいとみなす。
+// Since finds, in the repository containing dir, the diff from the merge-base of ref and HEAD to the working tree.
+// Untracked files (except ignored ones) count as wholly new.
 func Since(dir, ref string) (*Changes, error) {
 	top, err := git(dir, "rev-parse", "--show-toplevel")
 	if err != nil {
@@ -83,8 +83,8 @@ func git(dir string, args ...string) ([]byte, error) {
 	return out, nil
 }
 
-// resolve は、パスのシンボリックリンクを解決する。解決できなければそのまま返す。
-// go list と git が同じディレクトリを別の綴り（macOS の /var と /private/var など）で返しても突き合わせられるようにする。
+// resolve resolves symbolic links in path, returning it as is when it cannot.
+// It lets paths match even when go list and git spell the same directory differently (such as /var and /private/var on macOS).
 func resolve(path string) string {
 	if r, err := filepath.EvalSymlinks(path); err == nil {
 		return r
@@ -92,8 +92,8 @@ func resolve(path string) string {
 	return filepath.Clean(path)
 }
 
-// Parse は、root で実行した git diff -U0 --no-prefix の出力 patch と、追跡していないファイル untracked（root からの相対パス）から区間を求める。
-// read は作業ツリーのファイルを読む。
+// Parse finds the ranges from patch, the output of git diff -U0 --no-prefix run in root, and untracked, the untracked files relative to root.
+// read reads files of the working tree.
 func Parse(root string, patch []byte, untracked []string, read func(string) ([]byte, error)) (*Changes, error) {
 	c := &Changes{Renames: map[string]string{}, spans: map[string][]span{}, paths: map[string]bool{}}
 	abs := func(rel string) string { return filepath.Join(root, filepath.FromSlash(rel)) }
@@ -112,7 +112,7 @@ func Parse(root string, patch []byte, untracked []string, read func(string) ([]b
 		lines            []int
 		inFile           bool
 	)
-	// hunk は、古い側の行 old と新しい側の行 add の組である。-U0 なので文脈の行を含まない。
+	// hunk pairs the old lines old with the new lines add. With -U0 there are no context lines.
 	var hunkNewStart int
 	var oldLines, newLines []string
 	flush := func() {
@@ -159,7 +159,7 @@ func Parse(root string, patch []byte, untracked []string, read func(string) ([]b
 			}
 			src, lines = data, lineStarts(data)
 		case strings.HasPrefix(line, "Binary files "):
-			// 中身の差分がないので、ファイル全体を変わったとみなす。
+			// There is no content diff, so the whole file counts as changed.
 			if newPath != "" {
 				if data, err := read(newPath); err == nil {
 					c.add(newPath, span{0, len(data)})
@@ -185,7 +185,7 @@ func Parse(root string, patch []byte, untracked []string, read func(string) ([]b
 	for path := range c.spans {
 		c.touch(path)
 	}
-	// 呼び出し側のパスと突き合わせられるよう、シンボリックリンクを解決したパスでも引けるようにする。
+	// Also index by the path with symbolic links resolved, so it matches the callers' paths.
 	c.normalize()
 	return c, nil
 }
@@ -221,7 +221,7 @@ func unquote(p string) string {
 	return p
 }
 
-// hunkStart は、"@@ -a,b +c,d @@" の c を返す。
+// hunkStart returns c of "@@ -a,b +c,d @@".
 func hunkStart(line string) (int, error) {
 	fields := strings.Fields(line)
 	if len(fields) < 3 || !strings.HasPrefix(fields[2], "+") {
@@ -231,7 +231,7 @@ func hunkStart(line string) (int, error) {
 	return strconv.Atoi(n)
 }
 
-// lineStarts は、各行の先頭のバイト位置を返す。末尾に len(src) を足す。
+// lineStarts returns the byte offset of the start of each line, followed by len(src).
 func lineStarts(src []byte) []int {
 	starts := []int{0}
 	for i, b := range src {
@@ -249,11 +249,11 @@ func (c *Changes) add(path string, s span) {
 	c.spans[path] = append(c.spans[path], s)
 }
 
-// hunk は、新しい側の start 行目から始まる変更の区間を記録する。
-// 新しい行がなければ、start 行目の後ろで行が消えたとみなす。
+// hunk records the changed range starting at line start on the new side.
+// Without new lines, lines count as removed after line start.
 func (c *Changes) hunk(path string, src []byte, lines []int, start int, oldLines, newLines []string) {
 	lineOffset := func(n int) int {
-		// n は 1 から始まる行番号である。範囲の外は端に寄せる。
+		// n is a 1-based line number; values outside the range are clamped.
 		if n < 1 {
 			return 0
 		}
@@ -263,7 +263,7 @@ func (c *Changes) hunk(path string, src []byte, lines []int, start int, oldLines
 		return lines[n-1]
 	}
 	if len(newLines) == 0 {
-		// -U0 の削除だけの塊は、新しい側の start 行目の後ろを指す。
+		// A deletion-only hunk of -U0 points after line start on the new side.
 		at := lineOffset(start + 1)
 		c.add(path, span{at, at})
 		return
@@ -289,7 +289,7 @@ func tokens(src []byte) []tok {
 	fset := token.NewFileSet()
 	f := fset.AddFile("", -1, len(src))
 	var s scanner.Scanner
-	// 字句の誤りは差分の断片では避けられない（閉じていない文字列など）ので無視する。
+	// Token errors cannot be avoided in diff fragments (such as unclosed strings), so they are ignored.
 	s.Init(f, src, func(token.Position, string) {}, 0)
 	var out []tok
 	for {
@@ -298,7 +298,7 @@ func tokens(src []byte) []tok {
 			return out
 		}
 		if t == token.SEMICOLON && lit == "\n" {
-			// 改行から補われたセミコロンは、行の分け方の違いでしかない。
+			// Semicolons inserted at newlines only reflect different line breaks.
 			continue
 		}
 		start := f.Offset(pos)
@@ -310,11 +310,11 @@ func tokens(src []byte) []tok {
 	}
 }
 
-// maxCells は、字句の突き合わせの表の大きさの上限である。超えたら新しい側の字句をすべて変わったとみなす。
+// maxCells caps the size of the token matching table. Beyond it, every token on the new side counts as changed.
 const maxCells = 4 << 20
 
-// changedTokens は、古い字句の列と新しい字句の列の最長共通部分列を求め、新しい側で変わった字句の区間を返す。
-// 古い側にだけある字句は、新しい側の次の共通の字句の位置に幅 0 の区間を作る。
+// changedTokens finds the longest common subsequence of the old and new token lists, and returns the ranges of tokens changed on the new side.
+// A token only on the old side makes a zero-width range at the next common token on the new side.
 func changedTokens(oldSrc string, newSrc []byte) []span {
 	a, b := tokens([]byte(oldSrc)), tokens(newSrc)
 	if len(a)*len(b) > maxCells {
@@ -324,7 +324,7 @@ func changedTokens(oldSrc string, newSrc []byte) []span {
 		return []span{{b[0].start, b[len(b)-1].end}}
 	}
 	same := func(x, y tok) bool { return x.tok == y.tok && x.lit == y.lit }
-	// lcs[i][j] は a[i:] と b[j:] の最長共通部分列の長さである。
+	// lcs[i][j] is the length of the longest common subsequence of a[i:] and b[j:].
 	lcs := make([][]int32, len(a)+1)
 	for i := range lcs {
 		lcs[i] = make([]int32, len(b)+1)
@@ -363,8 +363,8 @@ func changedTokens(oldSrc string, newSrc []byte) []span {
 	return out
 }
 
-// Intersects は、path の区間 [start, end) が変わった区間と交わるかを返す。
-// 幅 0 の区間（消えた字句）は、[start, end) の内側（端を除く）にあれば交わるとみなす。
+// Intersects reports whether the range [start, end) of path intersects a changed range.
+// A zero-width range (removed tokens) intersects when it lies strictly inside [start, end).
 func (c *Changes) Intersects(path string, start, end int) bool {
 	for _, s := range c.spans[resolve(path)] {
 		if s.start == s.end {
@@ -380,7 +380,7 @@ func (c *Changes) Intersects(path string, start, end int) bool {
 	return false
 }
 
-// TouchesTestFile は、差分が dir の直下のテストファイル（_test.go）に触れるかを返す。消えたファイルと名前を変える前のファイルも含む。
+// TouchesTestFile reports whether the diff touches a test file (_test.go) directly in dir, including removed files and files before renaming.
 func (c *Changes) TouchesTestFile(dir string) bool {
 	d := resolve(dir)
 	for p := range c.paths {
@@ -391,5 +391,5 @@ func (c *Changes) TouchesTestFile(dir string) bool {
 	return false
 }
 
-// Files は、変わった区間を持つファイルの数を返す。
+// Files returns the number of files with changed ranges.
 func (c *Changes) Files() int { return len(c.spans) }

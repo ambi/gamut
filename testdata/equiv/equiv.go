@@ -1,8 +1,8 @@
-// Package equiv は、コンパイル結果が元と同じになる変異体と、違う変異体を、どちらも生き残る形で持つ。
+// Package equiv has a mutant that compiles to the original's code and one that does not, both surviving.
 package equiv
 
-// Scale の x * 1 を x / 1 にする変異体は、コンパイル結果が元と同じになる。
+// The mutant turning x * 1 into x / 1 in Scale compiles to the original's code.
 func Scale(x int) int { return x * 1 }
 
-// Name の x + 2 を x - 2 にする変異体は、コンパイル結果が違うが、テストが弱いので生き残る。
+// The mutant turning x + 2 into x - 2 in Name compiles differently, but survives because the test is weak.
 func Name(x int) int { return x + 2 }

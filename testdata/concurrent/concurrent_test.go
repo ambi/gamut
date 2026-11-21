@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// each は fn を多数のゴルーチンから同時に呼び、期待と違う結果があれば失敗する。
+// each calls fn from many goroutines at once and fails on any unexpected result.
 func each(t *testing.T, fn func(int) int, want func(int) int) {
 	t.Helper()
 	var wg sync.WaitGroup

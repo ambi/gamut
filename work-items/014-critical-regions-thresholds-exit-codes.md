@@ -5,42 +5,16 @@ depends_on: [012]
 created_at: 2026-11-20
 ---
 
-# 重要領域、閾値、終了コードを定める
+# Define critical regions, thresholds, and exit codes
 
-## 動機
+## Motivation
 
-認証、認可、金額の計算のような箇所では、すべての変異体の検出か明示的な受理を求めたい。
-全体の点数を閾値にすると、等価な変異体のせいで 100% にできず、点数を上げるためのテストが増える。
+Code such as authentication or money calculations should require every mutant to be detected or explicitly accepted. A global score threshold cannot reach 100% because of equivalent mutants and invites tests written only to raise the score.
 
-## 対象範囲
+## Summary
 
-- 重要領域：設定の `critical`（パスの glob）と、関数の宣言の直前の `//gamut:critical`。領域内の生き残り（3 分類すべて）があれば失敗にする。受理した変異体は許す。
-- 閾値：`thresholds.high`、`thresholds.low`、`thresholds.break`。要約に `[high]`、`[low]`、`[danger]` を付ける。
-- `--fail-on-survived`：生き残りが 1 体でもあれば失敗にする。
-- 終了コード：0 成功、1 引数と設定の誤り、2 品質の条件を満たさない、4 変異なしでテストが失敗する、5 forced fail の自己検査の失敗。
-
-## 対象外
-
-- 点数を KPI として扱うための機能。
-
-## 設計
-
-重要領域の判定は、[007](007-since-diff-mode.md) の `--since` では報告対象の変異体だけに適用する。
-要約には重要領域の点数と件数を別の行で出し、領域内の生き残りを先頭に並べる。
-
-## 完了の条件
-
-- 重要領域に生き残りを持つ固定モジュールで終了コード 2 になり、受理すると 0 になる。
-- 各終了コードを固定モジュールで再現する。
-
-## 検証
-
-- 端から端までのテスト。
-
-## 要約
-
-- 重要領域は、`-critical`（設定の `critical`）の glob（要素 `**` は 0 個以上のディレクトリ）に当たるファイルと、関数の宣言の Doc の `//gamut:critical` で決める。`mutant.Critical` が識別子の集合を返し、報告の変異体に `critical` を付ける。
-- 閾値は `-threshold-high`、`-threshold-low`、`-threshold-break`（設定の `thresholds`）で、新しい点数 `mutation_score` に当てる。点数は検出した変異体の、検出したものと生き残り（`LIVED`、`NOT COVERED`）の和に対する割合で、`test_efficacy` と違って到達しない変異体も数える。既定は high 80、low 60、break 0（無効）にした。
-- 品質の条件（重要領域の受理していない生き残り、break 未満の点数、`-fail-on-survived` の生き残り）を満たさなければ、報告と要約を書いてから終了コード 2 で終える。変更のない再実行も、再生した報告に条件を当て直す。報告を変えるフラグは、変更のない再実行の鍵に入れた。
-- 終了コードを作業項目の表に合わせた。引数の誤りは 2 から 1 に、自己検査の失敗は 4 から 5 に変わった。gamut はまだ公開していないので、互換のための移行は設けない。完了済みの 001、002、008 の要約の終了コードは当時の記録として残し、design.md と README を今の規則にした。
-- 端から端までのテスト（`quality_test.go`）で、重要領域の生き残りで終了コード 2 になり受理すると 0 になること、glob、break 閾値、`-fail-on-survived`、設定ファイルの各項目、引数の誤り（1）、基準のテストの失敗（4）、`panic` を握りつぶすコードでの自己検査の失敗（5）を再現した。
+- Critical regions are files matching `-critical` globs (`**` for any directories) and functions with `//gamut:critical` in their Doc. `mutant.Critical` returns their identifiers.
+- `-threshold-high`, `-threshold-low`, and `-threshold-break` apply to the new `mutation_score`, which, unlike `test_efficacy`, counts unreached mutants. Defaults: high 80, low 60, break 0 (off).
+- Failing the quality gate (unaccepted survivors in critical regions, a score below break, survivors under `-fail-on-survived`) writes the reports and summary and exits with code 2; unchanged reruns apply the gate to the replayed report.
+- Exit codes became 0, 1 (errors), 2 (quality gate), 4 (baseline), 5 (self-check). Summaries of earlier items keep the codes of their time.
+- `quality_test.go` reproduces every exit code.

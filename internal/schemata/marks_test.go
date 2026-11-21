@@ -14,7 +14,7 @@ func TestMarkTests_InsertsBoundariesWithoutShiftingLines(t *testing.T) {
 		name      string
 		file      string
 		src       string
-		want      []string // 書き換え後に含まれる字句
+		want      []string // text the rewrite contains
 		batchable []string
 	}{
 		{name: "internal test", file: "m_test.go",

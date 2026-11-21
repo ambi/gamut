@@ -15,8 +15,8 @@ import (
 	"github.com/ambi/gamut/internal/schemata"
 )
 
-// server は、変異体を順に判定するテストプロセスである。gamut の 1 回の実行の間だけ動く。
-// パッケージの初期化（テストの変数の初期化を含む）を変異体ごとに繰り返さないために使う。
+// server is a test process that judges mutants one after another. It lives only during one gamut run.
+// It avoids repeating package initialization (including the tests' variable initialization) per mutant.
 type server struct {
 	cmd   *cmdHandle
 	in    io.WriteCloser
@@ -27,7 +27,7 @@ type cmdHandle struct {
 	stop func()
 }
 
-// pool は、テストバイナリごとの待機中の server である。
+// pool holds the idle servers per test binary.
 type pool struct {
 	mu   sync.Mutex
 	idle map[*binary][]*server
@@ -39,7 +39,7 @@ func newPool(ctx context.Context, opts Options) *pool {
 	return &pool{idle: map[*binary][]*server{}, ctx: ctx, opts: opts}
 }
 
-// get は、b の待機中の server を返す。なければ起動する。
+// get returns an idle server of b, starting one when there is none.
 func (p *pool) get(b *binary) (*server, error) {
 	p.mu.Lock()
 	if list := p.idle[b]; len(list) > 0 {
@@ -69,7 +69,7 @@ func (p *pool) close() {
 	p.idle = map[*binary][]*server{}
 }
 
-// startServer は、b の判定のテストを起動する。env は足す環境変数である。
+// startServer starts b's judging test. env are additional environment variables.
 func startServer(ctx context.Context, b *binary, opts Options, env []string) (*server, error) {
 	r, w, err := os.Pipe()
 	if err != nil {
@@ -79,7 +79,7 @@ func startServer(ctx context.Context, b *binary, opts Options, env []string) (*s
 	cmd := testCommand(runCtx, b.dir, b.path, opts.TestFlags, append([]string{"GAMUT_SERVE=1", "GAMUT_MUTANT=0"}, env...),
 		"-test.run", "^"+schemata.ServerTestName+"$", "-test.count=1", "-test.timeout=0", "-test.paniconexit0")
 	cmd.ExtraFiles = []*os.File{w}
-	// 失敗したテストの出力は使わないので捨てる。
+	// The output of failing tests is not used, so it is discarded.
 	cmd.Stdout, cmd.Stderr = io.Discard, io.Discard
 	in, err := cmd.StdinPipe()
 	if err != nil {
@@ -122,21 +122,21 @@ const (
 	servedTimeout
 )
 
-// run は、変異体 index を有効にして names を順に実行する。最初に失敗したテストの名前を返す。
-// プロセスが落ちたら（panic、os.Exit）、そのとき実行していたテストが検出したとする。
+// run enables the mutant index and runs names in order. It returns the name of the first failing test.
+// If the process dies (panic, os.Exit), the test running at that moment counts as the detector.
 func (s *server) run(ctx context.Context, index int, names []string, limit time.Duration) (served, string) {
 	outcome, name, _, _ := s.do(ctx, strconv.Itoa(index), names, limit)
 	return outcome, name
 }
 
-// cover は、names を変異なしで順に実行して被覆を記録させ、各テストの所要時間と、同じプロセスで 2 回目に失敗したテストの名前を返す。
-// 終わると、プロセスは被覆の記録を止める。
+// cover runs names in order without mutations to record coverage, and returns each test's duration and the names of the tests that failed on their second run in the same process.
+// When it finishes, the process stops recording coverage.
 func (s *server) cover(ctx context.Context, names []string) (served, map[string]time.Duration, []string) {
 	outcome, _, durations, unrepeatable := s.do(ctx, "cover", names, 0)
 	return outcome, durations, unrepeatable
 }
 
-// do は、命令 head と names を送り、結果を待つ。limit が 0 なら時間を区切らない。
+// do sends the command head with names and waits for the result. A limit of 0 means no time limit.
 func (s *server) do(ctx context.Context, head string, names []string, limit time.Duration) (outcome served, failed string, durations map[string]time.Duration, unrepeatable []string) {
 	if _, err := fmt.Fprintf(s.in, "%s %s\n", head, strings.Join(names, " ")); err != nil {
 		return servedDied, "", nil, nil
@@ -178,7 +178,7 @@ func (s *server) do(ctx context.Context, head string, names []string, limit time
 	}
 }
 
-// canServe は、tests をすべて判定のテストから呼べるかを返す。
+// canServe reports whether the judging test can call every test in tests.
 func (u *unit) canServe(tests []*testCase) bool {
 	if u.served == nil {
 		return false
@@ -191,9 +191,9 @@ func (u *unit) canServe(tests []*testCase) bool {
 	return true
 }
 
-// serve は、変異体 m を、待機中のテストプロセスで判定する。テストは前回の検出テストを先に、残りを短い順に実行する。
-// 検出したら、そのテストを変異なしでもう一度実行し、通らなければ、変異体がプロセスの状態を汚したとみなしてプロセスを捨てる。
-// 落ちたか時間切れになったプロセスも捨てる。
+// serve judges the mutant m in an idle test process. It runs the previous detecting test first and the rest shortest first.
+// On detection, it runs that test again without mutations; if it does not pass, the mutant dirtied the process's state and the process is thrown away.
+// Processes that died or timed out are thrown away too.
 func (u *unit) serve(ctx context.Context, m *mutant.Mutant, tests []*testCase, opts Options, p *pool) *Result {
 	var order []*testCase
 	for _, g := range phases(tests, u.priorKillers(m, opts.Cache), u.bins) {
@@ -226,9 +226,9 @@ func (u *unit) serve(ctx context.Context, m *mutant.Mutant, tests []*testCase, o
 			s.close()
 			break
 		}
-		// 状態の汚れの確認：検出したテストは、変異なしなら通るはずである。
-		// 通らなければ、前の変異体か今の変異体がプロセスの状態を汚した。今の判定も汚れた状態から出たかもしれないので、
-		// プロセスを捨て、新しいプロセスで判定し直す。
+		// Checking for dirty state: the detecting test should pass without mutations.
+		// If it does not, the previous or the current mutant dirtied the process's state. The current verdict may also come from that dirty state,
+		// so throw the process away and judge again in a new one.
 		if check, _ := s.run(ctx, 0, []string{name}, time.Duration(float64(limit)*2)); check != servedPass {
 			s.close()
 			return u.execute(ctx, m, tests, opts, func(b *binary) (string, error) { return b.path, nil })

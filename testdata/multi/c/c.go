@@ -1,7 +1,7 @@
-// Package c はテストファイルを持たない。
+// Package c has no test files.
 package c
 
-// Half は x の半分を返す。
+// Half returns half of x.
 func Half(x int) int {
 	return x / 2
 }

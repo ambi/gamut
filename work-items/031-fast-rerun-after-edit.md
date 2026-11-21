@@ -5,45 +5,17 @@ depends_on: [005, 007, 030]
 created_at: 2026-11-21
 ---
 
-# 1 関数を変えた後の再実行を短くする
+# Shorten reruns after changing one function
 
-## 動機
+## Motivation
 
-idmagic の `backend/oauth2/internal/token/usecases`（562 体）で、1 関数を変えた後の `-since` の再実行に 1.2〜1.3 秒かかっていた（同じ中身の編集を繰り返す測り方。後述のとおり実際より短く出る）。
-判定する変異体は 1 体で、時間のほとんどは、読み込み、ビルド、テストプロセスの起動の待ちだった。
+On idmagic's `usecases` (562 mutants), a `-since` rerun after changing one function judged one mutant but took 1.2 to 1.3 s, mostly waiting for loading, building, and process start-up.
 
-## 対象範囲
+## Summary
 
-- 互いに依存しない `go` と `git` の実行を並行させる。
-- 読み込みで、編集したパッケージ自体をコンパイルしない。
-- テストバイナリのビルドのフラグを、判定を変えない範囲で短くする。
-
-## 対象外
-
-- macOS が新しい実行ファイルを初めて起動するときの検査（約 0.2〜0.35 秒）。システムの設定でしか消せず、設定はそのターミナルから起動するすべての実行ファイルの検査を止めるので、gamut からは勧めない。
-
-## 設計
-
-- `git diff` と依存の一覧（`go list -deps -test`）は、引数のパターンから求めたモジュールで、読み込みと並行して始める。読み込みの結果のモジュールと違えば、捨てて求め直す。
-- 読み込みは、依存の一覧（`-export` なし）と、前回の読み込みでエクスポートデータを求めたパッケージ（キャッシュに記録した hint）のエクスポートデータとを並行して求め、足りないものだけを後から求める。`go list -export -deps` を対象パッケージごと実行すると、編集したばかりの対象パッケージまでコンパイルするが、その結果はどこにも使わない。
-- ビルドに `-vet=off`、`-gcflags=<対象パッケージ>=-l`、`-ldflags=-s -w` を足す。利用者が `GOFLAGS` で同じフラグを指定していれば足さない。
-
-## 完了の条件
-
-- 判定がこの変更の前と一致する（端から端までのテストと canary）。
-- hint が古くても（消えたパッケージを含んでも）、同じ型の検査の結果になる。
-- idmagic の `usecases` で、毎回違う中身の 1 行の編集の後の `-since` が短くなる。
-
-## 検証
-
-- `TestWithHint_HintNeedsNoTargetExportUnlessImported`、`TestWithHint_StaleHintGivesTheSameTypes`。
-- idmagic での測定。
-
-## 要約
-
-- 同じ中身の編集を繰り返す測り方で、`-since` は 1.2〜1.3 秒から 0.95 秒前後に、通常の再実行は 1.3〜1.4 秒から 1.1 秒前後になった。
-- 毎回違う中身の 1 行の編集（`if` を 1 つ足す）では、`-since` が 1.45 秒前後、通常の再実行が 1.65 秒前後である。この測り方を始めた時点（並行化と被覆のプロセスの使い回しの後）では、`-since` が 1.52 秒、ビルドが 0.85 秒だった。
-- 1.45 秒の内訳は、読み込み、差分、鍵、構築可能性で約 0.3 秒、ビルド 0.66 秒（変異のない元のパッケージの `go test -c` でも 0.57 秒）、macOS の初回起動の検査 約 0.35 秒、テストの初期化と実行 約 0.1〜0.15 秒である。素の `go test` をそのパッケージに 1 回かけるのに 0.7 秒かかる。
-- ビルドのフラグの効果は、`-vet=off` で約 20%、対象パッケージだけのインライン化の停止で約 20%、`-s` で数パーセントだった。インライン化を止めるのは対象パッケージだけなので、依存のパッケージはビルドキャッシュのものを使う。インライン化を止めると、エクスポートデータに関数の本文が入らないので、本文だけの変更では外部テストのパッケージもコンパイルし直さない。
-- 読み込みで対象パッケージをコンパイルしなくなり、読み込みは 0.25 秒から 0.16 秒に、共有ビルドキャッシュの増加は 1 編集あたり約 7.5 MiB から約 6 MiB になった。残りは、書き換えたパッケージ（約 5.5 MiB）とテストのパッケージである。素の `go test` は 1 編集あたり約 1.8 MiB 増やす。
-- 同じ中身の編集を繰り返す測り方は、コンパイルとリンクがビルドキャッシュに当たり、実際より 0.3〜0.5 秒短く出る。測定は毎回違う中身の編集で行う。
+- `git diff` and the dependency list start alongside loading, from the module the patterns point at, and are recomputed if loading finds another module.
+- Loading requests the dependency list (without `-export`) and the export data of the previous load's hint in parallel, then only what is missing, so the just-edited target is no longer compiled. Loading went from 0.25 s to 0.16 s.
+- Builds add `-vet=off`, `-gcflags=<target>=-l`, and `-ldflags=-s -w` (about 20%, 20%, and a few percent), unless the user's `GOFLAGS` sets them.
+- With a different one-line edit each time, `-since` takes about 1.45 s: about 0.3 s for loading, diff, keys, and viability, 0.66 s building (0.57 s even for the unmutated package), about 0.35 s for macOS's first-launch check, and 0.1 to 0.15 s for test initialization and running. Plain `go test` on the package takes 0.7 s.
+- Repeating the same edit hits the build cache and reads 0.3 to 0.5 s too fast, so measurements use different edits.
+- The first-launch check of macOS is out of scope: only a system setting removes it, for every executable started from that terminal.

@@ -2,7 +2,7 @@ package ordering
 
 import "testing"
 
-// TestCalls は Double を呼ぶが結果を確かめない。宣言の順では先に走るが、変異体を検出しない。
+// TestCalls calls Double without checking the result. It runs first in declaration order but detects no mutant.
 func TestCalls(t *testing.T) {
 	_ = Double(3)
 }

@@ -17,17 +17,17 @@ import (
 )
 
 const (
-	// watchPoll は、.go ファイルの更新時刻と大きさを比べる間隔である。標準ライブラリにファイルの監視がないので、比べて見つける。
+	// watchPoll is the interval for comparing modification times and sizes of .go files. The standard library has no file watching, so changes are found by comparison.
 	watchPoll = 500 * time.Millisecond
-	// watchSettle は、変更を見つけてから判定を始めるまでの待ちで、続けて保存されたファイルを 1 回の判定にまとめる。
+	// watchSettle is the wait between finding a change and judging, so files saved in quick succession make one judgment.
 	watchSettle = time.Second
 )
 
-// watchHook はテスト専用の差し替え口で、n 回目の判定が終わるたびに呼ばれる。偽を返すと監視を終える。
+// watchHook is a hook for tests only, called after the n-th judgment. Returning false ends the watch.
 var watchHook func(n int) bool
 
-// watchLoop は、args で判定し、モジュールの .go ファイルが変わるたびに判定し直す。SIGINT か SIGTERM で終わる。
-// 判定の失敗（基準のテストの失敗、品質の条件）では止まらない。判定の間の保存は、次の 1 回の判定にまとめる。
+// watchLoop judges with args and judges again each time a .go file of the module changes, until SIGINT or SIGTERM.
+// Failed judgments (failing baseline tests, the quality gate) do not stop it. Saves during a judgment are combined into the next one.
 func watchLoop(args, patterns []string, stdout, stderr io.Writer) int {
 	abs, err := load.AbsPatterns(patterns)
 	if err != nil || len(abs) == 0 {
@@ -40,7 +40,7 @@ func watchLoop(args, patterns []string, stdout, stderr io.Writer) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	for n := 1; ; n++ {
-		// 判定の前に取るので、判定の間の保存は、判定の後の比較で見つかる。
+		// Taken before judging, so saves during the judgment are found by the comparison after it.
 		before := snapshot(root)
 		code := judge(args, stdout, stderr, modeJudge)
 		fmt.Fprintf(stderr, "watch: run %d exited %d; waiting for changes to .go files in %s\n", n, code, root)
@@ -62,13 +62,13 @@ func watchLoop(args, patterns []string, stdout, stderr io.Writer) int {
 	}
 }
 
-// fileState は、変更を見つけるための、ファイルの更新時刻と大きさである。
+// fileState is a file's modification time and size, for finding changes.
 type fileState struct {
 	mod  time.Time
 	size int64
 }
 
-// snapshot は、root の下の .go ファイルの状態を返す。名前が . で始まるディレクトリ（.git、.gamut）と testdata、vendor は見ない。
+// snapshot returns the state of the .go files under root, skipping directories whose names start with . (.git, .gamut), testdata, and vendor.
 func snapshot(root string) map[string]fileState {
 	out := map[string]fileState{}
 	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {

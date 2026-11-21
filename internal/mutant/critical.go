@@ -9,10 +9,10 @@ import (
 	"github.com/ambi/gamut/internal/load"
 )
 
-// Critical は、ms のうち重要領域にある変異体の識別子を返す。重要領域の変異体は、すべて検出されるか受理されることを求める。
-// 重要領域は、モジュール相対のパスが globs のどれかに当たるファイルと、宣言の Doc に //gamut:critical を持つ関数である。
-// globs は path.Match の形で、要素 ** は 0 個以上のディレクトリに当たる。
-// 関数の Doc の外の //gamut:critical は、警告として返して無視する。
+// Critical returns the identifiers of the mutants in ms that are in a critical region. Every mutant in a critical region must be detected or accepted.
+// Critical regions are files whose module-relative path matches one of globs, and functions with //gamut:critical in the Doc of their declaration.
+// globs are in path.Match form, and the element ** matches zero or more directories.
+// //gamut:critical outside a function's Doc is returned as a warning and ignored.
 func Critical(pkg *load.Package, ms []*Mutant, globs []string) (map[string]bool, []string, error) {
 	for _, g := range globs {
 		for elem := range strings.SplitSeq(g, "/") {
@@ -71,7 +71,7 @@ func Critical(pkg *load.Package, ms []*Mutant, globs []string) (map[string]bool,
 	return out, warnings, nil
 }
 
-// matchGlob は、/ 区切りのパス name が pattern に当たるかを返す。要素 ** は 0 個以上の要素に当たり、ほかの要素は path.Match で比べる。
+// matchGlob reports whether the /-separated path name matches pattern. The element ** matches zero or more elements, and other elements are compared with path.Match.
 func matchGlob(pattern, name string) (bool, error) {
 	pp := strings.Split(pattern, "/")
 	var np []string

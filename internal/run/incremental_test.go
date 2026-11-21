@@ -16,15 +16,15 @@ import (
 	"github.com/ambi/gamut/internal/run"
 )
 
-// judgement は、judge の 1 回の実行で観測したものである。
+// judgement is what one run of judge observed.
 type judgement struct {
 	results  map[string]*run.Result
 	measured []string
-	// groups は、実行した変異体の識別子から、テストのプロセスごとのテストの並びを引く。
+	// groups maps the identifiers of the mutants run to the lists of tests per test process.
 	groups map[string][][]string
 }
 
-// judge は、gamut の main と同じ手順で dir の 1 パッケージを読み、鍵を付け、store（nil ならキャッシュなし）で判定する。
+// judge loads the one package in dir by the same steps as gamut's main, attaches keys, and judges with store (no cache when nil).
 func judge(t *testing.T, dir string, store *cache.Store) judgement {
 	t.Helper()
 	pkg, err := loadOne(dir, nil)
@@ -96,9 +96,9 @@ func edit(t *testing.T, dir, name, old, repl string) {
 	}
 }
 
-// TestAll_RemeasuresCoverageOnlyForAffectedTests は、固定モジュールのコピーを書き換えながら判定し、
-// 被覆の記録で実行するテストが、変わった宣言に入っていたテストと、変わったテストと、新しいテストだけであることと、
-// キャッシュなしの判定と一致することを確かめる。
+// TestAll_RemeasuresCoverageOnlyForAffectedTests judges a copy of a fixed module while editing it, and checks
+// that coverage recording runs only tests that entered a changed declaration, changed tests, and new tests,
+// and that the verdicts match those without a cache.
 func TestAll_RemeasuresCoverageOnlyForAffectedTests(t *testing.T) {
 	dir := copyDir(t, "../../testdata/reuse")
 	store, err := cache.Open(filepath.Join(t.TempDir(), "cache.json"), "env")
@@ -113,12 +113,12 @@ func TestAll_RemeasuresCoverageOnlyForAffectedTests(t *testing.T) {
 		{"first run measures every test", nil, []string{"TestClamp", "TestScore", "TestTwice"}},
 		{"unchanged rerun measures nothing", nil, nil},
 		{"comments measure nothing", func() {
-			edit(t, dir, "reuse.go", "\treturn v + v\n", "\t// 注釈。\n\treturn v + v\n")
+			edit(t, dir, "reuse.go", "\treturn v + v\n", "\t// A note.\n\treturn v + v\n")
 		}, nil},
 		{"changing a function measures the tests that entered it", func() {
 			edit(t, dir, "reuse.go", "\treturn v + v\n", "\tw := v\n\treturn w + v\n")
 		}, []string{"TestTwice"}},
-		// Score は Clamp を呼ぶので、Clamp の変更は TestScore の到達も変えうる。
+		// Score calls Clamp, so a change to Clamp may also change what TestScore reaches.
 		{"changing a helper measures the tests that entered it or its callers", func() {
 			edit(t, dir, "reuse.go", "\tif v > hi {", "\tif hi < v {")
 		}, []string{"TestClamp", "TestScore"}},
@@ -153,8 +153,8 @@ func TestAll_RemeasuresCoverageOnlyForAffectedTests(t *testing.T) {
 	}
 }
 
-// TestAll_RunsThePreviousKillerFirst は、前回 KILLED だった変異体を実行し直すとき、最初のプロセスが前回の検出テストだけを実行することを確かめる。
-// TestCalls は宣言の順で先に走り、同じ変異体に感染するが検出しない。
+// TestAll_RunsThePreviousKillerFirst checks that, when rerunning a mutant that was KILLED last time, the first process runs only the previous detecting test.
+// TestCalls runs first in declaration order and is infected by the same mutant but does not detect it.
 func TestAll_RunsThePreviousKillerFirst(t *testing.T) {
 	dir := copyDir(t, "../../testdata/ordering")
 	store, err := cache.Open(filepath.Join(t.TempDir(), "cache.json"), "env")
@@ -174,14 +174,14 @@ func TestAll_RunsThePreviousKillerFirst(t *testing.T) {
 			}
 		}
 	}
-	// 検出したテストの本文を変えると、判定は再利用できず、実行し直す。
+	// Changing the body of the detecting test makes the verdict unreusable, so it runs again.
 	edit(t, dir, "ordering_test.go", "\tif got := Double(3); got != 6 {", "\tgot := Double(3)\n\tif got != 6 {")
 	second := judge(t, dir, store)
 	r := second.results[target]
 	if r.Cached || r.Status != run.Killed {
 		t.Fatalf("second run: %s cached=%t, want executed and KILLED", r.Status, r.Cached)
 	}
-	// 1 体 1 プロセスでは前回の検出テストだけのプロセスを先に起動し、常駐するテストプロセスでは並びの先頭に置く。
+	// With one process per mutant, a process with only the previous detecting test starts first; with a resident test process, that test goes first in the list.
 	if g := second.groups[target]; len(g) == 0 || len(g[0]) == 0 || g[0][0] != "TestDouble" {
 		t.Errorf("second run groups = %v, want the previous killer TestDouble first", g)
 	}

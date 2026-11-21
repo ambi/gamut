@@ -2,7 +2,7 @@ package flags
 
 import "testing"
 
-// TestHalf は -short なしでは失敗する。テストのフラグが渡らないと基準のテストが壊れる。
+// TestHalf fails without -short. If the test flags were not passed, the baseline tests would break.
 func TestHalf(t *testing.T) {
 	if !testing.Short() {
 		t.Fatal("this test needs -short")
