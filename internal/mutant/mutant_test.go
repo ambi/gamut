@@ -107,6 +107,14 @@ func TestEnumerate_Operators(t *testing.T) {
 			[]string{"ARITHMETIC_BASE +->- true", "INVERT_BITWISE <<->>> true", "INVERT_BITWISE >>-><< true"}},
 		{"and not", "package m\n\nfunc F(a, b int) int { return a &^ b }\n",
 			[]string{"INVERT_BITWISE &^->& true"}},
+		{"arithmetic compound assignments", "package m\n\nfunc F(a, b int) int { a += b; a *= 2; a %= 3; return a }\n",
+			[]string{"INVERT_ASSIGNMENTS +=->-= true", "INVERT_ASSIGNMENTS *=->/= true", "INVERT_ASSIGNMENTS %=->*= true"}},
+		{"string += is not viable", "package m\n\nfunc F(s string) string { s += \"x\"; return s }\n",
+			[]string{"INVERT_ASSIGNMENTS +=->-= false"}},
+		{"bitwise compound assignments", "package m\n\nfunc F(a uint) uint { a |= 1; a ^= 2; a &^= 4; a <<= 1; return a }\n",
+			[]string{"INVERT_BITWISE_ASSIGNMENTS |=->&= true", "INVERT_BITWISE_ASSIGNMENTS ^=->&= true", "INVERT_BITWISE_ASSIGNMENTS &^=->&= true", "INVERT_BITWISE_ASSIGNMENTS <<=->>>= true"}},
+		{"plain assignments are not mutated", "package m\n\nfunc F(a int) int { b := a; b = 2; return b }\n",
+			nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

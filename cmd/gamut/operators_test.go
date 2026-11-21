@@ -14,6 +14,8 @@ func TestOperators_OptInVerdicts(t *testing.T) {
 		want map[string]string // 囲む宣言 -> 状態
 	}{
 		{"INVERT_BITWISE", map[string]string{"Flags": "KILLED", "Mask": "LIVED", "Double": "KILLED"}},
+		{"INVERT_ASSIGNMENTS", map[string]string{"Total": "KILLED", "Scaled": "LIVED"}},
+		{"INVERT_BITWISE_ASSIGNMENTS", map[string]string{"SetBit": "KILLED", "ClearHigh": "LIVED"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.only, func(t *testing.T) {

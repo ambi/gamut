@@ -45,7 +45,7 @@ func TestMarkTests_InsertsBoundariesWithoutShiftingLines(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			pkg, err := loadOne(dir, nil)
+			pkg, err := loadOne(dir)
 			if err != nil {
 				t.Fatal(err)
 			}

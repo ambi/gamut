@@ -76,7 +76,13 @@ go build -o bin/gamut ./cmd/gamut
 ```
 
 変異演算子は `ARITHMETIC_BASE`、`CONDITIONALS_BOUNDARY`、`CONDITIONALS_NEGATION`、`INCREMENT_DECREMENT`、`INVERT_NEGATIVES` で、Gremlins と gomutants と同じ名前である。
-`INVERT_BITWISE`（`&`↔`|`、`^`→`&`、`&^`→`&`、`<<`↔`>>`）は既定で無効で、`-only` で選んだときだけ使う。
+次は既定で無効で、`-only` で選んだときだけ使う。
+
+| 名前 | 変異 |
+| --- | --- |
+| `INVERT_BITWISE` | `&`↔`\|`、`^`→`&`、`&^`→`&`、`<<`↔`>>` |
+| `INVERT_ASSIGNMENTS` | `+=`↔`-=`、`*=`↔`/=`、`%=`→`*=` |
+| `INVERT_BITWISE_ASSIGNMENTS` | `&=`↔`\|=`、`^=`→`&=`、`&^=`→`&=`、`<<=`↔`>>=` |
 テストプロセスは、gamut の 1 回の実行の間、変異体の間で使い回す。
 変異体がプロセスの状態を汚したと分かれば、そのプロセスを捨て、新しいプロセスで判定し直す。
 判定の前に、変異がテストに届くことを 1 件のテストで確かめる（forced fail）。

@@ -20,7 +20,7 @@ func build(t *testing.T, src string) *schemata.Result {
 	if err := os.WriteFile(filepath.Join(dir, "m.go"), []byte(src), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	pkg, err := loadOne(dir, nil)
+	pkg, err := loadOne(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,6 +57,44 @@ func TestBuild_NestedSitesEvaluateOperandsOnce(t *testing.T) {
 	// 外側の比較は内側の加算の書き換え結果を 1 回だけ引数に取り、内側を本文へ写さない。
 	if strings.Count(src, "gamutHit(2)") != 1 {
 		t.Fatalf("the inner site must be rendered once, as the outer argument:\n%s", src)
+	}
+}
+
+func TestBuild_CompoundAssignmentsAreEmbedded(t *testing.T) {
+	dir := t.TempDir()
+	src := "package m\n\nfunc next() int { return 3 }\n\nfunc F(a int) int {\n\ta += next()\n\ta <<= 1\n\treturn a\n}\n"
+	for name, s := range map[string]string{"go.mod": "module m\n\ngo 1.27.4\n", "m.go": src} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(s), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pkg, err := loadOne(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ms := mutant.Enumerate(pkg, []mutant.Type{mutant.InvertAssignments, mutant.InvertBitwiseAssignments})
+	mutant.CheckViability(pkg, ms)
+	res, err := schemata.Build(pkg, ms)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := levels(res)
+	for _, key := range []string{"INVERT_ASSIGNMENTS +=", "INVERT_BITWISE_ASSIGNMENTS <<="} {
+		if got[key] != schemata.Wrapped {
+			t.Errorf("%s: level %d, want Wrapped (levels %v)", key, got[key], got)
+		}
+	}
+	var out string
+	for _, b := range res.Files {
+		out = string(b)
+	}
+	// 右辺の呼び出しは引数として 1 回だけ書き、本文では引数の名前で参照する。
+	if strings.Count(out, "}(next())") != 1 || strings.Contains(out, "= next()") || !strings.Contains(out, "a -= gamutV") {
+		t.Errorf("the right-hand side must be evaluated once and passed in:\n%s", out)
+	}
+	// 書き換えても行は変わらない。
+	if strings.Count(out, "\n") != strings.Count(src, "\n") {
+		t.Errorf("the rewrite shifted lines:\n%s", out)
 	}
 }
 
@@ -128,7 +166,7 @@ func TestBuild_RejectsHelperNameCollision(t *testing.T) {
 	dir := t.TempDir()
 	_ = os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module m\n\ngo 1.27.4\n"), 0o600)
 	_ = os.WriteFile(filepath.Join(dir, "m.go"), []byte("package m\n\nvar gamutActive = 1\n"), 0o600)
-	pkg, err := loadOne(dir, nil)
+	pkg, err := loadOne(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,8 +176,8 @@ func TestBuild_RejectsHelperNameCollision(t *testing.T) {
 }
 
 // loadOne は、dir の 1 パッケージを読む。
-func loadOne(dir string, tags []string) (*load.Package, error) {
-	pkgs, err := load.Load([]string{dir}, tags)
+func loadOne(dir string) (*load.Package, error) {
+	pkgs, err := load.Load([]string{dir}, nil)
 	if err != nil {
 		return nil, err
 	}

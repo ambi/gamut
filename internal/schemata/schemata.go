@@ -57,7 +57,8 @@ type Site struct {
 }
 
 func (s *Site) next() Level {
-	if _, ok := s.Node.(*ast.IncDecStmt); ok {
+	switch s.Node.(type) {
+	case *ast.IncDecStmt, *ast.AssignStmt:
 		// 文は値を返さないので gamutMark で包めない。
 		return Untouched
 	}
@@ -454,6 +455,38 @@ func (r *renderer) renderSite(buf *bytes.Buffer, f *load.File, sites []*Site, s 
 		m := s.Mutants[0]
 		fmt.Fprintf(buf, "func() { if gamutCovering { gamutHit(%d); gamutInfect(%d) }; if gamutActive == %d { %s%s } else { %s%s } }()",
 			s.Index, m.Index, m.Index, target, m.Replacement, target, n.Tok)
+
+	case *ast.AssignStmt:
+		// x op= v。v は 1 回だけ評価して引数で渡す。対象の式は本文に写すので、その中の箇所は個別ビルドへ回す。
+		// 変異で値が変わるかは対象の値にもよる（x *= 1 と x /= 1 など）ので、到達したら感染したとみなす（実行して確かめる側に倒す）。
+		if len(n.Lhs) != 1 || len(n.Rhs) != 1 {
+			fallback()
+			return
+		}
+		r.demoteWithin(sites, r.offset(n.Lhs[0].Pos()), r.offset(n.Lhs[0].End()))
+		target := r.text(f, n.Lhs[0])
+		v, ok := r.operand(f, sites, n.Rhs[0], "gamutV")
+		if !ok {
+			fallback()
+			return
+		}
+		var body strings.Builder
+		fmt.Fprintf(&body, "if gamutCovering { gamutHit(%d); ", s.Index)
+		for _, m := range s.Mutants {
+			fmt.Fprintf(&body, "gamutInfect(%d); ", m.Index)
+		}
+		body.WriteString("}; switch gamutActive { ")
+		for _, m := range s.Mutants {
+			fmt.Fprintf(&body, "case %d: %s %s %s; ", m.Index, target, m.Replacement, v.ref)
+		}
+		fmt.Fprintf(&body, "default: %s %s %s }", target, n.Tok, v.ref)
+		if v.inline {
+			fmt.Fprintf(buf, "func() { %s }()", body.String())
+			return
+		}
+		fmt.Fprintf(buf, "func(%s %s) { %s }(", v.ref, v.typ, body.String())
+		r.renderArgs(buf, f, sites, []operand{v})
+		buf.WriteString(")")
 
 	default:
 		fallback()

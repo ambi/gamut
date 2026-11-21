@@ -19,17 +19,18 @@ gamut の 5 種類は演算子の置き換えに限られる。
 
 | 名前 | 変異 | 埋め込み方 |
 | --- | --- | --- |
-| `CONDITIONALS_LOGICAL` | `&&`↔`\|\|` | 短絡評価を保つため、関数リテラルの中で元の形と変異後の形を分岐させる |
+| `INVERT_LOGICAL` | `&&`↔`\|\|` | 短絡評価を保つため、関数リテラルの中で元の形と変異後の形を分岐させる |
 | `CONDITIONS_CONSTANT` | `if`、`for` の条件と `&&`、`\|\|` の被演算子を `true` か `false` にする。`\|\|` の下では `false`、`&&` の下では `true` だけ | 条件を関数リテラルで包む |
 | `STATEMENT_REMOVE` | 値を返さない呼び出しの文を削除する | 文を `if gamutActive != N { ... }` で包む |
 | `RETURN_ZERO` | 関数の本体を、戻り値の型のゼロ値（`error` は `errors.New("gamut")`）を返す文にする | 本体の先頭に `if gamutActive == N { return ... }` を置く |
-| `ASSIGNMENT_OPERATOR` | `+=`↔`-=`、`*=`↔`/=` など | 文を分岐させる |
-| `BRANCH_SWAP` | `break`↔`continue` | 文を分岐させる |
-| `NEGATE_UNARY` | `!x`→`x` | 式を包む |
+| `INVERT_ASSIGNMENTS` | `+=`↔`-=`、`*=`↔`/=`、`%=`→`*=` | 文を分岐させる |
+| `INVERT_LOOP_CTRL` | `break`↔`continue` | 文を分岐させる |
+| `REMOVE_LOGICAL_NOT` | `!x`→`x` | 式を包む |
 | `BOOLEAN_LITERAL` | `true`↔`false` | 式を包む。定数の文脈（`const` の宣言など）は個別ビルドにする |
 | `INVERT_BITWISE` | `&`↔`\|`、`^`→`&`、`&^`→`&`、`<<`↔`>>` | 二項演算子と同じく分岐させる |
-| `INVERT_BITWISE_ASSIGNMENT` | `&=`↔`\|=`、`^=`→`&=`、`<<=`↔`>>=` | 文を分岐させる |
+| `INVERT_BITWISE_ASSIGNMENTS` | `&=`↔`\|=`、`^=`→`&=`、`&^=`→`&=`、`<<=`↔`>>=` | 文を分岐させる |
 
+- 名前は、gomutants に同じ演算子があればそれに合わせる（着手時に gomutants 0.7.3 の `-list-mutators` で確かめ、仮の名前を付け直した）。
 - `switch` の `case` の削除は、`default` があるときだけ行う。
 - 等価になりやすい変異（`==`→`<=` など）は作らない。
 
@@ -56,5 +57,5 @@ gamut の 5 種類は演算子の置き換えに限られる。
 
 演算子のまとまりごとにコミットする。
 
-- 済み：既定で無効な演算子の仕組み（`mutant.OptIn` と、名前を確かめる `mutant.Known`）、`INVERT_BITWISE`。固定モジュール `testdata/operators` に、演算子ごとの `KILLED` と `LIVED` の例を足していく。
-- 残り：`BOOLEAN_LITERAL`、`ASSIGNMENT_OPERATOR`、`INVERT_BITWISE_ASSIGNMENT`、`BRANCH_SWAP`、`CONDITIONALS_LOGICAL`、`NEGATE_UNARY`、`CONDITIONS_CONSTANT`、`STATEMENT_REMOVE`、`RETURN_ZERO`、idmagic での測定と既定の集合の決定。
+- 済み：既定で無効な演算子の仕組み（`mutant.OptIn` と、名前を確かめる `mutant.Known`）、`INVERT_BITWISE`、`INVERT_ASSIGNMENTS`、`INVERT_BITWISE_ASSIGNMENTS`。固定モジュール `testdata/operators` に、演算子ごとの `KILLED` と `LIVED` の例を足していく。
+- 残り：`BOOLEAN_LITERAL`、`INVERT_LOOP_CTRL`、`INVERT_LOGICAL`、`REMOVE_LOGICAL_NOT`、`CONDITIONS_CONSTANT`、`STATEMENT_REMOVE`、`RETURN_ZERO`、idmagic での測定と既定の集合の決定。

@@ -29,6 +29,9 @@ const (
 	IncrementDecrement   Type = "INCREMENT_DECREMENT"
 	InvertNegatives      Type = "INVERT_NEGATIVES"
 	InvertBitwise        Type = "INVERT_BITWISE"
+	// InvertAssignments と InvertBitwiseAssignments は、複合代入の演算子を置き換える。
+	InvertAssignments        Type = "INVERT_ASSIGNMENTS"
+	InvertBitwiseAssignments Type = "INVERT_BITWISE_ASSIGNMENTS"
 )
 
 // AllTypes は既定で有効な変異演算子である。
@@ -36,7 +39,7 @@ var AllTypes = []Type{ArithmeticBase, ConditionalsBoundary, ConditionalsNegation
 
 // OptIn は、既定では無効で、-only や設定で選んだときだけ有効になる変異演算子である。
 // 実在のパッケージで生き残りの数と仕分けの内訳を測ってから、既定の集合に入れるかを決める。
-var OptIn = []Type{InvertBitwise}
+var OptIn = []Type{InvertBitwise, InvertAssignments, InvertBitwiseAssignments}
 
 // Known は、gamut が知っているすべての変異演算子である。-only、設定、無効化コメント、受理の名前はこれで確かめる。
 var Known = slices.Concat(AllTypes, OptIn)
@@ -55,7 +58,7 @@ type Mutant struct {
 	Replacement token.Token
 	Line        int
 	Column      int
-	// Site は変異箇所の構文木のノード（*ast.BinaryExpr、*ast.UnaryExpr、*ast.IncDecStmt）である。
+	// Site は変異箇所の構文木のノード（*ast.BinaryExpr、*ast.UnaryExpr、*ast.IncDecStmt、複合代入の *ast.AssignStmt）である。
 	Site ast.Node
 	// Scope は変異箇所を囲む宣言の名前である。
 	Scope string
@@ -111,6 +114,21 @@ var binaryRules = []rule{
 }
 
 var unaryRules = []rule{{InvertNegatives, token.SUB, token.ADD}}
+
+// assignRules は複合代入の文の規則である。単純な代入（=、:=）は変異しない。
+var assignRules = []rule{
+	{InvertAssignments, token.ADD_ASSIGN, token.SUB_ASSIGN},
+	{InvertAssignments, token.SUB_ASSIGN, token.ADD_ASSIGN},
+	{InvertAssignments, token.MUL_ASSIGN, token.QUO_ASSIGN},
+	{InvertAssignments, token.QUO_ASSIGN, token.MUL_ASSIGN},
+	{InvertAssignments, token.REM_ASSIGN, token.MUL_ASSIGN},
+	{InvertBitwiseAssignments, token.AND_ASSIGN, token.OR_ASSIGN},
+	{InvertBitwiseAssignments, token.OR_ASSIGN, token.AND_ASSIGN},
+	{InvertBitwiseAssignments, token.XOR_ASSIGN, token.AND_ASSIGN},
+	{InvertBitwiseAssignments, token.AND_NOT_ASSIGN, token.AND_ASSIGN},
+	{InvertBitwiseAssignments, token.SHL_ASSIGN, token.SHR_ASSIGN},
+	{InvertBitwiseAssignments, token.SHR_ASSIGN, token.SHL_ASSIGN},
+}
 
 var incDecRules = []rule{
 	{IncrementDecrement, token.INC, token.DEC},
@@ -192,6 +210,8 @@ func enumerateFile(pkg *load.Package, file *load.File, enabled []Type) []*Mutant
 			rules, opPos, op = unaryRules, x.OpPos, x.Op
 		case *ast.IncDecStmt:
 			rules, opPos, op = incDecRules, x.TokPos, x.Tok
+		case *ast.AssignStmt:
+			rules, opPos, op = assignRules, x.TokPos, x.Tok
 		default:
 			return true
 		}
